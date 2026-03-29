@@ -31,8 +31,8 @@ Write-Host " Data Protection Tool - Dev Start All"
 Write-Host "========================================="
 Write-Host ""
 
-# --- [1/5] Azurite ---
-Write-Host "[1/5] Starting Azurite (Azure Storage Emulator)..."
+# --- [1/4] Azurite ---
+Write-Host "[1/4] Starting Azurite (Azure Storage Emulator)..."
 
 $azuriteCmd = Get-Command azurite -ErrorAction SilentlyContinue
 if (-not $azuriteCmd) {
@@ -51,8 +51,8 @@ Write-Host "      Azurite PID: $($azurite.Id)"
 Write-Host "      Waiting 2 seconds for Azurite to initialize..."
 Start-Sleep -Seconds 2
 
-# --- [2/5] Build Frontend ---
-Write-Host "[2/5] Building Frontend..."
+# --- [2/4] Build Frontend ---
+Write-Host "[2/4] Building Frontend..."
 
 if (-not (Test-Path (Join-Path $frontendDir "node_modules"))) {
     Write-Host "      node_modules not found. Running npm install..."
@@ -65,8 +65,8 @@ Push-Location $frontendDir
 & cmd /c "npm run build"
 Pop-Location
 
-# --- [3/5] ControlCenter ---
-Write-Host "[3/5] Starting ControlCenter (HTTP on port 8190, gRPC on port 8191)..."
+# --- [3/4] ControlCenter ---
+Write-Host "[3/4] Starting ControlCenter (HTTP on port 8190, gRPC on port 8191)..."
 
 $cc = Start-Process -FilePath "dotnet" `
     -ArgumentList "run","--project",$ccProj `
@@ -77,17 +77,8 @@ Write-Host "      ControlCenter PID: $($cc.Id)"
 Write-Host "      Waiting 5 seconds for ControlCenter to initialize..."
 Start-Sleep -Seconds 5
 
-# --- [4/5] Frontend dev server ---
-Write-Host "[4/5] Starting Frontend (Vite dev server on port 5173)..."
-
-$frontend = Start-Process -FilePath "cmd.exe" `
-    -ArgumentList "/c","cd /d `"$frontendDir`" && npm run dev" `
-    -NoNewWindow -PassThru
-$processes += $frontend
-Write-Host "      Frontend PID: $($frontend.Id)"
-
-# --- [5/5] Agent ---
-Write-Host "[5/5] Starting Agent (gRPC client) in test mode..."
+# --- [4/4] Agent ---
+Write-Host "[4/4] Starting Agent (gRPC client) in test mode..."
 
 $agent = Start-Process -FilePath "dotnet" `
     -ArgumentList "run","--project",$agentProj,"--","test" `
@@ -100,10 +91,7 @@ Write-Host "========================================="
 Write-Host " All services started"
 Write-Host "   Azurite PID:       $($azurite.Id)"
 Write-Host "   ControlCenter PID: $($cc.Id)"
-Write-Host "   Frontend PID:      $($frontend.Id)"
 Write-Host "   Agent PID:         $($agent.Id)"
-Write-Host ""
-Write-Host " Frontend (Vite HMR): http://localhost:5173"
 Write-Host "========================================="
 Write-Host ""
 Write-Host "Press Ctrl+C to stop all services."
