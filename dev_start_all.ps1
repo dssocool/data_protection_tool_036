@@ -43,7 +43,7 @@ if (-not $azuriteCmd) {
 if (-not (Test-Path $azuriteData)) { New-Item -ItemType Directory -Path $azuriteData | Out-Null }
 
 $azurite = Start-Process -FilePath "cmd.exe" `
-    -ArgumentList "/c","azurite --silent --location `"$azuriteData`"" `
+    -ArgumentList "/c","azurite --silent --skipApiVersionCheck --location `"$azuriteData`"" `
     -NoNewWindow -PassThru
 $processes += $azurite
 Write-Host "      Azurite PID: $($azurite.Id)"

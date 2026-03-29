@@ -25,7 +25,7 @@ if pgrep -f azurite >/dev/null 2>&1; then
 fi
 
 mkdir -p "$AZURITE_DATA"
-azurite --silent --location "$AZURITE_DATA" &
+azurite --silent --skipApiVersionCheck --location "$AZURITE_DATA" &
 AZURITE_PID=$!
 echo "      Azurite PID: $AZURITE_PID"
 
