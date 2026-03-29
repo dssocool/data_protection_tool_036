@@ -198,11 +198,20 @@
   gap: 6px;
   padding: 3px 8px;
   border-radius: 4px;
+  cursor: pointer;
   transition: background 0.12s;
 }
 
 .conn-table-item:hover {
   background: #f0f4f8;
+}
+
+.conn-table-item-selected {
+  background: #e0ecf8;
+}
+
+.conn-table-item-selected:hover {
+  background: #d4e4f4;
 }
 
 .conn-table-icon {
@@ -216,4 +225,28 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.conn-context-menu {
+  position: fixed;
+  z-index: 100;
+  min-width: 200px;
+  background: #fff;
+  border-radius: 6px;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.15), 0 1px 4px rgba(0, 0, 0, 0.1);
+  padding: 4px 0;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+}
+
+.conn-context-menu-item {
+  padding: 7px 16px;
+  font-size: 13px;
+  color: #333;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.1s;
+}
+
+.conn-context-menu-item:hover {
+  background: #f0f4f8;
 }

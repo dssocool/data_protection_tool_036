@@ -1,5 +1,7 @@
 using System.Text.Json;
 using Azure.Data.Tables;
+using Azure.Storage;
+using Azure.Storage.Blobs;
 using Microsoft.AspNetCore.Server.Kestrel.Core;
 using DataProtectionTool.ControlCenter.Interceptors;
 using DataProtectionTool.ControlCenter.Models;
@@ -31,6 +33,23 @@ var tableConnectionString = builder.Configuration.GetSection("AzureTableStorage"
 builder.Services.AddSingleton(new TableServiceClient(tableConnectionString));
 builder.Services.AddSingleton<ClientTableService>();
 
+var blobSection = builder.Configuration.GetSection("AzureBlobStorage");
+var blobStorageConfig = new BlobStorageConfig
+{
+    StorageAccount = blobSection["StorageAccount"] ?? "",
+    Container = blobSection["Container"] ?? "",
+    AccessKey = blobSection["AccessKey"] ?? ""
+};
+builder.Services.AddSingleton(blobStorageConfig);
+
+var blobCredential = new StorageSharedKeyCredential(blobStorageConfig.StorageAccount, blobStorageConfig.AccessKey);
+var blobServiceUri = blobStorageConfig.StorageAccount == "devstoreaccount1"
+    ? new Uri($"http://127.0.0.1:10000/{blobStorageConfig.StorageAccount}")
+    : new Uri($"https://{blobStorageConfig.StorageAccount}.blob.core.windows.net");
+var blobServiceClient = new BlobServiceClient(blobServiceUri, blobCredential);
+builder.Services.AddSingleton(blobServiceClient);
+builder.Services.AddSingleton(blobCredential);
+
 var dataEngineConfigRoot = JsonSerializer.Deserialize<Dictionary<string, DataEngineConfig>>(
     File.ReadAllText("dataEngineConfig.json"),
     new JsonSerializerOptions { PropertyNameCaseInsensitive = true })
@@ -40,6 +59,12 @@ var dataEngineConfig = dataEngineConfigRoot.GetValueOrDefault("DataEngine")
 builder.Services.AddSingleton(dataEngineConfig);
 
 var app = builder.Build();
+
+{
+    var containerClient = app.Services.GetRequiredService<BlobServiceClient>()
+        .GetBlobContainerClient(blobStorageConfig.Container);
+    await containerClient.CreateIfNotExistsAsync();
+}
 
 app.UseStaticFiles();
 
@@ -151,6 +176,52 @@ app.MapPost("/api/agents/{path}/list-tables", async (string path, HttpRequest re
     }
 });
 
+app.MapPost("/api/agents/{path}/preview-table", async (string path, HttpRequest request, AgentRegistry registry) =>
+{
+    if (!registry.TryGetConnection(path, out var connection) || connection is null)
+        return Results.NotFound(new { error = "Agent not found or not connected." });
+
+    string body;
+    using (var reader = new StreamReader(request.Body))
+        body = await reader.ReadToEndAsync();
+
+    try
+    {
+        var result = await connection.SendCommandAsync("preview_table", body, TimeSpan.FromSeconds(60));
+        return Results.Content(result, "application/json");
+    }
+    catch (TimeoutException)
+    {
+        return Results.Ok(new { success = false, message = "Agent did not respond within 60 seconds." });
+    }
+    catch (Exception ex)
+    {
+        return Results.Ok(new { success = false, message = $"Preview table error: {ex.Message}" });
+    }
+});
+
+app.MapGet("/api/blob/{filename}", async (string filename, BlobServiceClient blobClient, BlobStorageConfig blobConfig) =>
+{
+    if (!filename.EndsWith("_preview.csv"))
+        return Results.BadRequest(new { error = "Invalid filename." });
+
+    try
+    {
+        var containerClient = blobClient.GetBlobContainerClient(blobConfig.Container);
+        var blob = containerClient.GetBlobClient(filename);
+
+        if (!await blob.ExistsAsync())
+            return Results.NotFound(new { error = "Blob not found." });
+
+        var download = await blob.DownloadContentAsync();
+        return Results.Text(download.Value.Content.ToString(), "text/csv");
+    }
+    catch (Exception ex)
+    {
+        return Results.Problem($"Failed to read blob: {ex.Message}");
+    }
+});
+
 app.MapGet("/api/agents/{path}/connections", async (string path, AgentRegistry registry, ClientTableService clientTableService) =>
 {
     if (!registry.TryGet(path, out var info) || info is null)
@@ -189,4 +260,4 @@ app.MapGet("/agents/{path}", (string path, AgentRegistry registry, IWebHostEnvir
     return Results.Content(File.ReadAllText(indexPath), "text/html");
 });
 
-app.Run();
+await app.RunAsync();

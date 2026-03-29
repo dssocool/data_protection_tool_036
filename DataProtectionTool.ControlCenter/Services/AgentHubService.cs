@@ -1,4 +1,6 @@
 using System.Text.Json;
+using Azure.Storage;
+using Azure.Storage.Sas;
 using Grpc.Core;
 using DataProtectionTool.Contracts;
 using DataProtectionTool.ControlCenter.Models;
@@ -11,17 +13,23 @@ public class AgentHubService : AgentHub.AgentHubBase
     private readonly AgentRegistry _registry;
     private readonly ClientTableService _clientTableService;
     private readonly DataEngineConfig _dataEngineConfig;
+    private readonly BlobStorageConfig _blobStorageConfig;
+    private readonly StorageSharedKeyCredential _blobCredential;
 
     public AgentHubService(
         ILogger<AgentHubService> logger,
         AgentRegistry registry,
         ClientTableService clientTableService,
-        DataEngineConfig dataEngineConfig)
+        DataEngineConfig dataEngineConfig,
+        BlobStorageConfig blobStorageConfig,
+        StorageSharedKeyCredential blobCredential)
     {
         _logger = logger;
         _registry = registry;
         _clientTableService = clientTableService;
         _dataEngineConfig = dataEngineConfig;
+        _blobStorageConfig = blobStorageConfig;
+        _blobCredential = blobCredential;
     }
 
     public override async Task Connect(
@@ -146,6 +154,12 @@ public class AgentHubService : AgentHub.AgentHubBase
                         continue;
                     }
 
+                    if (message.Type == "request_sas_token")
+                    {
+                        _ = HandleSasTokenRequestAsync(responseStream, message.Payload);
+                        continue;
+                    }
+
                     await responseStream.WriteAsync(new ServerMessage
                     {
                         Type = "ack",
@@ -191,6 +205,53 @@ public class AgentHubService : AgentHub.AgentHubBase
             _logger.LogWarning(ex, "Failed to route command response from agent at {Path}", agentPath);
         }
         return false;
+    }
+
+    private async Task HandleSasTokenRequestAsync(
+        IServerStreamWriter<ServerMessage> responseStream,
+        string payload)
+    {
+        try
+        {
+            using var doc = JsonDocument.Parse(payload);
+            var correlationId = doc.RootElement.TryGetProperty("correlationId", out var cidEl)
+                ? cidEl.GetString() ?? "" : "";
+
+            var sasBuilder = new AccountSasBuilder
+            {
+                Services = AccountSasServices.Blobs,
+                ResourceTypes = AccountSasResourceTypes.Object,
+                ExpiresOn = DateTimeOffset.UtcNow.AddMinutes(15),
+                Protocol = SasProtocol.HttpsAndHttp
+            };
+            sasBuilder.SetPermissions(AccountSasPermissions.Write | AccountSasPermissions.Create);
+
+            var sasToken = sasBuilder.ToSasQueryParameters(_blobCredential).ToString();
+
+            var blobEndpoint = _blobStorageConfig.StorageAccount == "devstoreaccount1"
+                ? $"http://127.0.0.1:10000/{_blobStorageConfig.StorageAccount}"
+                : $"https://{_blobStorageConfig.StorageAccount}.blob.core.windows.net";
+
+            var resultJson = JsonSerializer.Serialize(new
+            {
+                correlationId,
+                sasToken,
+                blobEndpoint,
+                container = _blobStorageConfig.Container
+            });
+
+            await responseStream.WriteAsync(new ServerMessage
+            {
+                Type = "sas_token_result",
+                Payload = resultJson
+            });
+
+            _logger.LogInformation("Generated SAS token for agent (correlationId={CorrelationId})", correlationId);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to handle SAS token request");
+        }
     }
 
     private async Task HandleGetConnectionDetailsAsync(

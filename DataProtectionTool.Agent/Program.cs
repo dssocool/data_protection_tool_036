@@ -3,8 +3,10 @@ using System.Diagnostics;
 using System.IdentityModel.Tokens.Jwt;
 using System.Net;
 using System.Net.Sockets;
+using System.Text;
 using System.Text.Json;
 using Azure.Identity;
+using Azure.Storage.Blobs;
 using Grpc.Core;
 using Grpc.Net.Client;
 using Microsoft.Data.SqlClient;
@@ -53,6 +55,7 @@ var headers = new Metadata
 };
 
 var connectionManager = new SqlConnectionManager();
+var sasTokenManager = new SasTokenManager();
 DataEngineConfig? dataEngineConfig = null;
 
 using var cts = new CancellationTokenSource();
@@ -127,9 +130,17 @@ while (!cts.Token.IsCancellationRequested)
                 {
                     _ = HandleListTablesAsync(call, agentId, oid, tid, response.Payload, connectionManager);
                 }
+                else if (response.Type == "preview_table")
+                {
+                    _ = HandlePreviewTableAsync(call, agentId, oid, tid, response.Payload, connectionManager, sasTokenManager);
+                }
                 else if (response.Type == "connection_details_result")
                 {
                     connectionManager.HandleConnectionDetailsResponse(response.Payload);
+                }
+                else if (response.Type == "sas_token_result")
+                {
+                    sasTokenManager.HandleSasTokenResponse(response.Payload);
                 }
             }
         });
@@ -371,6 +382,118 @@ static async Task HandleListTablesAsync(
             Console.Error.WriteLine($"[Agent] Failed to send error result: {writeEx.Message}");
         }
     }
+}
+
+static async Task HandlePreviewTableAsync(
+    AsyncDuplexStreamingCall<AgentMessage, ServerMessage> call,
+    string agentId, string oid, string tid, string payload,
+    SqlConnectionManager connManager, SasTokenManager sasManager)
+{
+    string correlationId = "";
+    try
+    {
+        using var envelope = JsonDocument.Parse(payload);
+        correlationId = envelope.RootElement.GetProperty("correlationId").GetString() ?? "";
+        var dataJson = envelope.RootElement.GetProperty("data").GetString() ?? "{}";
+
+        using var paramsDoc = JsonDocument.Parse(dataJson);
+        var rowKey = paramsDoc.RootElement.GetProperty("rowKey").GetString() ?? "";
+        var schema = paramsDoc.RootElement.GetProperty("schema").GetString() ?? "";
+        var tableName = paramsDoc.RootElement.GetProperty("tableName").GetString() ?? "";
+
+        Console.WriteLine($"[Agent] Previewing table [{schema}].[{tableName}] for connection {rowKey}...");
+
+        var csvContent = await connManager.ExecuteWithRetryAsync(rowKey, call, agentId, oid, tid,
+            async (sqlConn) =>
+            {
+                await using var cmd = sqlConn.CreateCommand();
+                cmd.CommandText = $"SELECT * FROM [{schema}].[{tableName}] TABLESAMPLE (200 ROWS)";
+
+                await using var reader = await cmd.ExecuteReaderAsync();
+                var sb = new StringBuilder();
+
+                var columnCount = reader.FieldCount;
+                for (int i = 0; i < columnCount; i++)
+                {
+                    if (i > 0) sb.Append(',');
+                    sb.Append(CsvEnclose(reader.GetName(i)));
+                }
+                sb.AppendLine();
+
+                while (await reader.ReadAsync())
+                {
+                    for (int i = 0; i < columnCount; i++)
+                    {
+                        if (i > 0) sb.Append(',');
+                        var value = reader.IsDBNull(i) ? "" : reader.GetValue(i)?.ToString() ?? "";
+                        sb.Append(CsvEnclose(value));
+                    }
+                    sb.AppendLine();
+                }
+
+                return sb.ToString();
+            });
+
+        var filename = $"{Guid.NewGuid():N}_preview.csv";
+
+        var sasInfo = await sasManager.RequestSasTokenAsync(call, agentId, oid, tid);
+
+        var blobUri = new Uri($"{sasInfo.BlobEndpoint}/{sasInfo.Container}/{filename}?{sasInfo.SasToken}");
+        var blobClient = new BlobClient(blobUri);
+        var csvBytes = Encoding.UTF8.GetBytes(csvContent);
+        using var stream = new MemoryStream(csvBytes);
+        await blobClient.UploadAsync(stream, overwrite: true);
+
+        Console.WriteLine($"[Agent] Uploaded preview CSV: {filename}");
+
+        var resultPayload = JsonSerializer.Serialize(new
+        {
+            correlationId,
+            success = true,
+            filename
+        });
+
+        await call.RequestStream.WriteAsync(new AgentMessage
+        {
+            AgentId = agentId,
+            Type = "preview_table_result",
+            Payload = resultPayload,
+            Oid = oid,
+            Tid = tid
+        });
+    }
+    catch (Exception ex)
+    {
+        Console.Error.WriteLine($"[Agent] Preview table failed: {ex.Message}");
+
+        var resultPayload = JsonSerializer.Serialize(new
+        {
+            correlationId,
+            success = false,
+            message = $"Preview failed: {ex.Message}"
+        });
+
+        try
+        {
+            await call.RequestStream.WriteAsync(new AgentMessage
+            {
+                AgentId = agentId,
+                Type = "preview_table_result",
+                Payload = resultPayload,
+                Oid = oid,
+                Tid = tid
+            });
+        }
+        catch (Exception writeEx)
+        {
+            Console.Error.WriteLine($"[Agent] Failed to send error result: {writeEx.Message}");
+        }
+    }
+}
+
+static string CsvEnclose(string value)
+{
+    return "\"" + value.Replace("\"", "\"\"") + "\"";
 }
 
 static string GetLocalIpAddress()
@@ -620,5 +743,74 @@ class SqlConnectionManager : IDisposable
         }
         _connections.Clear();
         _lock.Dispose();
+    }
+}
+
+class SasTokenInfo
+{
+    public string SasToken { get; set; } = "";
+    public string BlobEndpoint { get; set; } = "";
+    public string Container { get; set; } = "";
+}
+
+class SasTokenManager
+{
+    private readonly ConcurrentDictionary<string, TaskCompletionSource<SasTokenInfo>> _pending = new();
+
+    public async Task<SasTokenInfo> RequestSasTokenAsync(
+        AsyncDuplexStreamingCall<AgentMessage, ServerMessage> call,
+        string agentId, string oid, string tid)
+    {
+        var correlationId = Guid.NewGuid().ToString("N");
+        var tcs = new TaskCompletionSource<SasTokenInfo>(TaskCreationOptions.RunContinuationsAsynchronously);
+        _pending[correlationId] = tcs;
+
+        try
+        {
+            var requestPayload = JsonSerializer.Serialize(new { correlationId });
+            await call.RequestStream.WriteAsync(new AgentMessage
+            {
+                AgentId = agentId,
+                Type = "request_sas_token",
+                Payload = requestPayload,
+                Oid = oid,
+                Tid = tid
+            });
+
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+            await using var reg = timeout.Token.Register(() =>
+                tcs.TrySetException(new TimeoutException("Timed out waiting for SAS token")));
+
+            return await tcs.Task;
+        }
+        finally
+        {
+            _pending.TryRemove(correlationId, out _);
+        }
+    }
+
+    public void HandleSasTokenResponse(string payload)
+    {
+        try
+        {
+            using var doc = JsonDocument.Parse(payload);
+            var correlationId = doc.RootElement.TryGetProperty("correlationId", out var cidEl)
+                ? cidEl.GetString() ?? "" : "";
+
+            if (!string.IsNullOrEmpty(correlationId) && _pending.TryRemove(correlationId, out var tcs))
+            {
+                var info = new SasTokenInfo
+                {
+                    SasToken = doc.RootElement.TryGetProperty("sasToken", out var st) ? st.GetString() ?? "" : "",
+                    BlobEndpoint = doc.RootElement.TryGetProperty("blobEndpoint", out var be) ? be.GetString() ?? "" : "",
+                    Container = doc.RootElement.TryGetProperty("container", out var ct) ? ct.GetString() ?? "" : ""
+                };
+                tcs.TrySetResult(info);
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"[SasTokenMgr] Failed to handle SAS token response: {ex.Message}");
+        }
     }
 }

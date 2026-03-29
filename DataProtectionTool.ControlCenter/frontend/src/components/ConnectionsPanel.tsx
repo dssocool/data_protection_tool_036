@@ -17,12 +17,24 @@ export interface TableInfo {
   name: string;
 }
 
+interface ContextMenuState {
+  x: number;
+  y: number;
+  rowKey: string;
+  schema: string;
+  tableName: string;
+}
+
 interface ConnectionsPanelProps {
   connections: SavedConnection[];
   connectionTables: Record<string, TableInfo[]>;
   loadingTables: Set<string>;
+  selectedTable: { rowKey: string; schema: string; tableName: string } | null;
   onExpandConnection: (rowKey: string) => void;
+  onTableClick: (rowKey: string, schema: string, tableName: string) => void;
+  onReloadPreview: (rowKey: string, schema: string, tableName: string) => void;
   onClose: () => void;
+  onWidthChange?: (width: number) => void;
 }
 
 const MIN_WIDTH = 200;
@@ -33,11 +45,16 @@ export default function ConnectionsPanel({
   connections,
   connectionTables,
   loadingTables,
+  selectedTable,
   onExpandConnection,
+  onTableClick,
+  onReloadPreview,
   onClose,
+  onWidthChange,
 }: ConnectionsPanelProps) {
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [width, setWidth] = useState(DEFAULT_WIDTH);
+  const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
   const isResizing = useRef(false);
 
   const handleResizeStart = useCallback((e: React.MouseEvent) => {
@@ -50,6 +67,7 @@ export default function ConnectionsPanel({
       if (!isResizing.current) return;
       const newWidth = Math.min(MAX_WIDTH, Math.max(MIN_WIDTH, startWidth + ev.clientX - startX));
       setWidth(newWidth);
+      onWidthChange?.(newWidth);
     }
 
     function onMouseUp() {
@@ -64,7 +82,7 @@ export default function ConnectionsPanel({
     document.body.style.userSelect = "none";
     document.addEventListener("mousemove", onMouseMove);
     document.addEventListener("mouseup", onMouseUp);
-  }, [width]);
+  }, [width, onWidthChange]);
 
   useEffect(() => {
     return () => {
@@ -72,6 +90,23 @@ export default function ConnectionsPanel({
       document.body.style.userSelect = "";
     };
   }, []);
+
+  useEffect(() => {
+    if (!contextMenu) return;
+    function dismiss() { setContextMenu(null); }
+    document.addEventListener("mousedown", dismiss);
+    return () => document.removeEventListener("mousedown", dismiss);
+  }, [contextMenu]);
+
+  function handleTableContextMenu(
+    e: React.MouseEvent,
+    rowKey: string,
+    schema: string,
+    tableName: string,
+  ) {
+    e.preventDefault();
+    setContextMenu({ x: e.clientX, y: e.clientY, rowKey, schema, tableName });
+  }
 
   const grouped = useMemo(() => {
     const groups: Record<string, SavedConnection[]> = {};
@@ -156,17 +191,27 @@ export default function ConnectionsPanel({
                             <div className="conn-tables-empty">No tables found.</div>
                           ) : (
                             <ul className="conn-tables-list">
-                              {tables(conn.rowKey)!.map((t) => (
-                                <li key={`${t.schema}.${t.name}`} className="conn-table-item">
-                                  <svg className="conn-table-icon" width="14" height="14" viewBox="0 0 14 14">
-                                    <rect x="1" y="1" width="12" height="12" rx="1.5" fill="none" stroke="currentColor" strokeWidth="1" />
-                                    <line x1="1" y1="5" x2="13" y2="5" stroke="currentColor" strokeWidth="1" />
-                                    <line x1="1" y1="9" x2="13" y2="9" stroke="currentColor" strokeWidth="1" />
-                                    <line x1="5" y1="5" x2="5" y2="13" stroke="currentColor" strokeWidth="1" />
-                                  </svg>
-                                  <span className="conn-table-name">{t.schema}.{t.name}</span>
-                                </li>
-                              ))}
+                              {tables(conn.rowKey)!.map((t) => {
+                                const isSelected = selectedTable?.rowKey === conn.rowKey
+                                  && selectedTable?.schema === t.schema
+                                  && selectedTable?.tableName === t.name;
+                                return (
+                                  <li
+                                    key={`${t.schema}.${t.name}`}
+                                    className={`conn-table-item${isSelected ? " conn-table-item-selected" : ""}`}
+                                    onClick={() => onTableClick(conn.rowKey, t.schema, t.name)}
+                                    onContextMenu={(e) => handleTableContextMenu(e, conn.rowKey, t.schema, t.name)}
+                                  >
+                                    <svg className="conn-table-icon" width="14" height="14" viewBox="0 0 14 14">
+                                      <rect x="1" y="1" width="12" height="12" rx="1.5" fill="none" stroke="currentColor" strokeWidth="1" />
+                                      <line x1="1" y1="5" x2="13" y2="5" stroke="currentColor" strokeWidth="1" />
+                                      <line x1="1" y1="9" x2="13" y2="9" stroke="currentColor" strokeWidth="1" />
+                                      <line x1="5" y1="5" x2="5" y2="13" stroke="currentColor" strokeWidth="1" />
+                                    </svg>
+                                    <span className="conn-table-name">{t.schema}.{t.name}</span>
+                                  </li>
+                                );
+                              })}
                             </ul>
                           )
                         ) : null}
@@ -177,6 +222,29 @@ export default function ConnectionsPanel({
               </ul>
             </div>
           ))}
+        </div>
+      )}
+      {contextMenu && (
+        <div
+          className="conn-context-menu"
+          style={{ top: contextMenu.y, left: contextMenu.x }}
+          onMouseDown={(e) => e.stopPropagation()}
+        >
+          <div
+            className="conn-context-menu-item"
+            onClick={() => {
+              setContextMenu(null);
+              onReloadPreview(contextMenu.rowKey, contextMenu.schema, contextMenu.tableName);
+            }}
+          >
+            Reload Data Preview
+          </div>
+          <div
+            className="conn-context-menu-item"
+            onClick={() => setContextMenu(null)}
+          >
+            Data Protection: Dry Run
+          </div>
         </div>
       )}
       <div

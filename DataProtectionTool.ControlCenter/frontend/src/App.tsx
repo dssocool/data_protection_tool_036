@@ -4,6 +4,8 @@ import SqlServerConnectionModal from "./components/SqlServerConnectionModal";
 import type { SqlServerConnectionData, ValidateResult } from "./components/SqlServerConnectionModal";
 import ConnectionsPanel from "./components/ConnectionsPanel";
 import type { SavedConnection, TableInfo } from "./components/ConnectionsPanel";
+import DataPreviewPanel from "./components/DataPreviewPanel";
+import type { PreviewData } from "./components/DataPreviewPanel";
 import "./App.css";
 
 function getAgentPath(): string | null {
@@ -19,6 +21,11 @@ export default function App() {
   const [connections, setConnections] = useState<SavedConnection[]>([]);
   const [connectionTables, setConnectionTables] = useState<Record<string, TableInfo[]>>({});
   const [loadingTables, setLoadingTables] = useState<Set<string>>(new Set());
+  const [selectedTable, setSelectedTable] = useState<{ rowKey: string; schema: string; tableName: string } | null>(null);
+  const [previewData, setPreviewData] = useState<PreviewData | null>(null);
+  const [previewLoading, setPreviewLoading] = useState(false);
+  const [previewError, setPreviewError] = useState<string | null>(null);
+  const [connectionsPanelWidth, setConnectionsPanelWidth] = useState(260);
 
   const fetchConnections = useCallback(async () => {
     const agentPath = getAgentPath();
@@ -96,6 +103,95 @@ export default function App() {
     }
   }
 
+  function parseCsv(text: string): PreviewData {
+    const rows: string[][] = [];
+    let i = 0;
+    while (i < text.length) {
+      const row: string[] = [];
+      while (i < text.length) {
+        if (text[i] === '"') {
+          i++;
+          let val = "";
+          while (i < text.length) {
+            if (text[i] === '"') {
+              if (i + 1 < text.length && text[i + 1] === '"') {
+                val += '"';
+                i += 2;
+              } else {
+                i++;
+                break;
+              }
+            } else {
+              val += text[i];
+              i++;
+            }
+          }
+          row.push(val);
+        } else {
+          let val = "";
+          while (i < text.length && text[i] !== ',' && text[i] !== '\n' && text[i] !== '\r') {
+            val += text[i];
+            i++;
+          }
+          row.push(val);
+        }
+        if (i < text.length && text[i] === ',') {
+          i++;
+        } else {
+          break;
+        }
+      }
+      if (i < text.length && text[i] === '\r') i++;
+      if (i < text.length && text[i] === '\n') i++;
+      if (row.length > 0 && !(row.length === 1 && row[0] === "")) {
+        rows.push(row);
+      }
+    }
+    return { headers: rows[0] ?? [], rows: rows.slice(1) };
+  }
+
+  async function handleTableClick(rowKey: string, schema: string, tableName: string) {
+    const agentPath = getAgentPath();
+    if (!agentPath) return;
+
+    setSelectedTable({ rowKey, schema, tableName });
+    setPreviewLoading(true);
+    setPreviewError(null);
+    setPreviewData(null);
+
+    try {
+      const res = await fetch(`/api/agents/${agentPath}/preview-table`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ rowKey, schema, tableName }),
+      });
+
+      if (!res.ok) {
+        setPreviewError(`Server error: ${res.status}`);
+        return;
+      }
+
+      const result = await res.json();
+      if (!result.success) {
+        setPreviewError(result.message ?? "Preview failed.");
+        return;
+      }
+
+      const blobRes = await fetch(`/api/blob/${result.filename}`);
+      if (!blobRes.ok) {
+        setPreviewError(`Failed to fetch CSV: ${blobRes.status}`);
+        return;
+      }
+
+      const csvText = await blobRes.text();
+      setPreviewData(parseCsv(csvText));
+    } catch (e) {
+      setPreviewError(`Preview failed: ${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      setPreviewLoading(false);
+    }
+  }
+
   async function handleValidate(data: SqlServerConnectionData): Promise<ValidateResult> {
     const agentPath = getAgentPath();
     if (!agentPath) {
@@ -133,8 +229,26 @@ export default function App() {
             connections={connections}
             connectionTables={connectionTables}
             loadingTables={loadingTables}
+            selectedTable={selectedTable}
             onExpandConnection={handleExpandConnection}
+            onTableClick={handleTableClick}
+            onReloadPreview={handleTableClick}
             onClose={() => setShowConnections(false)}
+            onWidthChange={setConnectionsPanelWidth}
+          />
+        )}
+        {selectedTable && (
+          <DataPreviewPanel
+            tableName={`${selectedTable.schema}.${selectedTable.tableName}`}
+            loading={previewLoading}
+            error={previewError}
+            data={previewData}
+            panelLeft={showConnections ? connectionsPanelWidth + 16 : 0}
+            onClose={() => {
+              setSelectedTable(null);
+              setPreviewData(null);
+              setPreviewError(null);
+            }}
           />
         )}
       </main>
