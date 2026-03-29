@@ -17,6 +17,13 @@ if ! command -v azurite &>/dev/null; then
     npm install -g azurite
 fi
 
+# Kill any leftover Azurite from a previous run to avoid EADDRINUSE
+if pgrep -f azurite >/dev/null 2>&1; then
+    echo "      Killing stale Azurite process..."
+    pkill -f azurite 2>/dev/null || true
+    sleep 1
+fi
+
 mkdir -p "$AZURITE_DATA"
 azurite --silent --location "$AZURITE_DATA" &
 AZURITE_PID=$!
@@ -26,8 +33,13 @@ echo ""
 echo "Waiting 2 seconds for Azurite to initialize..."
 sleep 2
 
+if ! kill -0 "$AZURITE_PID" 2>/dev/null; then
+    echo "ERROR: Azurite failed to start. Check if ports 10000-10002 are in use."
+    exit 1
+fi
+
 # --- Control Center ---
-echo "[2/3] Starting ControlCenter (gRPC server on port 6000)..."
+echo "[2/3] Starting ControlCenter (HTTP on port 6000, gRPC on port 6001)..."
 dotnet run --project "$SCRIPT_DIR/DataProtectionTool.ControlCenter/DataProtectionTool.ControlCenter.csproj" &
 CC_PID=$!
 echo "      ControlCenter PID: $CC_PID"

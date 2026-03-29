@@ -8,17 +8,33 @@ public class ClientTableService
     private const string TableName = "Clients";
     private readonly TableClient _tableClient;
     private readonly ILogger<ClientTableService> _logger;
+    private bool _tableInitialized;
 
     public ClientTableService(TableServiceClient serviceClient, ILogger<ClientTableService> logger)
     {
         _logger = logger;
         _tableClient = serviceClient.GetTableClient(TableName);
-        _tableClient.CreateIfNotExists();
-        _logger.LogInformation("Azure Table Storage initialized — table '{Table}'", TableName);
+    }
+
+    private void EnsureTableExists()
+    {
+        if (_tableInitialized) return;
+        try
+        {
+            _tableClient.CreateIfNotExists();
+            _tableInitialized = true;
+            _logger.LogInformation("Azure Table Storage initialized — table '{Table}'", TableName);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to ensure table '{Table}' exists; will retry on next call", TableName);
+            throw;
+        }
     }
 
     public async Task<ClientEntity> CreateOrUpdateClientAsync(string oid, string tid, string agentId)
     {
+        EnsureTableExists();
         var partitionKey = ClientEntity.BuildPartitionKey(oid, tid);
 
         try
@@ -52,6 +68,7 @@ public class ClientTableService
 
     public async Task<ClientEntity?> GetClientAsync(string oid, string tid)
     {
+        EnsureTableExists();
         var partitionKey = ClientEntity.BuildPartitionKey(oid, tid);
         try
         {

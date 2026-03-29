@@ -9,7 +9,11 @@ builder.WebHost.ConfigureKestrel(options =>
 {
     options.ListenAnyIP(6000, listenOptions =>
     {
-        listenOptions.Protocols = HttpProtocols.Http1AndHttp2;
+        listenOptions.Protocols = HttpProtocols.Http1;
+    });
+    options.ListenAnyIP(6001, listenOptions =>
+    {
+        listenOptions.Protocols = HttpProtocols.Http2;
     });
 });
 

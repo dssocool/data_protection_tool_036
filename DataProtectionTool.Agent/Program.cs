@@ -38,7 +38,7 @@ else
 }
 
 var agentId = $"agent-{Environment.MachineName}-{Process.GetCurrentProcess().Id}";
-var serverAddress = "http://localhost:6000";
+var serverAddress = "http://localhost:6001";
 
 Console.WriteLine($"DataProtectionTool Agent [{agentId}]");
 
