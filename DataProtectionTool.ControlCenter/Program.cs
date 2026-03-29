@@ -21,31 +21,35 @@ builder.Services.AddSingleton<AgentRegistry>();
 
 var app = builder.Build();
 
+app.UseStaticFiles();
+
 app.MapGrpcService<AgentHubService>();
 app.MapGet("/", () => "DataProtectionTool ControlCenter is running.");
 
-app.MapGet("/agents/{path}", (string path, AgentRegistry registry) =>
+app.MapGet("/api/agents/{path}", (string path, AgentRegistry registry) =>
 {
     if (!registry.TryGet(path, out var info) || info is null)
+        return Results.NotFound(new { error = "Agent not found." });
+
+    return Results.Ok(new
+    {
+        oid = info.Oid,
+        tid = info.Tid,
+        agentId = info.AgentId,
+        connectedAt = info.ConnectedAt.ToString("O")
+    });
+});
+
+app.MapGet("/agents/{path}", (string path, AgentRegistry registry, IWebHostEnvironment env) =>
+{
+    if (!registry.TryGet(path, out _))
         return Results.NotFound("Agent not found.");
 
-    var html = $"""
-        <!DOCTYPE html>
-        <html>
-        <head><title>Agent Info</title></head>
-        <body>
-            <h1>Agent Status</h1>
-            <table border="1" cellpadding="8" cellspacing="0">
-                <tr><td><strong>OID</strong></td><td>{System.Net.WebUtility.HtmlEncode(info.Oid)}</td></tr>
-                <tr><td><strong>TID</strong></td><td>{System.Net.WebUtility.HtmlEncode(info.Tid)}</td></tr>
-                <tr><td><strong>Agent ID</strong></td><td>{System.Net.WebUtility.HtmlEncode(info.AgentId)}</td></tr>
-                <tr><td><strong>Connected At (UTC)</strong></td><td>{info.ConnectedAt:O}</td></tr>
-            </table>
-        </body>
-        </html>
-        """;
+    var indexPath = Path.Combine(env.WebRootPath, "index.html");
+    if (!File.Exists(indexPath))
+        return Results.NotFound("Frontend not built. Run 'npm run build' in frontend/.");
 
-    return Results.Content(html, "text/html");
+    return Results.Content(File.ReadAllText(indexPath), "text/html");
 });
 
 app.Run();

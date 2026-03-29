@@ -1,0 +1,103 @@
+.menu-bar {
+  display: flex;
+  align-items: center;
+  background: #f0f0f0;
+  border-bottom: 1px solid #ccc;
+  height: 32px;
+  padding: 0 4px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  font-size: 13px;
+  user-select: none;
+}
+
+.menu-top-item {
+  position: relative;
+}
+
+.menu-top-button {
+  background: none;
+  border: none;
+  padding: 4px 10px;
+  cursor: pointer;
+  font-size: 13px;
+  color: #333;
+  border-radius: 3px;
+  height: 28px;
+  line-height: 20px;
+}
+
+.menu-top-button:hover,
+.menu-top-button.active {
+  background: #d8d8d8;
+}
+
+/* Dropdown (first level, opens on click via React state) */
+.menu-dropdown {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  min-width: 180px;
+  background: #fff;
+  border: 1px solid #c0c0c0;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+  list-style: none;
+  margin: 0;
+  padding: 4px 0;
+  z-index: 1000;
+}
+
+/* Items inside dropdown */
+.menu-item {
+  position: relative;
+}
+
+.menu-item > button,
+.menu-item > span {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 5px 24px 5px 12px;
+  border: none;
+  background: none;
+  font-size: 13px;
+  color: #333;
+  cursor: pointer;
+  white-space: nowrap;
+  box-sizing: border-box;
+}
+
+.menu-item:hover > button,
+.menu-item:hover > span {
+  background: #e8e8e8;
+}
+
+/* Arrow indicator for items with sub-menus */
+.menu-item.has-submenu > span::after {
+  content: "▸";
+  position: absolute;
+  right: 8px;
+  top: 50%;
+  transform: translateY(-50%);
+  font-size: 11px;
+  color: #888;
+}
+
+/* Sub-menus open on hover */
+.menu-submenu {
+  display: none;
+  position: absolute;
+  top: -4px;
+  left: 100%;
+  min-width: 160px;
+  background: #fff;
+  border: 1px solid #c0c0c0;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+  list-style: none;
+  margin: 0;
+  padding: 4px 0;
+  z-index: 1001;
+}
+
+.menu-item.has-submenu:hover > .menu-submenu {
+  display: block;
+}

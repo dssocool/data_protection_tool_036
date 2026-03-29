@@ -50,6 +50,11 @@ PublishScripts/
 .DS_Store
 Thumbs.db
 
+## Node / Vite
+node_modules/
+dist/
+wwwroot/
+
 ## Misc
 *.swp
 *.bak
