@@ -15,6 +15,7 @@ function getAgentPath(): string | null {
 
 export default function App() {
   const [showSqlModal, setShowSqlModal] = useState(false);
+  const [showConnections, setShowConnections] = useState(true);
   const [connections, setConnections] = useState<SavedConnection[]>([]);
   const [connectionTables, setConnectionTables] = useState<Record<string, TableInfo[]>>({});
   const [loadingTables, setLoadingTables] = useState<Set<string>>(new Set());
@@ -42,7 +43,7 @@ export default function App() {
   }
 
   function handleViewConnections() {
-    console.log("View -> Connections");
+    setShowConnections(true);
   }
 
   function handleViewFlows() {
@@ -127,12 +128,15 @@ export default function App() {
         onViewFlows={handleViewFlows}
       />
       <main className="app-content">
-        <ConnectionsPanel
-          connections={connections}
-          connectionTables={connectionTables}
-          loadingTables={loadingTables}
-          onExpandConnection={handleExpandConnection}
-        />
+        {showConnections && (
+          <ConnectionsPanel
+            connections={connections}
+            connectionTables={connectionTables}
+            loadingTables={loadingTables}
+            onExpandConnection={handleExpandConnection}
+            onClose={() => setShowConnections(false)}
+          />
+        )}
       </main>
       {showSqlModal && (
         <SqlServerConnectionModal
