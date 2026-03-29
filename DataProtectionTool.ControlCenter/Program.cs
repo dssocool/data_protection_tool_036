@@ -31,6 +31,14 @@ var tableConnectionString = builder.Configuration.GetSection("AzureTableStorage"
 builder.Services.AddSingleton(new TableServiceClient(tableConnectionString));
 builder.Services.AddSingleton<ClientTableService>();
 
+var dataEngineConfigRoot = JsonSerializer.Deserialize<Dictionary<string, DataEngineConfig>>(
+    File.ReadAllText("dataEngineConfig.json"),
+    new JsonSerializerOptions { PropertyNameCaseInsensitive = true })
+    ?? throw new InvalidOperationException("Failed to parse dataEngineConfig.json.");
+var dataEngineConfig = dataEngineConfigRoot.GetValueOrDefault("DataEngine")
+    ?? throw new InvalidOperationException("dataEngineConfig.json is missing the 'DataEngine' section.");
+builder.Services.AddSingleton(dataEngineConfig);
+
 var app = builder.Build();
 
 app.UseStaticFiles();

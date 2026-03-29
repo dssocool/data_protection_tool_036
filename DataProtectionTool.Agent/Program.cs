@@ -53,6 +53,7 @@ var headers = new Metadata
 };
 
 var connectionManager = new SqlConnectionManager();
+DataEngineConfig? dataEngineConfig = null;
 
 using var cts = new CancellationTokenSource();
 Console.CancelKeyPress += (_, e) =>
@@ -85,30 +86,29 @@ while (!cts.Token.IsCancellationRequested)
         await call.RequestStream.WriteAsync(registerMessage, cts.Token);
         Console.WriteLine("Sent registration message with oid/tid.");
 
-        if (await call.ResponseStream.MoveNext(cts.Token))
+        while (await call.ResponseStream.MoveNext(cts.Token))
         {
             var response = call.ResponseStream.Current;
             if (response.Type == "registration_url")
             {
                 Console.WriteLine($"Agent registered. URL: {response.Payload}");
             }
-            else
-            {
-                Console.WriteLine($"[Server] type={response.Type}, payload={response.Payload}");
-            }
-        }
-
-        if (await call.ResponseStream.MoveNext(cts.Token))
-        {
-            var response = call.ResponseStream.Current;
-            if (response.Type == "connections_list")
+            else if (response.Type == "connections_list")
             {
                 connectionManager.LoadConnectionDetails(response.Payload);
                 Console.WriteLine("[Agent] Loaded connection details from ControlCenter.");
             }
+            else if (response.Type == "data_engine_config")
+            {
+                dataEngineConfig = JsonSerializer.Deserialize<DataEngineConfig>(response.Payload,
+                    new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+                Console.WriteLine($"[Agent] Loaded data engine config: {dataEngineConfig?.EngineUrl}");
+                break;
+            }
             else
             {
                 Console.WriteLine($"[Server] type={response.Type}, payload={response.Payload}");
+                break;
             }
         }
 
@@ -402,6 +402,15 @@ class ConnectionDetails
     public string DatabaseName { get; set; } = "";
     public string Encrypt { get; set; } = "";
     public bool TrustServerCertificate { get; set; }
+}
+
+class DataEngineConfig
+{
+    public string EngineUrl { get; set; } = "";
+    public string AuthorizationToken { get; set; } = "";
+    public string EnvironmentId { get; set; } = "";
+    public string ConnectorId { get; set; } = "";
+    public string ProfileSetId { get; set; } = "";
 }
 
 class SqlConnectionManager : IDisposable
