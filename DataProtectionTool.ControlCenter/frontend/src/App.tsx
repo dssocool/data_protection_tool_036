@@ -2,8 +2,10 @@ import { useCallback, useEffect, useState } from "react";
 import MenuBar from "./components/MenuBar";
 import SqlServerConnectionModal from "./components/SqlServerConnectionModal";
 import type { SqlServerConnectionData, ValidateResult } from "./components/SqlServerConnectionModal";
+import QueryModal from "./components/QueryModal";
+import type { QuerySaveData, QueryValidateResult } from "./components/QueryModal";
 import ConnectionsPanel from "./components/ConnectionsPanel";
-import type { SavedConnection, TableInfo } from "./components/ConnectionsPanel";
+import type { SavedConnection, TableInfo, QueryInfo } from "./components/ConnectionsPanel";
 import DataPreviewPanel from "./components/DataPreviewPanel";
 import type { PreviewData } from "./components/DataPreviewPanel";
 import "./App.css";
@@ -17,11 +19,14 @@ function getAgentPath(): string | null {
 
 export default function App() {
   const [showSqlModal, setShowSqlModal] = useState(false);
+  const [showQueryModal, setShowQueryModal] = useState(false);
   const [showConnections, setShowConnections] = useState(true);
   const [connections, setConnections] = useState<SavedConnection[]>([]);
   const [connectionTables, setConnectionTables] = useState<Record<string, TableInfo[]>>({});
+  const [connectionQueries, setConnectionQueries] = useState<Record<string, QueryInfo[]>>({});
   const [loadingTables, setLoadingTables] = useState<Set<string>>(new Set());
   const [selectedTable, setSelectedTable] = useState<{ rowKey: string; schema: string; tableName: string } | null>(null);
+  const [selectedQuery, setSelectedQuery] = useState<{ connectionRowKey: string; queryRowKey: string; queryText: string } | null>(null);
   const [previewData, setPreviewData] = useState<PreviewData | null>(null);
   const [previewLoading, setPreviewLoading] = useState(false);
   const [previewError, setPreviewError] = useState<string | null>(null);
@@ -78,19 +83,27 @@ export default function App() {
     setLoadingTables((prev) => new Set(prev).add(rowKey));
 
     try {
-      const res = await fetch(`/api/agents/${agentPath}/list-tables`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ rowKey }),
-      });
+      const [tablesRes, queriesRes] = await Promise.all([
+        fetch(`/api/agents/${agentPath}/list-tables`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ rowKey }),
+        }),
+        fetch(`/api/agents/${agentPath}/queries?connectionRowKey=${encodeURIComponent(rowKey)}`),
+      ]);
 
-      if (res.ok) {
-        const result = await res.json();
+      if (tablesRes.ok) {
+        const result = await tablesRes.json();
         if (result.success && result.tables) {
           setConnectionTables((prev) => ({ ...prev, [rowKey]: result.tables }));
         } else {
           setConnectionTables((prev) => ({ ...prev, [rowKey]: [] }));
         }
+      }
+
+      if (queriesRes.ok) {
+        const queries = await queriesRes.json();
+        setConnectionQueries((prev) => ({ ...prev, [rowKey]: queries }));
       }
     } catch {
       setConnectionTables((prev) => ({ ...prev, [rowKey]: [] }));
@@ -155,6 +168,7 @@ export default function App() {
     if (!agentPath) return;
 
     setSelectedTable({ rowKey, schema, tableName });
+    setSelectedQuery(null);
     setPreviewLoading(true);
     setPreviewError(null);
     setPreviewData(null);
@@ -216,10 +230,107 @@ export default function App() {
     };
   }
 
+  function handleNewQuery() {
+    setShowQueryModal(true);
+  }
+
+  async function handleValidateQuery(data: QuerySaveData): Promise<QueryValidateResult> {
+    const agentPath = getAgentPath();
+    if (!agentPath) {
+      return { success: false, message: "No agent path found in URL." };
+    }
+
+    const res = await fetch(`/api/agents/${agentPath}/validate-query`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(data),
+    });
+
+    if (!res.ok) {
+      const text = await res.text();
+      return { success: false, message: `Error: ${text}` };
+    }
+
+    const result = await res.json();
+    return {
+      success: result.success ?? false,
+      message: result.message ?? "Unknown result",
+    };
+  }
+
+  async function handleSaveQuery(data: QuerySaveData) {
+    const agentPath = getAgentPath();
+    if (!agentPath) return;
+
+    const res = await fetch(`/api/agents/${agentPath}/save-query`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(data),
+    });
+
+    if (res.ok) {
+      const result = await res.json();
+      if (result.success) {
+        setShowQueryModal(false);
+        const queriesRes = await fetch(
+          `/api/agents/${agentPath}/queries?connectionRowKey=${encodeURIComponent(data.connectionRowKey)}`
+        );
+        if (queriesRes.ok) {
+          const queries = await queriesRes.json();
+          setConnectionQueries((prev) => ({ ...prev, [data.connectionRowKey]: queries }));
+        }
+      }
+    }
+  }
+
+  async function handleQueryClick(connectionRowKey: string, queryRowKey: string, queryText: string) {
+    const agentPath = getAgentPath();
+    if (!agentPath) return;
+
+    setSelectedQuery({ connectionRowKey, queryRowKey, queryText });
+    setSelectedTable(null);
+    setPreviewLoading(true);
+    setPreviewError(null);
+    setPreviewData(null);
+
+    try {
+      const res = await fetch(`/api/agents/${agentPath}/preview-query`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ connectionRowKey, queryText }),
+      });
+
+      if (!res.ok) {
+        setPreviewError(`Server error: ${res.status}`);
+        return;
+      }
+
+      const result = await res.json();
+      if (!result.success) {
+        setPreviewError(result.message ?? "Preview failed.");
+        return;
+      }
+
+      const blobRes = await fetch(`/api/blob/${result.filename}`);
+      if (!blobRes.ok) {
+        setPreviewError(`Failed to fetch CSV: ${blobRes.status}`);
+        return;
+      }
+
+      const csvText = await blobRes.text();
+      setPreviewData(parseCsv(csvText));
+    } catch (e) {
+      setPreviewError(`Preview failed: ${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      setPreviewLoading(false);
+    }
+  }
+
   return (
     <div className="app">
       <MenuBar
         onSqlServerConnection={handleSqlServerConnection}
+        onNewQuery={handleNewQuery}
         onViewConnections={handleViewConnections}
         onViewFlows={handleViewFlows}
       />
@@ -228,24 +339,32 @@ export default function App() {
           <ConnectionsPanel
             connections={connections}
             connectionTables={connectionTables}
+            connectionQueries={connectionQueries}
             loadingTables={loadingTables}
             selectedTable={selectedTable}
+            selectedQuery={selectedQuery}
             onExpandConnection={handleExpandConnection}
             onTableClick={handleTableClick}
+            onQueryClick={handleQueryClick}
             onReloadPreview={handleTableClick}
             onClose={() => setShowConnections(false)}
             onWidthChange={setConnectionsPanelWidth}
           />
         )}
-        {selectedTable && (
+        {(selectedTable || selectedQuery) && (
           <DataPreviewPanel
-            tableName={`${selectedTable.schema}.${selectedTable.tableName}`}
+            tableName={
+              selectedTable
+                ? `${selectedTable.schema}.${selectedTable.tableName}`
+                : `Query Preview`
+            }
             loading={previewLoading}
             error={previewError}
             data={previewData}
             panelLeft={showConnections ? connectionsPanelWidth + 16 : 0}
             onClose={() => {
               setSelectedTable(null);
+              setSelectedQuery(null);
               setPreviewData(null);
               setPreviewError(null);
             }}
@@ -257,6 +376,14 @@ export default function App() {
           onClose={() => setShowSqlModal(false)}
           onSave={handleSave}
           onValidate={handleValidate}
+        />
+      )}
+      {showQueryModal && (
+        <QueryModal
+          connections={connections}
+          onClose={() => setShowQueryModal(false)}
+          onSave={handleSaveQuery}
+          onValidate={handleValidateQuery}
         />
       )}
     </div>

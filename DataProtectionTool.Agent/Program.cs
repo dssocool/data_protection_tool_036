@@ -134,6 +134,14 @@ while (!cts.Token.IsCancellationRequested)
                 {
                     _ = HandlePreviewTableAsync(call, agentId, oid, tid, response.Payload, connectionManager, sasTokenManager);
                 }
+                else if (response.Type == "validate_query")
+                {
+                    _ = HandleValidateQueryAsync(call, agentId, oid, tid, response.Payload, connectionManager);
+                }
+                else if (response.Type == "preview_query")
+                {
+                    _ = HandlePreviewQueryAsync(call, agentId, oid, tid, response.Payload, connectionManager, sasTokenManager);
+                }
                 else if (response.Type == "connection_details_result")
                 {
                     connectionManager.HandleConnectionDetailsResponse(response.Payload);
@@ -479,6 +487,199 @@ static async Task HandlePreviewTableAsync(
             {
                 AgentId = agentId,
                 Type = "preview_table_result",
+                Payload = resultPayload,
+                Oid = oid,
+                Tid = tid
+            });
+        }
+        catch (Exception writeEx)
+        {
+            Console.Error.WriteLine($"[Agent] Failed to send error result: {writeEx.Message}");
+        }
+    }
+}
+
+static async Task HandleValidateQueryAsync(
+    AsyncDuplexStreamingCall<AgentMessage, ServerMessage> call,
+    string agentId, string oid, string tid, string payload,
+    SqlConnectionManager connManager)
+{
+    string correlationId = "";
+    try
+    {
+        using var envelope = JsonDocument.Parse(payload);
+        correlationId = envelope.RootElement.GetProperty("correlationId").GetString() ?? "";
+        var dataJson = envelope.RootElement.GetProperty("data").GetString() ?? "{}";
+
+        using var paramsDoc = JsonDocument.Parse(dataJson);
+        var connectionRowKey = paramsDoc.RootElement.GetProperty("connectionRowKey").GetString() ?? "";
+        var queryText = paramsDoc.RootElement.GetProperty("queryText").GetString() ?? "";
+
+        Console.WriteLine($"[Agent] Validating query for connection {connectionRowKey}...");
+
+        var message = await connManager.ExecuteWithRetryAsync(connectionRowKey, call, agentId, oid, tid,
+            async (sqlConn) =>
+            {
+                await using var cmdOn = sqlConn.CreateCommand();
+                cmdOn.CommandText = "SET NOEXEC ON";
+                await cmdOn.ExecuteNonQueryAsync();
+
+                try
+                {
+                    await using var cmdQuery = sqlConn.CreateCommand();
+                    cmdQuery.CommandText = queryText;
+                    await cmdQuery.ExecuteNonQueryAsync();
+                    return "Query syntax is valid.";
+                }
+                finally
+                {
+                    await using var cmdOff = sqlConn.CreateCommand();
+                    cmdOff.CommandText = "SET NOEXEC OFF";
+                    await cmdOff.ExecuteNonQueryAsync();
+                }
+            });
+
+        var resultPayload = JsonSerializer.Serialize(new
+        {
+            correlationId,
+            success = true,
+            message
+        });
+
+        await call.RequestStream.WriteAsync(new AgentMessage
+        {
+            AgentId = agentId,
+            Type = "validate_query_result",
+            Payload = resultPayload,
+            Oid = oid,
+            Tid = tid
+        });
+
+        Console.WriteLine("[Agent] Query validation succeeded.");
+    }
+    catch (Exception ex)
+    {
+        Console.Error.WriteLine($"[Agent] Query validation failed: {ex.Message}");
+
+        var resultPayload = JsonSerializer.Serialize(new
+        {
+            correlationId,
+            success = false,
+            message = $"Query validation failed: {ex.Message}"
+        });
+
+        try
+        {
+            await call.RequestStream.WriteAsync(new AgentMessage
+            {
+                AgentId = agentId,
+                Type = "validate_query_result",
+                Payload = resultPayload,
+                Oid = oid,
+                Tid = tid
+            });
+        }
+        catch (Exception writeEx)
+        {
+            Console.Error.WriteLine($"[Agent] Failed to send error result: {writeEx.Message}");
+        }
+    }
+}
+
+static async Task HandlePreviewQueryAsync(
+    AsyncDuplexStreamingCall<AgentMessage, ServerMessage> call,
+    string agentId, string oid, string tid, string payload,
+    SqlConnectionManager connManager, SasTokenManager sasManager)
+{
+    string correlationId = "";
+    try
+    {
+        using var envelope = JsonDocument.Parse(payload);
+        correlationId = envelope.RootElement.GetProperty("correlationId").GetString() ?? "";
+        var dataJson = envelope.RootElement.GetProperty("data").GetString() ?? "{}";
+
+        using var paramsDoc = JsonDocument.Parse(dataJson);
+        var connectionRowKey = paramsDoc.RootElement.GetProperty("connectionRowKey").GetString() ?? "";
+        var queryText = paramsDoc.RootElement.GetProperty("queryText").GetString() ?? "";
+
+        Console.WriteLine($"[Agent] Previewing query for connection {connectionRowKey}...");
+
+        var csvContent = await connManager.ExecuteWithRetryAsync(connectionRowKey, call, agentId, oid, tid,
+            async (sqlConn) =>
+            {
+                await using var cmd = sqlConn.CreateCommand();
+                cmd.CommandText = $"SELECT TOP 200 * FROM ({queryText}) AS _q";
+
+                await using var reader = await cmd.ExecuteReaderAsync();
+                var sb = new StringBuilder();
+
+                var columnCount = reader.FieldCount;
+                for (int i = 0; i < columnCount; i++)
+                {
+                    if (i > 0) sb.Append(',');
+                    sb.Append(CsvEnclose(reader.GetName(i)));
+                }
+                sb.AppendLine();
+
+                while (await reader.ReadAsync())
+                {
+                    for (int i = 0; i < columnCount; i++)
+                    {
+                        if (i > 0) sb.Append(',');
+                        var value = reader.IsDBNull(i) ? "" : reader.GetValue(i)?.ToString() ?? "";
+                        sb.Append(CsvEnclose(value));
+                    }
+                    sb.AppendLine();
+                }
+
+                return sb.ToString();
+            });
+
+        var filename = $"{Guid.NewGuid():N}_preview.csv";
+
+        var sasInfo = await sasManager.RequestSasTokenAsync(call, agentId, oid, tid);
+
+        var blobUri = new Uri($"{sasInfo.BlobEndpoint}/{sasInfo.Container}/{filename}?{sasInfo.SasToken}");
+        var blobClient = new BlobClient(blobUri);
+        var csvBytes = Encoding.UTF8.GetBytes(csvContent);
+        using var stream = new MemoryStream(csvBytes);
+        await blobClient.UploadAsync(stream, overwrite: true);
+
+        Console.WriteLine($"[Agent] Uploaded query preview CSV: {filename}");
+
+        var resultPayload = JsonSerializer.Serialize(new
+        {
+            correlationId,
+            success = true,
+            filename
+        });
+
+        await call.RequestStream.WriteAsync(new AgentMessage
+        {
+            AgentId = agentId,
+            Type = "preview_query_result",
+            Payload = resultPayload,
+            Oid = oid,
+            Tid = tid
+        });
+    }
+    catch (Exception ex)
+    {
+        Console.Error.WriteLine($"[Agent] Preview query failed: {ex.Message}");
+
+        var resultPayload = JsonSerializer.Serialize(new
+        {
+            correlationId,
+            success = false,
+            message = $"Preview query failed: {ex.Message}"
+        });
+
+        try
+        {
+            await call.RequestStream.WriteAsync(new AgentMessage
+            {
+                AgentId = agentId,
+                Type = "preview_query_result",
                 Payload = resultPayload,
                 Oid = oid,
                 Tid = tid

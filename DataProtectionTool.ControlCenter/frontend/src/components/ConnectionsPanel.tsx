@@ -17,21 +17,32 @@ export interface TableInfo {
   name: string;
 }
 
+export interface QueryInfo {
+  rowKey: string;
+  connectionRowKey: string;
+  queryText: string;
+  createdAt: string;
+}
+
 interface ContextMenuState {
   x: number;
   y: number;
   rowKey: string;
   schema: string;
   tableName: string;
+  isQuery: boolean;
 }
 
 interface ConnectionsPanelProps {
   connections: SavedConnection[];
   connectionTables: Record<string, TableInfo[]>;
+  connectionQueries: Record<string, QueryInfo[]>;
   loadingTables: Set<string>;
   selectedTable: { rowKey: string; schema: string; tableName: string } | null;
+  selectedQuery: { connectionRowKey: string; queryRowKey: string; queryText: string } | null;
   onExpandConnection: (rowKey: string) => void;
   onTableClick: (rowKey: string, schema: string, tableName: string) => void;
+  onQueryClick: (connectionRowKey: string, queryRowKey: string, queryText: string) => void;
   onReloadPreview: (rowKey: string, schema: string, tableName: string) => void;
   onClose: () => void;
   onWidthChange?: (width: number) => void;
@@ -44,10 +55,13 @@ const DEFAULT_WIDTH = 260;
 export default function ConnectionsPanel({
   connections,
   connectionTables,
+  connectionQueries,
   loadingTables,
   selectedTable,
+  selectedQuery,
   onExpandConnection,
   onTableClick,
+  onQueryClick,
   onReloadPreview,
   onClose,
   onWidthChange,
@@ -103,9 +117,10 @@ export default function ConnectionsPanel({
     rowKey: string,
     schema: string,
     tableName: string,
+    isQuery = false,
   ) {
     e.preventDefault();
-    setContextMenu({ x: e.clientX, y: e.clientY, rowKey, schema, tableName });
+    setContextMenu({ x: e.clientX, y: e.clientY, rowKey, schema, tableName, isQuery });
   }
 
   const grouped = useMemo(() => {
@@ -136,6 +151,7 @@ export default function ConnectionsPanel({
   const isExpanded = (rowKey: string) => expanded.has(rowKey);
   const isLoading = (rowKey: string) => loadingTables.has(rowKey);
   const tables = (rowKey: string) => connectionTables[rowKey];
+  const queries = (rowKey: string) => connectionQueries[rowKey];
 
   return (
     <div className="connections-panel" style={{ width }}>
@@ -185,36 +201,65 @@ export default function ConnectionsPanel({
                     {isExpanded(conn.rowKey) && (
                       <div className="conn-tables">
                         {isLoading(conn.rowKey) ? (
-                          <div className="conn-tables-loading">Loading tables...</div>
-                        ) : tables(conn.rowKey) ? (
-                          tables(conn.rowKey)!.length === 0 ? (
-                            <div className="conn-tables-empty">No tables found.</div>
-                          ) : (
-                            <ul className="conn-tables-list">
-                              {tables(conn.rowKey)!.map((t) => {
-                                const isSelected = selectedTable?.rowKey === conn.rowKey
-                                  && selectedTable?.schema === t.schema
-                                  && selectedTable?.tableName === t.name;
-                                return (
-                                  <li
-                                    key={`${t.schema}.${t.name}`}
-                                    className={`conn-table-item${isSelected ? " conn-table-item-selected" : ""}`}
-                                    onClick={() => onTableClick(conn.rowKey, t.schema, t.name)}
-                                    onContextMenu={(e) => handleTableContextMenu(e, conn.rowKey, t.schema, t.name)}
-                                  >
-                                    <svg className="conn-table-icon" width="14" height="14" viewBox="0 0 14 14">
-                                      <rect x="1" y="1" width="12" height="12" rx="1.5" fill="none" stroke="currentColor" strokeWidth="1" />
-                                      <line x1="1" y1="5" x2="13" y2="5" stroke="currentColor" strokeWidth="1" />
-                                      <line x1="1" y1="9" x2="13" y2="9" stroke="currentColor" strokeWidth="1" />
-                                      <line x1="5" y1="5" x2="5" y2="13" stroke="currentColor" strokeWidth="1" />
-                                    </svg>
-                                    <span className="conn-table-name">{t.schema}.{t.name}</span>
-                                  </li>
-                                );
-                              })}
-                            </ul>
-                          )
-                        ) : null}
+                          <div className="conn-tables-loading">Loading...</div>
+                        ) : (
+                          <>
+                            {queries(conn.rowKey) && queries(conn.rowKey)!.length > 0 && (
+                              <ul className="conn-tables-list">
+                                {queries(conn.rowKey)!.map((q) => {
+                                  const isSelected = selectedQuery?.connectionRowKey === conn.rowKey
+                                    && selectedQuery?.queryRowKey === q.rowKey;
+                                  const label = q.queryText.length > 40
+                                    ? q.queryText.substring(0, 40) + "..."
+                                    : q.queryText;
+                                  return (
+                                    <li
+                                      key={q.rowKey}
+                                      className={`conn-table-item conn-query-item${isSelected ? " conn-table-item-selected" : ""}`}
+                                      onClick={() => onQueryClick(conn.rowKey, q.rowKey, q.queryText)}
+                                      onContextMenu={(e) => handleTableContextMenu(e, conn.rowKey, "", q.rowKey, true)}
+                                    >
+                                      <svg className="conn-table-icon conn-query-icon" width="14" height="14" viewBox="0 0 14 14">
+                                        <path d="M2 2 L12 2 L12 12 L2 12 Z" fill="none" stroke="currentColor" strokeWidth="1" rx="1" />
+                                        <path d="M4 5 L10 5 M4 7 L9 7 M4 9 L7 9" stroke="currentColor" strokeWidth="0.8" strokeLinecap="round" />
+                                      </svg>
+                                      <span className="conn-table-name" title={q.queryText}>{label}</span>
+                                    </li>
+                                  );
+                                })}
+                              </ul>
+                            )}
+                            {tables(conn.rowKey) ? (
+                              tables(conn.rowKey)!.length === 0 && (!queries(conn.rowKey) || queries(conn.rowKey)!.length === 0) ? (
+                                <div className="conn-tables-empty">No tables found.</div>
+                              ) : (
+                                <ul className="conn-tables-list">
+                                  {tables(conn.rowKey)!.map((t) => {
+                                    const isSelected = selectedTable?.rowKey === conn.rowKey
+                                      && selectedTable?.schema === t.schema
+                                      && selectedTable?.tableName === t.name;
+                                    return (
+                                      <li
+                                        key={`${t.schema}.${t.name}`}
+                                        className={`conn-table-item${isSelected ? " conn-table-item-selected" : ""}`}
+                                        onClick={() => onTableClick(conn.rowKey, t.schema, t.name)}
+                                        onContextMenu={(e) => handleTableContextMenu(e, conn.rowKey, t.schema, t.name)}
+                                      >
+                                        <svg className="conn-table-icon" width="14" height="14" viewBox="0 0 14 14">
+                                          <rect x="1" y="1" width="12" height="12" rx="1.5" fill="none" stroke="currentColor" strokeWidth="1" />
+                                          <line x1="1" y1="5" x2="13" y2="5" stroke="currentColor" strokeWidth="1" />
+                                          <line x1="1" y1="9" x2="13" y2="9" stroke="currentColor" strokeWidth="1" />
+                                          <line x1="5" y1="5" x2="5" y2="13" stroke="currentColor" strokeWidth="1" />
+                                        </svg>
+                                        <span className="conn-table-name">{t.schema}.{t.name}</span>
+                                      </li>
+                                    );
+                                  })}
+                                </ul>
+                              )
+                            ) : null}
+                          </>
+                        )}
                       </div>
                     )}
                   </li>
@@ -231,8 +276,9 @@ export default function ConnectionsPanel({
           onMouseDown={(e) => e.stopPropagation()}
         >
           <div
-            className="conn-context-menu-item"
+            className={`conn-context-menu-item${contextMenu.isQuery ? " conn-context-menu-item-disabled" : ""}`}
             onClick={() => {
+              if (contextMenu.isQuery) return;
               setContextMenu(null);
               onReloadPreview(contextMenu.rowKey, contextMenu.schema, contextMenu.tableName);
             }}

@@ -250,3 +250,21 @@
 .conn-context-menu-item:hover {
   background: #f0f4f8;
 }
+
+.conn-context-menu-item-disabled {
+  color: #bbb;
+  cursor: default;
+}
+
+.conn-context-menu-item-disabled:hover {
+  background: none;
+}
+
+.conn-query-icon {
+  color: #0078d4;
+}
+
+.conn-query-item {
+  border-left: 2px solid #0078d4;
+  margin-left: -2px;
+}

@@ -3,12 +3,14 @@ import "./MenuBar.css";
 
 interface MenuBarProps {
   onSqlServerConnection: () => void;
+  onNewQuery: () => void;
   onViewConnections: () => void;
   onViewFlows: () => void;
 }
 
 export default function MenuBar({
   onSqlServerConnection,
+  onNewQuery,
   onViewConnections,
   onViewFlows,
 }: MenuBarProps) {
@@ -60,6 +62,11 @@ export default function MenuBar({
                       </button>
                     </li>
                   </ul>
+                </li>
+                <li className="menu-item">
+                  <button onClick={() => handleAction(onNewQuery)}>
+                    Query
+                  </button>
                 </li>
               </ul>
             </li>

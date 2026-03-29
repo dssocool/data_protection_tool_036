@@ -1,0 +1,31 @@
+.query-modal-dialog {
+  width: 600px;
+}
+
+.query-text-row {
+  align-items: flex-start;
+}
+
+.query-text-label {
+  padding-top: 8px;
+}
+
+.query-textarea {
+  flex: 1;
+  padding: 8px 10px;
+  border: 1px solid #bbb;
+  border-radius: 4px;
+  font-size: 13px;
+  color: #333;
+  background: #fff;
+  resize: vertical;
+  outline: none;
+  font-family: "Cascadia Code", "Fira Code", "Consolas", "Monaco", monospace;
+  line-height: 1.5;
+  tab-size: 2;
+  transition: border-color 0.15s;
+}
+
+.query-textarea:focus {
+  border-color: #0078d4;
+}

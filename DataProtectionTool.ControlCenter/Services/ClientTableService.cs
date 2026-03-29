@@ -142,4 +142,57 @@ public class ClientTableService
             return null;
         }
     }
+
+    public async Task<QueryEntity> SaveQueryAsync(
+        string partitionKey,
+        string connectionRowKey,
+        string queryText)
+    {
+        EnsureTableExists();
+        var id = Guid.NewGuid().ToString("N");
+        var entity = new QueryEntity
+        {
+            PartitionKey = partitionKey,
+            RowKey = QueryEntity.BuildRowKey(id),
+            ConnectionRowKey = connectionRowKey,
+            QueryText = queryText,
+            CreatedAt = DateTime.UtcNow
+        };
+
+        await _tableClient.AddEntityAsync(entity);
+        _logger.LogInformation(
+            "Saved query — partitionKey={PK}, rowKey={RK}, connectionRowKey={CRK}",
+            partitionKey, entity.RowKey, connectionRowKey);
+        return entity;
+    }
+
+    public async Task<List<QueryEntity>> GetQueriesAsync(string partitionKey, string connectionRowKey)
+    {
+        EnsureTableExists();
+        var queries = new List<QueryEntity>();
+
+        await foreach (var entity in _tableClient.QueryAsync<QueryEntity>(
+            e => e.PartitionKey == partitionKey && e.RowKey.CompareTo("query_") >= 0
+                                                && e.RowKey.CompareTo("query_~") < 0))
+        {
+            if (entity.ConnectionRowKey == connectionRowKey)
+                queries.Add(entity);
+        }
+
+        return queries;
+    }
+
+    public async Task<QueryEntity?> GetQueryByRowKeyAsync(string partitionKey, string rowKey)
+    {
+        EnsureTableExists();
+        try
+        {
+            var response = await _tableClient.GetEntityAsync<QueryEntity>(partitionKey, rowKey);
+            return response.Value;
+        }
+        catch (Azure.RequestFailedException ex) when (ex.Status == 404)
+        {
+            return null;
+        }
+    }
 }

@@ -245,6 +245,111 @@ app.MapGet("/api/agents/{path}/connections", async (string path, AgentRegistry r
     return Results.Ok(result);
 });
 
+app.MapPost("/api/agents/{path}/validate-query", async (string path, HttpRequest request, AgentRegistry registry) =>
+{
+    if (!registry.TryGetConnection(path, out var connection) || connection is null)
+        return Results.NotFound(new { error = "Agent not found or not connected." });
+
+    string body;
+    using (var reader = new StreamReader(request.Body))
+        body = await reader.ReadToEndAsync();
+
+    try
+    {
+        var result = await connection.SendCommandAsync("validate_query", body, TimeSpan.FromSeconds(30));
+
+        using var doc = JsonDocument.Parse(result);
+        var message = doc.RootElement.TryGetProperty("message", out var msgEl) ? msgEl.GetString() : null;
+        var success = doc.RootElement.TryGetProperty("success", out var sEl) && sEl.GetBoolean();
+
+        return Results.Ok(new { success, message = message ?? "Unknown result" });
+    }
+    catch (TimeoutException)
+    {
+        return Results.Ok(new { success = false, message = "Agent did not respond within 30 seconds." });
+    }
+    catch (Exception ex)
+    {
+        return Results.Ok(new { success = false, message = $"Query validation error: {ex.Message}" });
+    }
+});
+
+app.MapPost("/api/agents/{path}/save-query", async (string path, HttpRequest request, AgentRegistry registry, ClientTableService clientTableService) =>
+{
+    if (!registry.TryGet(path, out var info) || info is null)
+        return Results.NotFound(new { error = "Agent not found." });
+
+    string body;
+    using (var reader = new StreamReader(request.Body))
+        body = await reader.ReadToEndAsync();
+
+    try
+    {
+        using var doc = JsonDocument.Parse(body);
+        var root = doc.RootElement;
+
+        var connectionRowKey = root.TryGetProperty("connectionRowKey", out var crk) ? crk.GetString() ?? "" : "";
+        var queryText = root.TryGetProperty("queryText", out var qt) ? qt.GetString() ?? "" : "";
+
+        var partitionKey = ClientEntity.BuildPartitionKey(info.Oid, info.Tid);
+        var entity = await clientTableService.SaveQueryAsync(partitionKey, connectionRowKey, queryText);
+
+        return Results.Ok(new
+        {
+            success = true,
+            rowKey = entity.RowKey,
+            message = "Query saved."
+        });
+    }
+    catch (Exception ex)
+    {
+        return Results.Ok(new { success = false, message = $"Failed to save query: {ex.Message}" });
+    }
+});
+
+app.MapPost("/api/agents/{path}/preview-query", async (string path, HttpRequest request, AgentRegistry registry) =>
+{
+    if (!registry.TryGetConnection(path, out var connection) || connection is null)
+        return Results.NotFound(new { error = "Agent not found or not connected." });
+
+    string body;
+    using (var reader = new StreamReader(request.Body))
+        body = await reader.ReadToEndAsync();
+
+    try
+    {
+        var result = await connection.SendCommandAsync("preview_query", body, TimeSpan.FromSeconds(60));
+        return Results.Content(result, "application/json");
+    }
+    catch (TimeoutException)
+    {
+        return Results.Ok(new { success = false, message = "Agent did not respond within 60 seconds." });
+    }
+    catch (Exception ex)
+    {
+        return Results.Ok(new { success = false, message = $"Preview query error: {ex.Message}" });
+    }
+});
+
+app.MapGet("/api/agents/{path}/queries", async (string path, string connectionRowKey, AgentRegistry registry, ClientTableService clientTableService) =>
+{
+    if (!registry.TryGet(path, out var info) || info is null)
+        return Results.NotFound(new { error = "Agent not found." });
+
+    var partitionKey = ClientEntity.BuildPartitionKey(info.Oid, info.Tid);
+    var queries = await clientTableService.GetQueriesAsync(partitionKey, connectionRowKey);
+
+    var result = queries.Select(q => new
+    {
+        rowKey = q.RowKey,
+        connectionRowKey = q.ConnectionRowKey,
+        queryText = q.QueryText,
+        createdAt = q.CreatedAt.ToString("O")
+    });
+
+    return Results.Ok(result);
+});
+
 app.MapGet("/agents/{path}", (string path, AgentRegistry registry, IWebHostEnvironment env) =>
 {
     if (!registry.TryGet(path, out _))
