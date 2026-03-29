@@ -41,10 +41,6 @@ var agentId = $"agent-{Environment.MachineName}-{Process.GetCurrentProcess().Id}
 var serverAddress = "http://localhost:5000";
 
 Console.WriteLine($"DataProtectionTool Agent [{agentId}]");
-Console.WriteLine($"Connecting to ControlCenter at {serverAddress}...");
-
-using var channel = GrpcChannel.ForAddress(serverAddress);
-var client = new AgentHub.AgentHubClient(channel);
 
 var headers = new Metadata
 {
@@ -60,81 +56,102 @@ Console.CancelKeyPress += (_, e) =>
     cts.Cancel();
 };
 
-try
+while (!cts.Token.IsCancellationRequested)
 {
-    using var call = client.Connect(headers: headers, cancellationToken: cts.Token);
+    Console.WriteLine($"Connecting to ControlCenter at {serverAddress}...");
 
-    Console.WriteLine("Bidirectional stream established.");
-
-    var registerMessage = new AgentMessage
+    try
     {
-        AgentId = agentId,
-        Type = "register",
-        Payload = "",
-        Oid = oid,
-        Tid = tid
-    };
-    await call.RequestStream.WriteAsync(registerMessage, cts.Token);
-    Console.WriteLine("Sent registration message with oid/tid.");
+        using var channel = GrpcChannel.ForAddress(serverAddress);
+        var client = new AgentHub.AgentHubClient(channel);
 
-    if (await call.ResponseStream.MoveNext(cts.Token))
-    {
-        var response = call.ResponseStream.Current;
-        if (response.Type == "registration_url")
+        using var call = client.Connect(headers: headers, cancellationToken: cts.Token);
+
+        Console.WriteLine("Bidirectional stream established.");
+
+        var registerMessage = new AgentMessage
         {
-            Console.WriteLine($"Agent registered. URL: {response.Payload}");
-        }
-        else
-        {
-            Console.WriteLine($"[Server] type={response.Type}, payload={response.Payload}");
-        }
-    }
+            AgentId = agentId,
+            Type = "register",
+            Payload = "",
+            Oid = oid,
+            Tid = tid
+        };
+        await call.RequestStream.WriteAsync(registerMessage, cts.Token);
+        Console.WriteLine("Sent registration message with oid/tid.");
 
-    var receiveTask = Task.Run(async () =>
-    {
-        while (await call.ResponseStream.MoveNext(cts.Token))
+        if (await call.ResponseStream.MoveNext(cts.Token))
         {
             var response = call.ResponseStream.Current;
-            Console.WriteLine($"[Server] type={response.Type}, payload={response.Payload}");
-        }
-    });
-
-    var sendTask = Task.Run(async () =>
-    {
-        var sequence = 0;
-        while (!cts.Token.IsCancellationRequested)
-        {
-            var message = new AgentMessage
+            if (response.Type == "registration_url")
             {
-                AgentId = agentId,
-                Type = "heartbeat",
-                Payload = $"seq={sequence++}",
-                Oid = oid,
-                Tid = tid
-            };
-
-            await call.RequestStream.WriteAsync(message, cts.Token);
-            Console.WriteLine($"[Agent] Sent heartbeat seq={sequence - 1}");
-            await Task.Delay(TimeSpan.FromSeconds(5), cts.Token);
+                Console.WriteLine($"Agent registered. URL: {response.Payload}");
+            }
+            else
+            {
+                Console.WriteLine($"[Server] type={response.Type}, payload={response.Payload}");
+            }
         }
-    });
 
-    await Task.WhenAny(receiveTask, sendTask);
+        var receiveTask = Task.Run(async () =>
+        {
+            while (await call.ResponseStream.MoveNext(cts.Token))
+            {
+                var response = call.ResponseStream.Current;
+                Console.WriteLine($"[Server] type={response.Type}, payload={response.Payload}");
+            }
+        });
 
-    await call.RequestStream.CompleteAsync();
-    await receiveTask;
-}
-catch (RpcException ex) when (ex.StatusCode == StatusCode.Unauthenticated)
-{
-    Console.Error.WriteLine($"Authentication failed: {ex.Status.Detail}");
-}
-catch (OperationCanceledException)
-{
-    Console.WriteLine("Agent shutting down...");
-}
-catch (RpcException ex)
-{
-    Console.Error.WriteLine($"gRPC error: {ex.Status.StatusCode} — {ex.Status.Detail}");
+        var sendTask = Task.Run(async () =>
+        {
+            var sequence = 0;
+            while (!cts.Token.IsCancellationRequested)
+            {
+                var message = new AgentMessage
+                {
+                    AgentId = agentId,
+                    Type = "heartbeat",
+                    Payload = $"seq={sequence++}",
+                    Oid = oid,
+                    Tid = tid
+                };
+
+                await call.RequestStream.WriteAsync(message, cts.Token);
+                Console.WriteLine($"[Agent] Sent heartbeat seq={sequence - 1}");
+                await Task.Delay(TimeSpan.FromSeconds(5), cts.Token);
+            }
+        });
+
+        await Task.WhenAny(receiveTask, sendTask);
+
+        await call.RequestStream.CompleteAsync();
+        await receiveTask;
+    }
+    catch (RpcException ex) when (ex.StatusCode == StatusCode.Unauthenticated)
+    {
+        Console.Error.WriteLine($"Authentication failed: {ex.Status.Detail}");
+        break;
+    }
+    catch (OperationCanceledException)
+    {
+        Console.WriteLine("Agent shutting down...");
+        break;
+    }
+    catch (RpcException ex)
+    {
+        Console.Error.WriteLine($"gRPC error: {ex.Status.StatusCode} — {ex.Status.Detail}");
+    }
+    catch (Exception ex)
+    {
+        Console.Error.WriteLine($"Unexpected error: {ex.Message}");
+    }
+
+    if (!cts.Token.IsCancellationRequested)
+    {
+        Console.WriteLine("Retrying connection in 30 seconds...");
+        try { await Task.Delay(TimeSpan.FromSeconds(30), cts.Token); }
+        catch (OperationCanceledException) { break; }
+    }
 }
 
 Console.WriteLine("Agent disconnected.");
