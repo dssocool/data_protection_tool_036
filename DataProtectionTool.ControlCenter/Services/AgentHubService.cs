@@ -101,6 +101,16 @@ public class AgentHubService : AgentHub.AgentHubBase
                         "Received from agent {AgentId}: type={Type}, payload={Payload}",
                         message.AgentId, message.Type, message.Payload);
 
+                    if (message.Type == "heartbeat")
+                    {
+                        await responseStream.WriteAsync(new ServerMessage
+                        {
+                            Type = "ack",
+                            Payload = $"Received heartbeat from {message.AgentId}"
+                        });
+                        continue;
+                    }
+
                     if (TryRouteCommandResponse(registeredPath!, message.Payload))
                         continue;
 
@@ -110,12 +120,11 @@ public class AgentHubService : AgentHub.AgentHubBase
                         continue;
                     }
 
-                    var response = new ServerMessage
+                    await responseStream.WriteAsync(new ServerMessage
                     {
                         Type = "ack",
                         Payload = $"Received {message.Type} from {message.AgentId}"
-                    };
-                    await responseStream.WriteAsync(response);
+                    });
                 }
             });
 
