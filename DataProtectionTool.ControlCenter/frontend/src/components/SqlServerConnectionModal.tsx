@@ -4,6 +4,7 @@ import "./SqlServerConnectionModal.css";
 interface SqlServerConnectionModalProps {
   onClose: () => void;
   onSave: (data: SqlServerConnectionData) => void;
+  onValidate: (data: SqlServerConnectionData) => Promise<string>;
 }
 
 export interface SqlServerConnectionData {
@@ -16,18 +17,14 @@ export interface SqlServerConnectionData {
   trustServerCertificate: boolean;
 }
 
-const AUTH_OPTIONS = [
-  "Microsoft Entra Integrated",
-  "SQL Server Authentication",
-  "Microsoft Entra Password",
-  "Microsoft Entra MFA",
-];
+const AUTH_OPTIONS = ["Microsoft Entra Integrated"];
 
-const ENCRYPT_OPTIONS = ["Mandatory", "Optional", "Strict"];
+const ENCRYPT_OPTIONS = ["Mandatory"];
 
 export default function SqlServerConnectionModal({
   onClose,
   onSave,
+  onValidate,
 }: SqlServerConnectionModalProps) {
   const [serverName, setServerName] = useState("");
   const [authentication, setAuthentication] = useState(AUTH_OPTIONS[0]);
@@ -37,15 +34,12 @@ export default function SqlServerConnectionModal({
   const [encrypt, setEncrypt] = useState("Mandatory");
   const [trustServerCertificate, setTrustServerCertificate] = useState(true);
   const [status, setStatus] = useState("");
+  const [validating, setValidating] = useState(false);
 
   const credentialsDisabled = authentication === "Microsoft Entra Integrated";
 
-  function handleSave() {
-    if (!serverName.trim()) {
-      setStatus("Server Name is required.");
-      return;
-    }
-    onSave({
+  function getFormData(): SqlServerConnectionData {
+    return {
       serverName,
       authentication,
       userName,
@@ -53,7 +47,32 @@ export default function SqlServerConnectionModal({
       databaseName,
       encrypt,
       trustServerCertificate,
-    });
+    };
+  }
+
+  function handleSave() {
+    if (!serverName.trim()) {
+      setStatus("Server Name is required.");
+      return;
+    }
+    onSave(getFormData());
+  }
+
+  async function handleValidate() {
+    if (!serverName.trim()) {
+      setStatus("Server Name is required.");
+      return;
+    }
+    setValidating(true);
+    setStatus("Validating...");
+    try {
+      const result = await onValidate(getFormData());
+      setStatus(result);
+    } catch (err) {
+      setStatus(err instanceof Error ? err.message : "Validation failed.");
+    } finally {
+      setValidating(false);
+    }
   }
 
   return (
@@ -164,9 +183,18 @@ export default function SqlServerConnectionModal({
           <button className="btn btn-cancel" onClick={onClose}>
             Cancel
           </button>
-          <button className="btn btn-save" onClick={handleSave}>
-            Save
-          </button>
+          <div className="modal-footer-right">
+            <button
+              className="btn btn-validate"
+              onClick={handleValidate}
+              disabled={validating}
+            >
+              {validating ? "Validating..." : "Validate"}
+            </button>
+            <button className="btn btn-save" onClick={handleSave}>
+              Save
+            </button>
+          </div>
         </div>
       </div>
     </div>

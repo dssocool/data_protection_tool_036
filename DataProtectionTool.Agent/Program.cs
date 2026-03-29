@@ -2,9 +2,11 @@ using System.Diagnostics;
 using System.IdentityModel.Tokens.Jwt;
 using System.Net;
 using System.Net.Sockets;
+using System.Text.Json;
 using Azure.Identity;
 using Grpc.Core;
 using Grpc.Net.Client;
+using Microsoft.Data.SqlClient;
 using DataProtectionTool.Contracts;
 
 var testMode = args.Any(a => a.Equals("test", StringComparison.OrdinalIgnoreCase));
@@ -99,6 +101,11 @@ while (!cts.Token.IsCancellationRequested)
             {
                 var response = call.ResponseStream.Current;
                 Console.WriteLine($"[Server] type={response.Type}, payload={response.Payload}");
+
+                if (response.Type == "validate_sql")
+                {
+                    _ = HandleValidateSqlAsync(call, agentId, oid, tid, response.Payload);
+                }
             }
         });
 
@@ -155,6 +162,104 @@ while (!cts.Token.IsCancellationRequested)
 }
 
 Console.WriteLine("Agent disconnected.");
+
+static async Task HandleValidateSqlAsync(
+    AsyncDuplexStreamingCall<AgentMessage, ServerMessage> call,
+    string agentId, string oid, string tid, string payload)
+{
+    string correlationId = "";
+    try
+    {
+        using var envelope = JsonDocument.Parse(payload);
+        correlationId = envelope.RootElement.GetProperty("correlationId").GetString() ?? "";
+        var dataJson = envelope.RootElement.GetProperty("data").GetString() ?? "{}";
+
+        using var paramsDoc = JsonDocument.Parse(dataJson);
+        var root = paramsDoc.RootElement;
+
+        var serverName = root.GetProperty("serverName").GetString() ?? "";
+        var databaseName = root.TryGetProperty("databaseName", out var dbEl) ? dbEl.GetString() ?? "" : "";
+        var encrypt = root.TryGetProperty("encrypt", out var encEl) ? encEl.GetString() ?? "Mandatory" : "Mandatory";
+        var trustCert = root.TryGetProperty("trustServerCertificate", out var tcEl) && tcEl.GetBoolean();
+        var authentication = root.TryGetProperty("authentication", out var authEl)
+            ? authEl.GetString() ?? "Microsoft Entra Integrated"
+            : "Microsoft Entra Integrated";
+
+        var csb = new SqlConnectionStringBuilder
+        {
+            DataSource = serverName,
+            Encrypt = encrypt == "Mandatory" ? SqlConnectionEncryptOption.Mandatory
+                    : encrypt == "Strict" ? SqlConnectionEncryptOption.Strict
+                    : SqlConnectionEncryptOption.Optional,
+            TrustServerCertificate = trustCert,
+        };
+
+        if (!string.IsNullOrEmpty(databaseName))
+            csb.InitialCatalog = databaseName;
+
+        if (authentication == "Microsoft Entra Integrated")
+        {
+            csb.Authentication = SqlAuthenticationMethod.ActiveDirectoryIntegrated;
+        }
+        else
+        {
+            var userName = root.TryGetProperty("userName", out var uEl) ? uEl.GetString() ?? "" : "";
+            var password = root.TryGetProperty("password", out var pEl) ? pEl.GetString() ?? "" : "";
+            csb.UserID = userName;
+            csb.Password = password;
+        }
+
+        Console.WriteLine($"[Agent] Testing SQL connection to {serverName}...");
+
+        await using var conn = new SqlConnection(csb.ConnectionString);
+        await conn.OpenAsync();
+
+        var resultPayload = JsonSerializer.Serialize(new
+        {
+            correlationId,
+            success = true,
+            message = $"Connection successful. Server version: {conn.ServerVersion}"
+        });
+
+        await call.RequestStream.WriteAsync(new AgentMessage
+        {
+            AgentId = agentId,
+            Type = "validate_sql_result",
+            Payload = resultPayload,
+            Oid = oid,
+            Tid = tid
+        });
+
+        Console.WriteLine("[Agent] SQL connection test succeeded.");
+    }
+    catch (Exception ex)
+    {
+        Console.Error.WriteLine($"[Agent] SQL connection test failed: {ex.Message}");
+
+        var resultPayload = JsonSerializer.Serialize(new
+        {
+            correlationId,
+            success = false,
+            message = $"Connection failed: {ex.Message}"
+        });
+
+        try
+        {
+            await call.RequestStream.WriteAsync(new AgentMessage
+            {
+                AgentId = agentId,
+                Type = "validate_sql_result",
+                Payload = resultPayload,
+                Oid = oid,
+                Tid = tid
+            });
+        }
+        catch (Exception writeEx)
+        {
+            Console.Error.WriteLine($"[Agent] Failed to send error result: {writeEx.Message}");
+        }
+    }
+}
 
 static string GetLocalIpAddress()
 {

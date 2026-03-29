@@ -2,7 +2,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-AZURITE_DATA="/tmp/azurite-data-protection-tool"
+AZURITE_DATA="$SCRIPT_DIR/.azurite"
 
 echo "========================================="
 echo " Data Protection Tool - Dev Start All"

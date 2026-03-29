@@ -147,6 +147,26 @@
   background: #e0e0e0;
 }
 
+.modal-footer-right {
+  display: flex;
+  gap: 10px;
+}
+
+.btn-validate {
+  background: #107c10;
+  color: #fff;
+  border-color: #107c10;
+}
+
+.btn-validate:hover {
+  background: #0b6a0b;
+}
+
+.btn-validate:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
 .btn-save {
   background: #0078d4;
   color: #fff;

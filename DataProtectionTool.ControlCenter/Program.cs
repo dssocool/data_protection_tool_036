@@ -1,3 +1,4 @@
+using System.Text.Json;
 using Azure.Data.Tables;
 using Microsoft.AspNetCore.Server.Kestrel.Core;
 using DataProtectionTool.ControlCenter.Interceptors;
@@ -48,6 +49,35 @@ app.MapGet("/api/agents/{path}", (string path, AgentRegistry registry) =>
         agentId = info.AgentId,
         connectedAt = info.ConnectedAt.ToString("O")
     });
+});
+
+app.MapPost("/api/agents/{path}/validate-sql", async (string path, HttpRequest request, AgentRegistry registry) =>
+{
+    if (!registry.TryGetConnection(path, out var connection) || connection is null)
+        return Results.NotFound(new { error = "Agent not found or not connected." });
+
+    string body;
+    using (var reader = new StreamReader(request.Body))
+        body = await reader.ReadToEndAsync();
+
+    try
+    {
+        var result = await connection.SendCommandAsync("validate_sql", body, TimeSpan.FromSeconds(30));
+
+        using var doc = JsonDocument.Parse(result);
+        var message = doc.RootElement.TryGetProperty("message", out var msgEl) ? msgEl.GetString() : null;
+        var success = doc.RootElement.TryGetProperty("success", out var sEl) && sEl.GetBoolean();
+
+        return Results.Ok(new { success, message = message ?? "Unknown result" });
+    }
+    catch (TimeoutException)
+    {
+        return Results.Ok(new { success = false, message = "Agent did not respond within 30 seconds." });
+    }
+    catch (Exception ex)
+    {
+        return Results.Ok(new { success = false, message = $"Validation error: {ex.Message}" });
+    }
 });
 
 app.MapGet("/agents/{path}", (string path, AgentRegistry registry, IWebHostEnvironment env) =>

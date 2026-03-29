@@ -55,6 +55,9 @@ node_modules/
 dist/
 wwwroot/
 
+## Azurite (local Azure Storage emulator data)
+.azurite/
+
 ## Misc
 *.swp
 *.bak

@@ -12,6 +12,7 @@
     <PackageReference Include="Google.Protobuf" Version="3.*" />
     <PackageReference Include="Azure.Identity" Version="1.*" />
     <PackageReference Include="System.IdentityModel.Tokens.Jwt" Version="8.*" />
+    <PackageReference Include="Microsoft.Data.SqlClient" Version="5.*" />
   </ItemGroup>
 
   <ItemGroup>

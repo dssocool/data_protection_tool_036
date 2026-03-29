@@ -1,3 +1,4 @@
+using System.Text.Json;
 using Grpc.Core;
 using DataProtectionTool.Contracts;
 
@@ -48,7 +49,7 @@ public class AgentHubService : AgentHub.AgentHubBase
                 tid = context.RequestHeaders.GetValue(SharedSecret.TidMetadataKey) ?? "";
 
             var agentInfo = new AgentInfo(oid, tid, firstMessage.AgentId, DateTime.UtcNow);
-            registeredPath = _registry.Register(agentInfo);
+            registeredPath = _registry.Register(agentInfo, responseStream);
 
             await _clientTableService.CreateOrUpdateClientAsync(oid, tid, firstMessage.AgentId);
 
@@ -72,6 +73,12 @@ public class AgentHubService : AgentHub.AgentHubBase
                         "Received from agent {AgentId}: type={Type}, payload={Payload}",
                         message.AgentId, message.Type, message.Payload);
 
+                    if (message.Type == "validate_sql_result" && registeredPath != null)
+                    {
+                        TryRouteCommandResponse(registeredPath, message.Payload);
+                        continue;
+                    }
+
                     var response = new ServerMessage
                     {
                         Type = "ack",
@@ -94,5 +101,25 @@ public class AgentHubService : AgentHub.AgentHubBase
         }
 
         _logger.LogInformation("Agent disconnected from {Peer}", peer);
+    }
+
+    private void TryRouteCommandResponse(string agentPath, string payload)
+    {
+        try
+        {
+            using var doc = JsonDocument.Parse(payload);
+            var correlationId = doc.RootElement.GetProperty("correlationId").GetString();
+            if (string.IsNullOrEmpty(correlationId))
+                return;
+
+            if (_registry.TryGetConnection(agentPath, out var conn) && conn != null)
+            {
+                conn.TryCompleteCommand(correlationId, payload);
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to route command response from agent at {Path}", agentPath);
+        }
     }
 }
