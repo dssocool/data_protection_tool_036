@@ -3,7 +3,7 @@ import MenuBar from "./components/MenuBar";
 import SqlServerConnectionModal from "./components/SqlServerConnectionModal";
 import type { SqlServerConnectionData, ValidateResult } from "./components/SqlServerConnectionModal";
 import ConnectionsPanel from "./components/ConnectionsPanel";
-import type { SavedConnection } from "./components/ConnectionsPanel";
+import type { SavedConnection, TableInfo } from "./components/ConnectionsPanel";
 import "./App.css";
 
 function getAgentPath(): string | null {
@@ -16,6 +16,8 @@ function getAgentPath(): string | null {
 export default function App() {
   const [showSqlModal, setShowSqlModal] = useState(false);
   const [connections, setConnections] = useState<SavedConnection[]>([]);
+  const [connectionTables, setConnectionTables] = useState<Record<string, TableInfo[]>>({});
+  const [loadingTables, setLoadingTables] = useState<Set<string>>(new Set());
 
   const fetchConnections = useCallback(async () => {
     const agentPath = getAgentPath();
@@ -61,6 +63,38 @@ export default function App() {
     fetchConnections();
   }
 
+  async function handleExpandConnection(rowKey: string) {
+    const agentPath = getAgentPath();
+    if (!agentPath) return;
+
+    setLoadingTables((prev) => new Set(prev).add(rowKey));
+
+    try {
+      const res = await fetch(`/api/agents/${agentPath}/list-tables`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ rowKey }),
+      });
+
+      if (res.ok) {
+        const result = await res.json();
+        if (result.success && result.tables) {
+          setConnectionTables((prev) => ({ ...prev, [rowKey]: result.tables }));
+        } else {
+          setConnectionTables((prev) => ({ ...prev, [rowKey]: [] }));
+        }
+      }
+    } catch {
+      setConnectionTables((prev) => ({ ...prev, [rowKey]: [] }));
+    } finally {
+      setLoadingTables((prev) => {
+        const next = new Set(prev);
+        next.delete(rowKey);
+        return next;
+      });
+    }
+  }
+
   async function handleValidate(data: SqlServerConnectionData): Promise<ValidateResult> {
     const agentPath = getAgentPath();
     if (!agentPath) {
@@ -93,7 +127,12 @@ export default function App() {
         onViewFlows={handleViewFlows}
       />
       <main className="app-content">
-        <ConnectionsPanel connections={connections} />
+        <ConnectionsPanel
+          connections={connections}
+          connectionTables={connectionTables}
+          loadingTables={loadingTables}
+          onExpandConnection={handleExpandConnection}
+        />
       </main>
       {showSqlModal && (
         <SqlServerConnectionModal

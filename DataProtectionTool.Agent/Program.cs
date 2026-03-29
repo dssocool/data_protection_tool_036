@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.IdentityModel.Tokens.Jwt;
 using System.Net;
@@ -51,6 +52,8 @@ var headers = new Metadata
     { SharedSecret.TidMetadataKey, tid }
 };
 
+var connectionManager = new SqlConnectionManager();
+
 using var cts = new CancellationTokenSource();
 Console.CancelKeyPress += (_, e) =>
 {
@@ -95,6 +98,20 @@ while (!cts.Token.IsCancellationRequested)
             }
         }
 
+        if (await call.ResponseStream.MoveNext(cts.Token))
+        {
+            var response = call.ResponseStream.Current;
+            if (response.Type == "connections_list")
+            {
+                connectionManager.LoadConnectionDetails(response.Payload);
+                Console.WriteLine("[Agent] Loaded connection details from ControlCenter.");
+            }
+            else
+            {
+                Console.WriteLine($"[Server] type={response.Type}, payload={response.Payload}");
+            }
+        }
+
         var receiveTask = Task.Run(async () =>
         {
             while (await call.ResponseStream.MoveNext(cts.Token))
@@ -105,6 +122,14 @@ while (!cts.Token.IsCancellationRequested)
                 if (response.Type == "validate_sql")
                 {
                     _ = HandleValidateSqlAsync(call, agentId, oid, tid, response.Payload);
+                }
+                else if (response.Type == "list_tables")
+                {
+                    _ = HandleListTablesAsync(call, agentId, oid, tid, response.Payload, connectionManager);
+                }
+                else if (response.Type == "connection_details_result")
+                {
+                    connectionManager.HandleConnectionDetailsResponse(response.Payload);
                 }
             }
         });
@@ -161,6 +186,7 @@ while (!cts.Token.IsCancellationRequested)
     }
 }
 
+connectionManager.Dispose();
 Console.WriteLine("Agent disconnected.");
 
 static async Task HandleValidateSqlAsync(
@@ -261,6 +287,92 @@ static async Task HandleValidateSqlAsync(
     }
 }
 
+static async Task HandleListTablesAsync(
+    AsyncDuplexStreamingCall<AgentMessage, ServerMessage> call,
+    string agentId, string oid, string tid, string payload,
+    SqlConnectionManager connManager)
+{
+    string correlationId = "";
+    try
+    {
+        using var envelope = JsonDocument.Parse(payload);
+        correlationId = envelope.RootElement.GetProperty("correlationId").GetString() ?? "";
+        var dataJson = envelope.RootElement.GetProperty("data").GetString() ?? "{}";
+
+        using var paramsDoc = JsonDocument.Parse(dataJson);
+        var rowKey = paramsDoc.RootElement.GetProperty("rowKey").GetString() ?? "";
+
+        Console.WriteLine($"[Agent] Listing tables for connection {rowKey}...");
+
+        var tables = await connManager.ExecuteWithRetryAsync(rowKey, call, agentId, oid, tid,
+            async (sqlConn) =>
+            {
+                var result = new List<object>();
+                await using var cmd = sqlConn.CreateCommand();
+                cmd.CommandText = @"SELECT TABLE_SCHEMA, TABLE_NAME 
+                    FROM INFORMATION_SCHEMA.TABLES 
+                    WHERE TABLE_TYPE = 'BASE TABLE' 
+                    ORDER BY TABLE_SCHEMA, TABLE_NAME";
+
+                await using var reader = await cmd.ExecuteReaderAsync();
+                while (await reader.ReadAsync())
+                {
+                    result.Add(new
+                    {
+                        schema = reader.GetString(0),
+                        name = reader.GetString(1)
+                    });
+                }
+                return result;
+            });
+
+        var resultPayload = JsonSerializer.Serialize(new
+        {
+            correlationId,
+            success = true,
+            tables
+        });
+
+        await call.RequestStream.WriteAsync(new AgentMessage
+        {
+            AgentId = agentId,
+            Type = "list_tables_result",
+            Payload = resultPayload,
+            Oid = oid,
+            Tid = tid
+        });
+
+        Console.WriteLine($"[Agent] Listed {tables.Count} tables for connection {rowKey}.");
+    }
+    catch (Exception ex)
+    {
+        Console.Error.WriteLine($"[Agent] List tables failed: {ex.Message}");
+
+        var resultPayload = JsonSerializer.Serialize(new
+        {
+            correlationId,
+            success = false,
+            message = $"List tables failed: {ex.Message}"
+        });
+
+        try
+        {
+            await call.RequestStream.WriteAsync(new AgentMessage
+            {
+                AgentId = agentId,
+                Type = "list_tables_result",
+                Payload = resultPayload,
+                Oid = oid,
+                Tid = tid
+            });
+        }
+        catch (Exception writeEx)
+        {
+            Console.Error.WriteLine($"[Agent] Failed to send error result: {writeEx.Message}");
+        }
+    }
+}
+
 static string GetLocalIpAddress()
 {
     try
@@ -278,4 +390,226 @@ static string GetLocalIpAddress()
     var host = Dns.GetHostEntry(Dns.GetHostName());
     var ipv4 = host.AddressList.FirstOrDefault(a => a.AddressFamily == AddressFamily.InterNetwork);
     return ipv4?.ToString() ?? "127.0.0.1";
+}
+
+class ConnectionDetails
+{
+    public string RowKey { get; set; } = "";
+    public string ServerName { get; set; } = "";
+    public string Authentication { get; set; } = "";
+    public string UserName { get; set; } = "";
+    public string Password { get; set; } = "";
+    public string DatabaseName { get; set; } = "";
+    public string Encrypt { get; set; } = "";
+    public bool TrustServerCertificate { get; set; }
+}
+
+class SqlConnectionManager : IDisposable
+{
+    private readonly ConcurrentDictionary<string, ConnectionDetails> _details = new();
+    private readonly ConcurrentDictionary<string, SqlConnection> _connections = new();
+    private readonly ConcurrentDictionary<string, TaskCompletionSource<ConnectionDetails>> _pendingDetailRequests = new();
+    private readonly SemaphoreSlim _lock = new(1, 1);
+
+    public void LoadConnectionDetails(string connectionsListJson)
+    {
+        try
+        {
+            using var doc = JsonDocument.Parse(connectionsListJson);
+            foreach (var el in doc.RootElement.EnumerateArray())
+            {
+                var details = ParseConnectionDetails(el);
+                if (!string.IsNullOrEmpty(details.RowKey))
+                {
+                    _details[details.RowKey] = details;
+                    Console.WriteLine($"[ConnMgr] Stored details for {details.RowKey} ({details.ServerName})");
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"[ConnMgr] Failed to load connection details: {ex.Message}");
+        }
+    }
+
+    public void HandleConnectionDetailsResponse(string payload)
+    {
+        try
+        {
+            using var doc = JsonDocument.Parse(payload);
+            var correlationId = doc.RootElement.TryGetProperty("correlationId", out var cidEl)
+                ? cidEl.GetString() ?? "" : "";
+            var success = doc.RootElement.TryGetProperty("success", out var sEl) && sEl.GetBoolean();
+
+            if (!string.IsNullOrEmpty(correlationId) &&
+                _pendingDetailRequests.TryRemove(correlationId, out var tcs))
+            {
+                if (success)
+                {
+                    var details = ParseConnectionDetails(doc.RootElement);
+                    _details[details.RowKey] = details;
+                    tcs.TrySetResult(details);
+                }
+                else
+                {
+                    var message = doc.RootElement.TryGetProperty("message", out var msgEl)
+                        ? msgEl.GetString() ?? "Unknown error" : "Unknown error";
+                    tcs.TrySetException(new InvalidOperationException(message));
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"[ConnMgr] Failed to handle connection details response: {ex.Message}");
+        }
+    }
+
+    public async Task<SqlConnection> GetOrCreateConnectionAsync(string rowKey)
+    {
+        if (_connections.TryGetValue(rowKey, out var existing) &&
+            existing.State == System.Data.ConnectionState.Open)
+        {
+            return existing;
+        }
+
+        if (!_details.TryGetValue(rowKey, out var details))
+            throw new InvalidOperationException($"No connection details found for {rowKey}");
+
+        var conn = BuildSqlConnection(details);
+        await conn.OpenAsync();
+
+        if (_connections.TryRemove(rowKey, out var old))
+        {
+            try { await old.DisposeAsync(); } catch { }
+        }
+
+        _connections[rowKey] = conn;
+        Console.WriteLine($"[ConnMgr] Opened SQL connection for {rowKey} ({details.ServerName})");
+        return conn;
+    }
+
+    public async Task<T> ExecuteWithRetryAsync<T>(
+        string rowKey,
+        AsyncDuplexStreamingCall<AgentMessage, ServerMessage> call,
+        string agentId, string oid, string tid,
+        Func<SqlConnection, Task<T>> operation)
+    {
+        try
+        {
+            var conn = await GetOrCreateConnectionAsync(rowKey);
+            return await operation(conn);
+        }
+        catch (SqlException ex)
+        {
+            Console.WriteLine($"[ConnMgr] SQL error for {rowKey}, attempting reconnect: {ex.Message}");
+
+            EvictConnection(rowKey);
+
+            try
+            {
+                await RefreshConnectionDetailsAsync(rowKey, call, agentId, oid, tid);
+            }
+            catch (Exception refetchEx)
+            {
+                Console.Error.WriteLine($"[ConnMgr] Failed to re-fetch details for {rowKey}: {refetchEx.Message}");
+            }
+
+            var conn = await GetOrCreateConnectionAsync(rowKey);
+            return await operation(conn);
+        }
+    }
+
+    private async Task RefreshConnectionDetailsAsync(
+        string rowKey,
+        AsyncDuplexStreamingCall<AgentMessage, ServerMessage> call,
+        string agentId, string oid, string tid)
+    {
+        var correlationId = Guid.NewGuid().ToString("N");
+        var tcs = new TaskCompletionSource<ConnectionDetails>(TaskCreationOptions.RunContinuationsAsynchronously);
+        _pendingDetailRequests[correlationId] = tcs;
+
+        try
+        {
+            var requestPayload = JsonSerializer.Serialize(new { correlationId, rowKey });
+            await call.RequestStream.WriteAsync(new AgentMessage
+            {
+                AgentId = agentId,
+                Type = "get_connection_details",
+                Payload = requestPayload,
+                Oid = oid,
+                Tid = tid
+            });
+
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+            await using var reg = timeout.Token.Register(() =>
+                tcs.TrySetException(new TimeoutException("Timed out waiting for connection details")));
+
+            await tcs.Task;
+            Console.WriteLine($"[ConnMgr] Refreshed connection details for {rowKey}");
+        }
+        finally
+        {
+            _pendingDetailRequests.TryRemove(correlationId, out _);
+        }
+    }
+
+    private void EvictConnection(string rowKey)
+    {
+        if (_connections.TryRemove(rowKey, out var old))
+        {
+            try { old.Dispose(); } catch { }
+        }
+    }
+
+    private static SqlConnection BuildSqlConnection(ConnectionDetails details)
+    {
+        var csb = new SqlConnectionStringBuilder
+        {
+            DataSource = details.ServerName,
+            Encrypt = details.Encrypt == "Mandatory" ? SqlConnectionEncryptOption.Mandatory
+                    : details.Encrypt == "Strict" ? SqlConnectionEncryptOption.Strict
+                    : SqlConnectionEncryptOption.Optional,
+            TrustServerCertificate = details.TrustServerCertificate,
+        };
+
+        if (!string.IsNullOrEmpty(details.DatabaseName))
+            csb.InitialCatalog = details.DatabaseName;
+
+        if (details.Authentication == "Microsoft Entra Integrated")
+        {
+            csb.Authentication = SqlAuthenticationMethod.ActiveDirectoryIntegrated;
+        }
+        else
+        {
+            csb.UserID = details.UserName;
+            csb.Password = details.Password;
+        }
+
+        return new SqlConnection(csb.ConnectionString);
+    }
+
+    private static ConnectionDetails ParseConnectionDetails(JsonElement el)
+    {
+        return new ConnectionDetails
+        {
+            RowKey = el.TryGetProperty("rowKey", out var rk) ? rk.GetString() ?? "" : "",
+            ServerName = el.TryGetProperty("serverName", out var sn) ? sn.GetString() ?? "" : "",
+            Authentication = el.TryGetProperty("authentication", out var au) ? au.GetString() ?? "" : "",
+            UserName = el.TryGetProperty("userName", out var un) ? un.GetString() ?? "" : "",
+            Password = el.TryGetProperty("password", out var pw) ? pw.GetString() ?? "" : "",
+            DatabaseName = el.TryGetProperty("databaseName", out var db) ? db.GetString() ?? "" : "",
+            Encrypt = el.TryGetProperty("encrypt", out var en) ? en.GetString() ?? "" : "",
+            TrustServerCertificate = el.TryGetProperty("trustServerCertificate", out var tsc) && tsc.GetBoolean(),
+        };
+    }
+
+    public void Dispose()
+    {
+        foreach (var kvp in _connections)
+        {
+            try { kvp.Value.Dispose(); } catch { }
+        }
+        _connections.Clear();
+        _lock.Dispose();
+    }
 }

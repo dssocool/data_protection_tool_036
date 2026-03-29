@@ -128,4 +128,18 @@ public class ClientTableService
 
         return connections;
     }
+
+    public async Task<ConnectionEntity?> GetConnectionByRowKeyAsync(string partitionKey, string rowKey)
+    {
+        EnsureTableExists();
+        try
+        {
+            var response = await _tableClient.GetEntityAsync<ConnectionEntity>(partitionKey, rowKey);
+            return response.Value;
+        }
+        catch (Azure.RequestFailedException ex) when (ex.Status == 404)
+        {
+            return null;
+        }
+    }
 }

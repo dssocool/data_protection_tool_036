@@ -119,6 +119,30 @@ app.MapPost("/api/agents/{path}/save-connection", async (string path, HttpReques
     }
 });
 
+app.MapPost("/api/agents/{path}/list-tables", async (string path, HttpRequest request, AgentRegistry registry) =>
+{
+    if (!registry.TryGetConnection(path, out var connection) || connection is null)
+        return Results.NotFound(new { error = "Agent not found or not connected." });
+
+    string body;
+    using (var reader = new StreamReader(request.Body))
+        body = await reader.ReadToEndAsync();
+
+    try
+    {
+        var result = await connection.SendCommandAsync("list_tables", body, TimeSpan.FromSeconds(30));
+        return Results.Content(result, "application/json");
+    }
+    catch (TimeoutException)
+    {
+        return Results.Ok(new { success = false, message = "Agent did not respond within 30 seconds." });
+    }
+    catch (Exception ex)
+    {
+        return Results.Ok(new { success = false, message = $"List tables error: {ex.Message}" });
+    }
+});
+
 app.MapGet("/api/agents/{path}/connections", async (string path, AgentRegistry registry, ClientTableService clientTableService) =>
 {
     if (!registry.TryGet(path, out var info) || info is null)

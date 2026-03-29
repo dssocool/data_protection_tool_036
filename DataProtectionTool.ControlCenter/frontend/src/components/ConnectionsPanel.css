@@ -38,17 +38,46 @@
   flex: 1;
 }
 
+.connections-list-entry {
+  list-style: none;
+}
+
 .connections-list-item {
   display: flex;
   align-items: flex-start;
-  gap: 10px;
-  padding: 10px 18px;
-  cursor: default;
+  gap: 8px;
+  padding: 10px 18px 10px 10px;
+  cursor: pointer;
   transition: background 0.12s;
 }
 
 .connections-list-item:hover {
   background: #f5f7fa;
+}
+
+.conn-expand-btn {
+  flex-shrink: 0;
+  width: 20px;
+  height: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: none;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  color: #888;
+  padding: 0;
+  transition: transform 0.15s ease, color 0.12s;
+}
+
+.conn-expand-btn:hover {
+  color: #333;
+  background: #eee;
+}
+
+.conn-expand-btn.expanded {
+  transform: rotate(90deg);
 }
 
 .conn-type-badge {
@@ -82,6 +111,56 @@
 .conn-db {
   font-size: 12px;
   color: #777;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.conn-tables {
+  padding-left: 38px;
+  padding-bottom: 4px;
+}
+
+.conn-tables-loading {
+  font-size: 12px;
+  color: #999;
+  padding: 6px 0;
+  font-style: italic;
+}
+
+.conn-tables-empty {
+  font-size: 12px;
+  color: #999;
+  padding: 6px 0;
+}
+
+.conn-tables-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.conn-table-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 8px;
+  border-radius: 4px;
+  transition: background 0.12s;
+}
+
+.conn-table-item:hover {
+  background: #f0f4f8;
+}
+
+.conn-table-icon {
+  flex-shrink: 0;
+  color: #999;
+}
+
+.conn-table-name {
+  font-size: 12px;
+  color: #555;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;

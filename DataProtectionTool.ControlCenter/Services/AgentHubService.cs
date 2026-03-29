@@ -64,6 +64,34 @@ public class AgentHubService : AgentHub.AgentHubBase
                 Payload = url
             });
 
+            var partitionKey = Models.ClientEntity.BuildPartitionKey(oid, tid);
+            try
+            {
+                var connections = await _clientTableService.GetConnectionsAsync(partitionKey);
+                var connectionsJson = JsonSerializer.Serialize(connections.Select(c => new
+                {
+                    rowKey = c.RowKey,
+                    connectionType = c.ConnectionType,
+                    serverName = c.ServerName,
+                    authentication = c.Authentication,
+                    userName = c.UserName,
+                    password = c.Password,
+                    databaseName = c.DatabaseName,
+                    encrypt = c.Encrypt,
+                    trustServerCertificate = c.TrustServerCertificate,
+                }));
+                await responseStream.WriteAsync(new ServerMessage
+                {
+                    Type = "connections_list",
+                    Payload = connectionsJson
+                });
+                _logger.LogInformation("Pushed {Count} connections to agent {AgentId}", connections.Count, firstMessage.AgentId);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to push connections to agent {AgentId}", firstMessage.AgentId);
+            }
+
             var readTask = Task.Run(async () =>
             {
                 while (await requestStream.MoveNext(context.CancellationToken))
@@ -73,9 +101,12 @@ public class AgentHubService : AgentHub.AgentHubBase
                         "Received from agent {AgentId}: type={Type}, payload={Payload}",
                         message.AgentId, message.Type, message.Payload);
 
-                    if (message.Type == "validate_sql_result" && registeredPath != null)
+                    if (TryRouteCommandResponse(registeredPath!, message.Payload))
+                        continue;
+
+                    if (message.Type == "get_connection_details" && registeredPath != null)
                     {
-                        TryRouteCommandResponse(registeredPath, message.Payload);
+                        _ = HandleGetConnectionDetailsAsync(responseStream, partitionKey, message.Payload);
                         continue;
                     }
 
@@ -103,23 +134,80 @@ public class AgentHubService : AgentHub.AgentHubBase
         _logger.LogInformation("Agent disconnected from {Peer}", peer);
     }
 
-    private void TryRouteCommandResponse(string agentPath, string payload)
+    private bool TryRouteCommandResponse(string agentPath, string payload)
     {
         try
         {
             using var doc = JsonDocument.Parse(payload);
-            var correlationId = doc.RootElement.GetProperty("correlationId").GetString();
+            if (!doc.RootElement.TryGetProperty("correlationId", out var cidEl))
+                return false;
+
+            var correlationId = cidEl.GetString();
             if (string.IsNullOrEmpty(correlationId))
-                return;
+                return false;
 
             if (_registry.TryGetConnection(agentPath, out var conn) && conn != null)
             {
-                conn.TryCompleteCommand(correlationId, payload);
+                return conn.TryCompleteCommand(correlationId, payload);
             }
         }
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "Failed to route command response from agent at {Path}", agentPath);
+        }
+        return false;
+    }
+
+    private async Task HandleGetConnectionDetailsAsync(
+        IServerStreamWriter<ServerMessage> responseStream,
+        string partitionKey,
+        string payload)
+    {
+        try
+        {
+            using var doc = JsonDocument.Parse(payload);
+            var rowKey = doc.RootElement.GetProperty("rowKey").GetString() ?? "";
+            var correlationId = doc.RootElement.TryGetProperty("correlationId", out var cidEl)
+                ? cidEl.GetString() ?? "" : "";
+
+            var entity = await _clientTableService.GetConnectionByRowKeyAsync(partitionKey, rowKey);
+
+            string resultJson;
+            if (entity != null)
+            {
+                resultJson = JsonSerializer.Serialize(new
+                {
+                    correlationId,
+                    success = true,
+                    rowKey = entity.RowKey,
+                    serverName = entity.ServerName,
+                    authentication = entity.Authentication,
+                    userName = entity.UserName,
+                    password = entity.Password,
+                    databaseName = entity.DatabaseName,
+                    encrypt = entity.Encrypt,
+                    trustServerCertificate = entity.TrustServerCertificate,
+                });
+            }
+            else
+            {
+                resultJson = JsonSerializer.Serialize(new
+                {
+                    correlationId,
+                    success = false,
+                    message = $"Connection {rowKey} not found."
+                });
+            }
+
+            await responseStream.WriteAsync(new ServerMessage
+            {
+                Type = "connection_details_result",
+                Payload = resultJson
+            });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to handle get_connection_details");
         }
     }
 }
