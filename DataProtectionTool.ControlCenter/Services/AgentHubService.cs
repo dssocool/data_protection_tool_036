@@ -6,10 +6,12 @@ namespace DataProtectionTool.ControlCenter.Services;
 public class AgentHubService : AgentHub.AgentHubBase
 {
     private readonly ILogger<AgentHubService> _logger;
+    private readonly AgentRegistry _registry;
 
-    public AgentHubService(ILogger<AgentHubService> logger)
+    public AgentHubService(ILogger<AgentHubService> logger, AgentRegistry registry)
     {
         _logger = logger;
+        _registry = registry;
     }
 
     public override async Task Connect(
@@ -20,30 +22,68 @@ public class AgentHubService : AgentHub.AgentHubBase
         var peer = context.Peer;
         _logger.LogInformation("Agent connected from {Peer}", peer);
 
-        var readTask = Task.Run(async () =>
-        {
-            await foreach (var message in requestStream.ReadAllAsync(context.CancellationToken))
-            {
-                _logger.LogInformation(
-                    "Received from agent {AgentId}: type={Type}, payload={Payload}",
-                    message.AgentId, message.Type, message.Payload);
-
-                var response = new ServerMessage
-                {
-                    Type = "ack",
-                    Payload = $"Received {message.Type} from {message.AgentId}"
-                };
-                await responseStream.WriteAsync(response);
-            }
-        });
+        string? registeredPath = null;
 
         try
         {
+            if (!await requestStream.MoveNext(context.CancellationToken))
+            {
+                _logger.LogWarning("Agent from {Peer} disconnected without sending any messages", peer);
+                return;
+            }
+
+            var firstMessage = requestStream.Current;
+
+            var oid = firstMessage.Oid;
+            var tid = firstMessage.Tid;
+
+            if (string.IsNullOrEmpty(oid))
+                oid = context.RequestHeaders.GetValue(SharedSecret.OidMetadataKey) ?? "";
+            if (string.IsNullOrEmpty(tid))
+                tid = context.RequestHeaders.GetValue(SharedSecret.TidMetadataKey) ?? "";
+
+            var agentInfo = new AgentInfo(oid, tid, firstMessage.AgentId, DateTime.UtcNow);
+            registeredPath = _registry.Register(agentInfo);
+
+            var url = $"http://localhost:5000/agents/{registeredPath}";
+            _logger.LogInformation(
+                "Agent {AgentId} registered — oid={Oid}, tid={Tid}, url={Url}",
+                firstMessage.AgentId, oid, tid, url);
+
+            await responseStream.WriteAsync(new ServerMessage
+            {
+                Type = "registration_url",
+                Payload = url
+            });
+
+            var readTask = Task.Run(async () =>
+            {
+                while (await requestStream.MoveNext(context.CancellationToken))
+                {
+                    var message = requestStream.Current;
+                    _logger.LogInformation(
+                        "Received from agent {AgentId}: type={Type}, payload={Payload}",
+                        message.AgentId, message.Type, message.Payload);
+
+                    var response = new ServerMessage
+                    {
+                        Type = "ack",
+                        Payload = $"Received {message.Type} from {message.AgentId}"
+                    };
+                    await responseStream.WriteAsync(response);
+                }
+            });
+
             await readTask;
         }
         catch (OperationCanceledException)
         {
             // Client disconnected
+        }
+        finally
+        {
+            if (registeredPath != null)
+                _registry.Remove(registeredPath);
         }
 
         _logger.LogInformation("Agent disconnected from {Peer}", peer);

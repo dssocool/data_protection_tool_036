@@ -8,6 +8,8 @@ message AgentMessage {
   string agent_id = 1;
   string type = 2;
   string payload = 3;
+  string oid = 4;
+  string tid = 5;
 }
 
 message ServerMessage {

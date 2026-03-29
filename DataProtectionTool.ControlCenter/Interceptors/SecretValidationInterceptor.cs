@@ -60,5 +60,12 @@ public class SecretValidationInterceptor : Interceptor
             _logger.LogWarning("Rejected gRPC call from {Peer} — invalid or missing shared secret", context.Peer);
             throw new RpcException(new Status(StatusCode.Unauthenticated, "Invalid shared secret"));
         }
+
+        var oid = context.RequestHeaders.GetValue(SharedSecret.OidMetadataKey);
+        var tid = context.RequestHeaders.GetValue(SharedSecret.TidMetadataKey);
+        if (!string.IsNullOrEmpty(oid) || !string.IsNullOrEmpty(tid))
+        {
+            _logger.LogInformation("Agent identity from {Peer} — oid={Oid}, tid={Tid}", context.Peer, oid, tid);
+        }
     }
 }
