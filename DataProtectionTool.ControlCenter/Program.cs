@@ -1,3 +1,4 @@
+using Azure.Data.Tables;
 using Microsoft.AspNetCore.Server.Kestrel.Core;
 using DataProtectionTool.ControlCenter.Interceptors;
 using DataProtectionTool.ControlCenter.Services;
@@ -6,7 +7,7 @@ var builder = WebApplication.CreateBuilder(args);
 
 builder.WebHost.ConfigureKestrel(options =>
 {
-    options.ListenAnyIP(5000, listenOptions =>
+    options.ListenAnyIP(6000, listenOptions =>
     {
         listenOptions.Protocols = HttpProtocols.Http1AndHttp2;
     });
@@ -18,6 +19,11 @@ builder.Services.AddGrpc(options =>
 });
 
 builder.Services.AddSingleton<AgentRegistry>();
+
+var tableConnectionString = builder.Configuration.GetSection("AzureTableStorage")["ConnectionString"]
+    ?? throw new InvalidOperationException("AzureTableStorage:ConnectionString is not configured.");
+builder.Services.AddSingleton(new TableServiceClient(tableConnectionString));
+builder.Services.AddSingleton<ClientTableService>();
 
 var app = builder.Build();
 

@@ -7,11 +7,16 @@ public class AgentHubService : AgentHub.AgentHubBase
 {
     private readonly ILogger<AgentHubService> _logger;
     private readonly AgentRegistry _registry;
+    private readonly ClientTableService _clientTableService;
 
-    public AgentHubService(ILogger<AgentHubService> logger, AgentRegistry registry)
+    public AgentHubService(
+        ILogger<AgentHubService> logger,
+        AgentRegistry registry,
+        ClientTableService clientTableService)
     {
         _logger = logger;
         _registry = registry;
+        _clientTableService = clientTableService;
     }
 
     public override async Task Connect(
@@ -45,7 +50,9 @@ public class AgentHubService : AgentHub.AgentHubBase
             var agentInfo = new AgentInfo(oid, tid, firstMessage.AgentId, DateTime.UtcNow);
             registeredPath = _registry.Register(agentInfo);
 
-            var url = $"http://localhost:5000/agents/{registeredPath}";
+            await _clientTableService.CreateOrUpdateClientAsync(oid, tid, firstMessage.AgentId);
+
+            var url = $"http://localhost:6000/agents/{registeredPath}";
             _logger.LogInformation(
                 "Agent {AgentId} registered — oid={Oid}, tid={Tid}, url={Url}",
                 firstMessage.AgentId, oid, tid, url);

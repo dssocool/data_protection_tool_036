@@ -2,13 +2,32 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+AZURITE_DATA="/tmp/azurite-data-protection-tool"
 
 echo "========================================="
 echo " Data Protection Tool - Dev Start All"
 echo "========================================="
 echo ""
 
-echo "[1/2] Starting ControlCenter (gRPC server on port 5000)..."
+# --- Azurite (Azure Storage Emulator) ---
+echo "[1/3] Starting Azurite (Azure Storage Emulator)..."
+
+if ! command -v azurite &>/dev/null; then
+    echo "      Azurite not found. Installing via npm..."
+    npm install -g azurite
+fi
+
+mkdir -p "$AZURITE_DATA"
+azurite --silent --location "$AZURITE_DATA" &
+AZURITE_PID=$!
+echo "      Azurite PID: $AZURITE_PID"
+
+echo ""
+echo "Waiting 2 seconds for Azurite to initialize..."
+sleep 2
+
+# --- Control Center ---
+echo "[2/3] Starting ControlCenter (gRPC server on port 6000)..."
 dotnet run --project "$SCRIPT_DIR/DataProtectionTool.ControlCenter/DataProtectionTool.ControlCenter.csproj" &
 CC_PID=$!
 echo "      ControlCenter PID: $CC_PID"
@@ -17,7 +36,8 @@ echo ""
 echo "Waiting 5 seconds for ControlCenter to initialize..."
 sleep 5
 
-echo "[2/2] Starting Agent (gRPC client) in test mode..."
+# --- Agent ---
+echo "[3/3] Starting Agent (gRPC client) in test mode..."
 dotnet run --project "$SCRIPT_DIR/DataProtectionTool.Agent/DataProtectionTool.Agent.csproj" -- test &
 AGENT_PID=$!
 echo "      Agent PID: $AGENT_PID"
@@ -25,6 +45,7 @@ echo "      Agent PID: $AGENT_PID"
 echo ""
 echo "========================================="
 echo " All services started"
+echo "   Azurite PID:       $AZURITE_PID"
 echo "   ControlCenter PID: $CC_PID"
 echo "   Agent PID:         $AGENT_PID"
 echo "========================================="
@@ -36,8 +57,10 @@ cleanup() {
     echo "Shutting down..."
     kill "$AGENT_PID" 2>/dev/null || true
     kill "$CC_PID" 2>/dev/null || true
+    kill "$AZURITE_PID" 2>/dev/null || true
     wait "$AGENT_PID" 2>/dev/null || true
     wait "$CC_PID" 2>/dev/null || true
+    wait "$AZURITE_PID" 2>/dev/null || true
     echo "All services stopped."
 }
 
