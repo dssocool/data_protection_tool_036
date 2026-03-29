@@ -52,7 +52,7 @@ public class AgentHubService : AgentHub.AgentHubBase
 
             await _clientTableService.CreateOrUpdateClientAsync(oid, tid, firstMessage.AgentId);
 
-            var url = $"http://localhost:6000/agents/{registeredPath}";
+            var url = $"http://localhost:8190/agents/{registeredPath}";
             _logger.LogInformation(
                 "Agent {AgentId} registered — oid={Oid}, tid={Tid}, url={Url}",
                 firstMessage.AgentId, oid, tid, url);

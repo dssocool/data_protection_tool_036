@@ -39,7 +39,7 @@ if ! kill -0 "$AZURITE_PID" 2>/dev/null; then
 fi
 
 # --- Control Center ---
-echo "[2/3] Starting ControlCenter (HTTP on port 6000, gRPC on port 6001)..."
+echo "[2/3] Starting ControlCenter (HTTP on port 8190, gRPC on port 8191)..."
 dotnet run --project "$SCRIPT_DIR/DataProtectionTool.ControlCenter/DataProtectionTool.ControlCenter.csproj" &
 CC_PID=$!
 echo "      ControlCenter PID: $CC_PID"
