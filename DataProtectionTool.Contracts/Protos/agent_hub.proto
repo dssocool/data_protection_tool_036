@@ -1,0 +1,20 @@
+syntax = "proto3";
+
+option csharp_namespace = "DataProtectionTool.Contracts";
+
+package dataprotection;
+
+message AgentMessage {
+  string agent_id = 1;
+  string type = 2;
+  string payload = 3;
+}
+
+message ServerMessage {
+  string type = 1;
+  string payload = 2;
+}
+
+service AgentHub {
+  rpc Connect (stream AgentMessage) returns (stream ServerMessage);
+}
