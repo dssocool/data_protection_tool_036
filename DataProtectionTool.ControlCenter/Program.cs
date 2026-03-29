@@ -85,6 +85,9 @@ app.MapGet("/agents/{path}", (string path, AgentRegistry registry, IWebHostEnvir
     if (!registry.TryGet(path, out _))
         return Results.NotFound("Agent not found.");
 
+    if (string.IsNullOrEmpty(env.WebRootPath))
+        return Results.NotFound("Frontend not built. No wwwroot directory found. Run 'npm run build' in frontend/.");
+
     var indexPath = Path.Combine(env.WebRootPath, "index.html");
     if (!File.Exists(indexPath))
         return Results.NotFound("Frontend not built. Run 'npm run build' in frontend/.");

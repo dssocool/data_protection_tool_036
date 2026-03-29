@@ -10,7 +10,7 @@ echo "========================================="
 echo ""
 
 # --- Azurite (Azure Storage Emulator) ---
-echo "[1/4] Starting Azurite (Azure Storage Emulator)..."
+echo "[1/5] Starting Azurite (Azure Storage Emulator)..."
 
 if ! command -v azurite &>/dev/null; then
     echo "      Azurite not found. Installing via npm..."
@@ -38,8 +38,19 @@ if ! kill -0 "$AZURITE_PID" 2>/dev/null; then
     exit 1
 fi
 
+# --- Build Frontend ---
+echo "[2/5] Building Frontend..."
+FRONTEND_DIR="$SCRIPT_DIR/DataProtectionTool.ControlCenter/frontend"
+
+if [ ! -d "$FRONTEND_DIR/node_modules" ]; then
+    echo "      node_modules not found. Running npm install..."
+    npm install --prefix "$FRONTEND_DIR"
+fi
+
+npm run build --prefix "$FRONTEND_DIR"
+
 # --- Control Center ---
-echo "[2/4] Starting ControlCenter (HTTP on port 8190, gRPC on port 8191)..."
+echo "[3/5] Starting ControlCenter (HTTP on port 8190, gRPC on port 8191)..."
 dotnet run --project "$SCRIPT_DIR/DataProtectionTool.ControlCenter/DataProtectionTool.ControlCenter.csproj" &
 CC_PID=$!
 echo "      ControlCenter PID: $CC_PID"
@@ -49,20 +60,14 @@ echo "Waiting 5 seconds for ControlCenter to initialize..."
 sleep 5
 
 # --- Frontend (Vite dev server) ---
-echo "[3/4] Starting Frontend (Vite dev server on port 5173)..."
-FRONTEND_DIR="$SCRIPT_DIR/DataProtectionTool.ControlCenter/frontend"
-
-if [ ! -d "$FRONTEND_DIR/node_modules" ]; then
-    echo "      node_modules not found. Running npm install..."
-    npm install --prefix "$FRONTEND_DIR"
-fi
+echo "[4/5] Starting Frontend (Vite dev server on port 5173)..."
 
 npm run dev --prefix "$FRONTEND_DIR" &
 FRONTEND_PID=$!
 echo "      Frontend PID: $FRONTEND_PID"
 
 # --- Agent ---
-echo "[4/4] Starting Agent (gRPC client) in test mode..."
+echo "[5/5] Starting Agent (gRPC client) in test mode..."
 dotnet run --project "$SCRIPT_DIR/DataProtectionTool.Agent/DataProtectionTool.Agent.csproj" -- test &
 AGENT_PID=$!
 echo "      Agent PID: $AGENT_PID"
