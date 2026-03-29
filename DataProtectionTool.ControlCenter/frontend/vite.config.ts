@@ -8,4 +8,10 @@ export default defineConfig({
     outDir: path.resolve(__dirname, "../wwwroot"),
     emptyOutDir: true,
   },
+  server: {
+    proxy: {
+      "/api": "http://localhost:8190",
+      "/agents": "http://localhost:8190",
+    },
+  },
 });
