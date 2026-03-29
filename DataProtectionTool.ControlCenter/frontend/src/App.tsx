@@ -1,11 +1,39 @@
-import { useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import MenuBar from "./components/MenuBar";
 import SqlServerConnectionModal from "./components/SqlServerConnectionModal";
-import type { SqlServerConnectionData } from "./components/SqlServerConnectionModal";
+import type { SqlServerConnectionData, ValidateResult } from "./components/SqlServerConnectionModal";
+import ConnectionsPanel from "./components/ConnectionsPanel";
+import type { SavedConnection } from "./components/ConnectionsPanel";
 import "./App.css";
+
+function getAgentPath(): string | null {
+  const segments = window.location.pathname.split("/");
+  const agentsIdx = segments.indexOf("agents");
+  if (agentsIdx === -1 || agentsIdx + 1 >= segments.length) return null;
+  return segments[agentsIdx + 1];
+}
 
 export default function App() {
   const [showSqlModal, setShowSqlModal] = useState(false);
+  const [connections, setConnections] = useState<SavedConnection[]>([]);
+
+  const fetchConnections = useCallback(async () => {
+    const agentPath = getAgentPath();
+    if (!agentPath) return;
+    try {
+      const res = await fetch(`/api/agents/${agentPath}/connections`);
+      if (res.ok) {
+        const data = await res.json();
+        setConnections(data);
+      }
+    } catch {
+      // silently ignore fetch errors
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchConnections();
+  }, [fetchConnections]);
 
   function handleSqlServerConnection() {
     setShowSqlModal(true);
@@ -19,18 +47,25 @@ export default function App() {
     console.log("View -> Flows");
   }
 
-  function handleSave(data: SqlServerConnectionData) {
-    console.log("Save connection:", data);
+  async function handleSave(data: SqlServerConnectionData) {
+    const agentPath = getAgentPath();
+    if (!agentPath) return;
+
+    await fetch(`/api/agents/${agentPath}/save-connection`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(data),
+    });
+
     setShowSqlModal(false);
+    fetchConnections();
   }
 
-  async function handleValidate(data: SqlServerConnectionData): Promise<string> {
-    const segments = window.location.pathname.split("/");
-    const agentsIdx = segments.indexOf("agents");
-    if (agentsIdx === -1 || agentsIdx + 1 >= segments.length) {
-      return "No agent path found in URL. Open this page via an agent URL.";
+  async function handleValidate(data: SqlServerConnectionData): Promise<ValidateResult> {
+    const agentPath = getAgentPath();
+    if (!agentPath) {
+      return { success: false, message: "No agent path found in URL. Open this page via an agent URL." };
     }
-    const agentPath = segments[agentsIdx + 1];
 
     const res = await fetch(`/api/agents/${agentPath}/validate-sql`, {
       method: "POST",
@@ -40,11 +75,14 @@ export default function App() {
 
     if (!res.ok) {
       const text = await res.text();
-      return `Error: ${text}`;
+      return { success: false, message: `Error: ${text}` };
     }
 
     const result = await res.json();
-    return result.message ?? result.status ?? "Unknown result";
+    return {
+      success: result.success ?? false,
+      message: result.message ?? result.status ?? "Unknown result",
+    };
   }
 
   return (
@@ -55,7 +93,7 @@ export default function App() {
         onViewFlows={handleViewFlows}
       />
       <main className="app-content">
-        <h1>DataProtectionTool Control Center</h1>
+        <ConnectionsPanel connections={connections} />
       </main>
       {showSqlModal && (
         <SqlServerConnectionModal

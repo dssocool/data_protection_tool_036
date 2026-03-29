@@ -80,4 +80,52 @@ public class ClientTableService
             return null;
         }
     }
+
+    public async Task<ConnectionEntity> SaveConnectionAsync(
+        string partitionKey,
+        string serverName,
+        string authentication,
+        string userName,
+        string password,
+        string databaseName,
+        string encrypt,
+        bool trustServerCertificate)
+    {
+        EnsureTableExists();
+        var id = Guid.NewGuid().ToString("N");
+        var entity = new ConnectionEntity
+        {
+            PartitionKey = partitionKey,
+            RowKey = ConnectionEntity.BuildRowKey(id),
+            ServerName = serverName,
+            Authentication = authentication,
+            UserName = userName,
+            Password = password,
+            DatabaseName = databaseName,
+            Encrypt = encrypt,
+            TrustServerCertificate = trustServerCertificate,
+            CreatedAt = DateTime.UtcNow
+        };
+
+        await _tableClient.AddEntityAsync(entity);
+        _logger.LogInformation(
+            "Saved connection — partitionKey={PK}, rowKey={RK}",
+            partitionKey, entity.RowKey);
+        return entity;
+    }
+
+    public async Task<List<ConnectionEntity>> GetConnectionsAsync(string partitionKey)
+    {
+        EnsureTableExists();
+        var connections = new List<ConnectionEntity>();
+
+        await foreach (var entity in _tableClient.QueryAsync<ConnectionEntity>(
+            e => e.PartitionKey == partitionKey && e.RowKey.CompareTo("connection_") >= 0
+                                                && e.RowKey.CompareTo("connection_~") < 0))
+        {
+            connections.Add(entity);
+        }
+
+        return connections;
+    }
 }

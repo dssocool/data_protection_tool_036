@@ -173,6 +173,11 @@
   border-color: #0078d4;
 }
 
-.btn-save:hover {
+.btn-save:hover:not(:disabled) {
   background: #006abc;
+}
+
+.btn-save:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
 }

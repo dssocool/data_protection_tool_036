@@ -1,10 +1,15 @@
 import { useState } from "react";
 import "./SqlServerConnectionModal.css";
 
+export interface ValidateResult {
+  success: boolean;
+  message: string;
+}
+
 interface SqlServerConnectionModalProps {
   onClose: () => void;
   onSave: (data: SqlServerConnectionData) => void;
-  onValidate: (data: SqlServerConnectionData) => Promise<string>;
+  onValidate: (data: SqlServerConnectionData) => Promise<ValidateResult>;
 }
 
 export interface SqlServerConnectionData {
@@ -35,8 +40,13 @@ export default function SqlServerConnectionModal({
   const [trustServerCertificate, setTrustServerCertificate] = useState(true);
   const [status, setStatus] = useState("");
   const [validating, setValidating] = useState(false);
+  const [validated, setValidated] = useState(false);
 
   const credentialsDisabled = authentication === "Microsoft Entra Integrated";
+
+  function invalidate() {
+    setValidated(false);
+  }
 
   function getFormData(): SqlServerConnectionData {
     return {
@@ -51,10 +61,7 @@ export default function SqlServerConnectionModal({
   }
 
   function handleSave() {
-    if (!serverName.trim()) {
-      setStatus("Server Name is required.");
-      return;
-    }
+    if (!validated) return;
     onSave(getFormData());
   }
 
@@ -67,17 +74,19 @@ export default function SqlServerConnectionModal({
     setStatus("Validating...");
     try {
       const result = await onValidate(getFormData());
-      setStatus(result);
+      setStatus(result.message);
+      setValidated(result.success);
     } catch (err) {
       setStatus(err instanceof Error ? err.message : "Validation failed.");
+      setValidated(false);
     } finally {
       setValidating(false);
     }
   }
 
   return (
-    <div className="modal-overlay" onClick={onClose}>
-      <div className="modal-dialog" onClick={(e) => e.stopPropagation()}>
+    <div className="modal-overlay">
+      <div className="modal-dialog">
         <div className="modal-header">
           <h2>SQL Server Connection</h2>
         </div>
@@ -90,7 +99,7 @@ export default function SqlServerConnectionModal({
               type="text"
               placeholder="e.g. localhost\SQLEXPRESS"
               value={serverName}
-              onChange={(e) => setServerName(e.target.value)}
+              onChange={(e) => { setServerName(e.target.value); invalidate(); }}
             />
           </div>
 
@@ -99,7 +108,7 @@ export default function SqlServerConnectionModal({
             <select
               className="form-select"
               value={authentication}
-              onChange={(e) => setAuthentication(e.target.value)}
+              onChange={(e) => { setAuthentication(e.target.value); invalidate(); }}
             >
               {AUTH_OPTIONS.map((opt) => (
                 <option key={opt} value={opt}>
@@ -115,7 +124,7 @@ export default function SqlServerConnectionModal({
               className={`form-input ${credentialsDisabled ? "disabled" : ""}`}
               type="text"
               value={userName}
-              onChange={(e) => setUserName(e.target.value)}
+              onChange={(e) => { setUserName(e.target.value); invalidate(); }}
               disabled={credentialsDisabled}
             />
           </div>
@@ -126,7 +135,7 @@ export default function SqlServerConnectionModal({
               className={`form-input ${credentialsDisabled ? "disabled" : ""}`}
               type="password"
               value={password}
-              onChange={(e) => setPassword(e.target.value)}
+              onChange={(e) => { setPassword(e.target.value); invalidate(); }}
               disabled={credentialsDisabled}
             />
           </div>
@@ -137,7 +146,7 @@ export default function SqlServerConnectionModal({
               className="form-input"
               type="text"
               value={databaseName}
-              onChange={(e) => setDatabaseName(e.target.value)}
+              onChange={(e) => { setDatabaseName(e.target.value); invalidate(); }}
             />
           </div>
 
@@ -146,7 +155,7 @@ export default function SqlServerConnectionModal({
             <select
               className="form-select"
               value={encrypt}
-              onChange={(e) => setEncrypt(e.target.value)}
+              onChange={(e) => { setEncrypt(e.target.value); invalidate(); }}
             >
               {ENCRYPT_OPTIONS.map((opt) => (
                 <option key={opt} value={opt}>
@@ -162,7 +171,7 @@ export default function SqlServerConnectionModal({
               <input
                 type="checkbox"
                 checked={trustServerCertificate}
-                onChange={(e) => setTrustServerCertificate(e.target.checked)}
+                onChange={(e) => { setTrustServerCertificate(e.target.checked); invalidate(); }}
               />
               Trust Server Certificate
             </label>
@@ -191,7 +200,11 @@ export default function SqlServerConnectionModal({
             >
               {validating ? "Validating..." : "Validate"}
             </button>
-            <button className="btn btn-save" onClick={handleSave}>
+            <button
+              className="btn btn-save"
+              onClick={handleSave}
+              disabled={!validated}
+            >
               Save
             </button>
           </div>

@@ -2,6 +2,7 @@ using System.Text.Json;
 using Azure.Data.Tables;
 using Microsoft.AspNetCore.Server.Kestrel.Core;
 using DataProtectionTool.ControlCenter.Interceptors;
+using DataProtectionTool.ControlCenter.Models;
 using DataProtectionTool.ControlCenter.Services;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -78,6 +79,67 @@ app.MapPost("/api/agents/{path}/validate-sql", async (string path, HttpRequest r
     {
         return Results.Ok(new { success = false, message = $"Validation error: {ex.Message}" });
     }
+});
+
+app.MapPost("/api/agents/{path}/save-connection", async (string path, HttpRequest request, AgentRegistry registry, ClientTableService clientTableService) =>
+{
+    if (!registry.TryGet(path, out var info) || info is null)
+        return Results.NotFound(new { error = "Agent not found." });
+
+    string body;
+    using (var reader = new StreamReader(request.Body))
+        body = await reader.ReadToEndAsync();
+
+    try
+    {
+        using var doc = JsonDocument.Parse(body);
+        var root = doc.RootElement;
+
+        var partitionKey = ClientEntity.BuildPartitionKey(info.Oid, info.Tid);
+        var entity = await clientTableService.SaveConnectionAsync(
+            partitionKey,
+            root.TryGetProperty("serverName", out var sn) ? sn.GetString() ?? "" : "",
+            root.TryGetProperty("authentication", out var au) ? au.GetString() ?? "" : "",
+            root.TryGetProperty("userName", out var un) ? un.GetString() ?? "" : "",
+            root.TryGetProperty("password", out var pw) ? pw.GetString() ?? "" : "",
+            root.TryGetProperty("databaseName", out var db) ? db.GetString() ?? "" : "",
+            root.TryGetProperty("encrypt", out var en) ? en.GetString() ?? "" : "",
+            root.TryGetProperty("trustServerCertificate", out var tsc) && tsc.GetBoolean());
+
+        return Results.Ok(new
+        {
+            success = true,
+            rowKey = entity.RowKey,
+            message = "Connection saved."
+        });
+    }
+    catch (Exception ex)
+    {
+        return Results.Ok(new { success = false, message = $"Failed to save: {ex.Message}" });
+    }
+});
+
+app.MapGet("/api/agents/{path}/connections", async (string path, AgentRegistry registry, ClientTableService clientTableService) =>
+{
+    if (!registry.TryGet(path, out var info) || info is null)
+        return Results.NotFound(new { error = "Agent not found." });
+
+    var partitionKey = ClientEntity.BuildPartitionKey(info.Oid, info.Tid);
+    var connections = await clientTableService.GetConnectionsAsync(partitionKey);
+
+    var result = connections.Select(c => new
+    {
+        rowKey = c.RowKey,
+        connectionType = c.ConnectionType,
+        serverName = c.ServerName,
+        authentication = c.Authentication,
+        databaseName = c.DatabaseName,
+        encrypt = c.Encrypt,
+        trustServerCertificate = c.TrustServerCertificate,
+        createdAt = c.CreatedAt.ToString("O")
+    });
+
+    return Results.Ok(result);
 });
 
 app.MapGet("/agents/{path}", (string path, AgentRegistry registry, IWebHostEnvironment env) =>

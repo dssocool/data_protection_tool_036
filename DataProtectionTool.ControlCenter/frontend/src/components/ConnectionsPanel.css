@@ -1,0 +1,88 @@
+.connections-panel {
+  position: absolute;
+  top: 16px;
+  left: 16px;
+  bottom: 16px;
+  width: 260px;
+  background: #fff;
+  border-radius: 8px;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.12), 0 1px 4px rgba(0, 0, 0, 0.08);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  z-index: 10;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+}
+
+.connections-panel-title {
+  margin: 0;
+  padding: 16px 18px 12px;
+  font-size: 15px;
+  font-weight: 600;
+  color: #333;
+  border-bottom: 1px solid #e8e8e8;
+}
+
+.connections-panel-empty {
+  padding: 18px;
+  margin: 0;
+  color: #999;
+  font-size: 13px;
+}
+
+.connections-list {
+  list-style: none;
+  margin: 0;
+  padding: 6px 0;
+  overflow-y: auto;
+  flex: 1;
+}
+
+.connections-list-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px 18px;
+  cursor: default;
+  transition: background 0.12s;
+}
+
+.connections-list-item:hover {
+  background: #f5f7fa;
+}
+
+.conn-type-badge {
+  flex-shrink: 0;
+  padding: 2px 8px;
+  border-radius: 4px;
+  background: #e8f0fe;
+  color: #0078d4;
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+  margin-top: 1px;
+}
+
+.conn-details {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.conn-server {
+  font-size: 13px;
+  font-weight: 500;
+  color: #333;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.conn-db {
+  font-size: 12px;
+  color: #777;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
