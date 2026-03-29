@@ -34,15 +34,16 @@ Write-Host ""
 # --- [1/5] Azurite ---
 Write-Host "[1/5] Starting Azurite (Azure Storage Emulator)..."
 
-if (-not (Get-Command azurite -ErrorAction SilentlyContinue)) {
+$azuriteCmd = Get-Command azurite -ErrorAction SilentlyContinue
+if (-not $azuriteCmd) {
     Write-Host "      Azurite not found. Installing via npm..."
-    npm install -g azurite
+    & cmd /c "npm install -g azurite"
 }
 
 if (-not (Test-Path $azuriteData)) { New-Item -ItemType Directory -Path $azuriteData | Out-Null }
 
-$azurite = Start-Process -FilePath "azurite" `
-    -ArgumentList "--silent","--location",$azuriteData `
+$azurite = Start-Process -FilePath "cmd.exe" `
+    -ArgumentList "/c","azurite --silent --location `"$azuriteData`"" `
     -NoNewWindow -PassThru
 $processes += $azurite
 Write-Host "      Azurite PID: $($azurite.Id)"
@@ -56,12 +57,12 @@ Write-Host "[2/5] Building Frontend..."
 if (-not (Test-Path (Join-Path $frontendDir "node_modules"))) {
     Write-Host "      node_modules not found. Running npm install..."
     Push-Location $frontendDir
-    npm install
+    & cmd /c "npm install"
     Pop-Location
 }
 
 Push-Location $frontendDir
-npm run build
+& cmd /c "npm run build"
 Pop-Location
 
 # --- [3/5] ControlCenter ---
@@ -79,8 +80,8 @@ Start-Sleep -Seconds 5
 # --- [4/5] Frontend dev server ---
 Write-Host "[4/5] Starting Frontend (Vite dev server on port 5173)..."
 
-$frontend = Start-Process -FilePath "npm" `
-    -ArgumentList "run","dev","--prefix",$frontendDir `
+$frontend = Start-Process -FilePath "cmd.exe" `
+    -ArgumentList "/c","cd /d `"$frontendDir`" && npm run dev" `
     -NoNewWindow -PassThru
 $processes += $frontend
 Write-Host "      Frontend PID: $($frontend.Id)"
@@ -99,7 +100,7 @@ Write-Host "========================================="
 Write-Host " All services started"
 Write-Host "   Azurite PID:       $($azurite.Id)"
 Write-Host "   ControlCenter PID: $($cc.Id)"
-Write-Host "   Frontend PID:     $($frontend.Id)"
+Write-Host "   Frontend PID:      $($frontend.Id)"
 Write-Host "   Agent PID:         $($agent.Id)"
 Write-Host ""
 Write-Host " Frontend (Vite HMR): http://localhost:5173"
@@ -108,7 +109,6 @@ Write-Host ""
 Write-Host "Press Ctrl+C to stop all services."
 
 try {
-    # Keep the script alive, monitoring child processes
     while ($true) {
         $allExited = $true
         foreach ($p in $processes) {
