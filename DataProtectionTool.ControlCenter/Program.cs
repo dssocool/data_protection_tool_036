@@ -271,10 +271,24 @@ app.MapPost("/api/agents/{path}/list-tables", async (string path, HttpRequest re
                     var name = item.TryGetProperty("name", out var nEl) ? nEl.GetString() ?? "" : "";
                     tableList.Add((schema, name));
                 }
-                await clientTableService.SaveDataItemsAsync(partitionKey, connEntity.ServerName, connEntity.DatabaseName, rowKey, tableList);
-                await clientTableService.AppendEventAsync(partitionKey, "list_tables", $"Listed {tableList.Count} tables");
-
                 var tables = tableList.Select(t => new { schema = t.schema, name = t.name }).ToList();
+
+                _ = Task.Run(async () =>
+                {
+                    try
+                    {
+                        await clientTableService.SaveDataItemsAsync(partitionKey, connEntity.ServerName, connEntity.DatabaseName, rowKey, tableList);
+                        await clientTableService.AppendEventAsync(partitionKey, "list_tables", $"Listed {tableList.Count} tables");
+                    }
+                    catch (Exception saveEx)
+                    {
+                        await clientTableService.AppendEventAsync(partitionKey, "list_tables",
+                            $"Failed to load tables from {connEntity.DatabaseName}. Refresh the database to try again.");
+                        await clientTableService.AppendEventAsync(partitionKey, "list_tables",
+                            saveEx.Message, saveEx.ToString());
+                    }
+                });
+
                 return Results.Ok(new { success = true, tables });
             }
         }
