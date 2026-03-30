@@ -626,6 +626,9 @@ app.MapPost("/api/agents/{path}/dry-run", async (string path, HttpRequest reques
         if (string.IsNullOrEmpty(dataEngineConfig.ConnectorId))
             return Results.Ok(new { success = false, message = "Data engine ConnectorId is not configured. Set ConnectorId in dataEngineConfig.json." });
 
+        if (string.IsNullOrEmpty(dataEngineConfig.ProfileSetId))
+            return Results.Ok(new { success = false, message = "Data engine ProfileSetId is not configured. Set ProfileSetId in dataEngineConfig.json." });
+
         // Step 1: Get or create file format
         var existing = await clientTableService.GetTableFormatAsync(partitionKey, rowKey, schema, tableName);
         string fileFormatId;
@@ -665,7 +668,8 @@ app.MapPost("/api/agents/{path}/dry-run", async (string path, HttpRequest reques
         }
 
         // Step 2: Create a file ruleset (new ruleset every dry run)
-        var rulesetName = $"ruleset_{Guid.NewGuid():N}";
+        var dryRunUuid = Guid.NewGuid().ToString("N");
+        var rulesetName = $"ruleset_{dryRunUuid}";
         var rulesetPayload = JsonSerializer.Serialize(new
         {
             engineUrl = dataEngineConfig.EngineUrl,
@@ -718,10 +722,157 @@ app.MapPost("/api/agents/{path}/dry-run", async (string path, HttpRequest reques
             fileMetadataIds.Add(fileMetadataId);
         }
 
-        _ = clientTableService.AppendEventAsync(partitionKey, "dry_run",
-            $"Dry run completed: fileFormatId={fileFormatId}, fileRulesetId={fileRulesetId}");
+        var engineBaseUrl = $"{dataEngineConfig.EngineUrl.TrimEnd('/')}/masking/api/v5.1.44";
 
-        return Results.Ok(new { success = true, fileFormatId, fileRulesetId, fileMetadataIds });
+        async Task<JsonDocument> RelayEngineHttpAsync(string method, string relativeUrl, object? requestBody = null)
+        {
+            var httpPayload = JsonSerializer.Serialize(new
+            {
+                method,
+                url = $"{engineBaseUrl}/{relativeUrl}",
+                headers = new Dictionary<string, string>
+                {
+                    ["accept"] = "application/json",
+                    ["Authorization"] = dataEngineConfig.AuthorizationToken,
+                    ["Content-Type"] = "application/json"
+                },
+                body = requestBody != null ? JsonSerializer.Serialize(requestBody) : null
+            });
+            var result = await connection.SendCommandAsync("http_request", httpPayload, TimeSpan.FromSeconds(120));
+            return JsonDocument.Parse(result);
+        }
+
+        string ExtractBodyField(JsonDocument relayResponse, string fieldName)
+        {
+            if (!relayResponse.RootElement.TryGetProperty("body", out var bodyEl))
+                return "";
+            using var bodyDoc = JsonDocument.Parse(bodyEl.GetString() ?? "{}");
+            return bodyDoc.RootElement.TryGetProperty(fieldName, out var valEl) ? valEl.ToString() : "";
+        }
+
+        // Step 4: Create profile job
+        using var profileJobResp = await RelayEngineHttpAsync("POST", "profile-jobs", new
+        {
+            jobName = $"profile_{dryRunUuid}",
+            profileSetId = int.Parse(dataEngineConfig.ProfileSetId),
+            rulesetId = int.Parse(fileRulesetId)
+        });
+
+        if (!(profileJobResp.RootElement.TryGetProperty("success", out var pjSuccessEl) && pjSuccessEl.GetBoolean()))
+        {
+            var msg = profileJobResp.RootElement.TryGetProperty("message", out var m) ? m.GetString() : "Profile job creation failed.";
+            return Results.Ok(new { success = false, message = msg });
+        }
+
+        var profileJobId = ExtractBodyField(profileJobResp, "profileJobId");
+        if (string.IsNullOrEmpty(profileJobId))
+            return Results.Ok(new { success = false, message = "Profile job creation returned no profileJobId." });
+
+        // Step 5: Create masking job
+        using var maskingJobResp = await RelayEngineHttpAsync("POST", "masking-jobs", new
+        {
+            jobName = $"masking_{dryRunUuid}",
+            rulesetId = int.Parse(fileRulesetId),
+            onTheFlyMasking = false
+        });
+
+        if (!(maskingJobResp.RootElement.TryGetProperty("success", out var mjSuccessEl) && mjSuccessEl.GetBoolean()))
+        {
+            var msg = maskingJobResp.RootElement.TryGetProperty("message", out var m) ? m.GetString() : "Masking job creation failed.";
+            return Results.Ok(new { success = false, message = msg });
+        }
+
+        var maskingJobId = ExtractBodyField(maskingJobResp, "maskingJobId");
+        if (string.IsNullOrEmpty(maskingJobId))
+            return Results.Ok(new { success = false, message = "Masking job creation returned no maskingJobId." });
+
+        // Step 6: Run the profile job
+        using var profileExecResp = await RelayEngineHttpAsync("POST", "executions", new
+        {
+            jobId = int.Parse(profileJobId)
+        });
+
+        if (!(profileExecResp.RootElement.TryGetProperty("success", out var peSuccessEl) && peSuccessEl.GetBoolean()))
+        {
+            var msg = profileExecResp.RootElement.TryGetProperty("message", out var m) ? m.GetString() : "Profile job execution failed to start.";
+            return Results.Ok(new { success = false, message = msg });
+        }
+
+        var profileExecId = ExtractBodyField(profileExecResp, "executionId");
+        if (string.IsNullOrEmpty(profileExecId))
+            return Results.Ok(new { success = false, message = "Profile job execution returned no executionId." });
+
+        // Step 7: Poll profile job status every 2 seconds
+        var profileStatus = "";
+        for (var i = 0; i < 300; i++)
+        {
+            await Task.Delay(2000);
+
+            using var statusResp = await RelayEngineHttpAsync("GET", $"executions/{profileExecId}");
+            if (!(statusResp.RootElement.TryGetProperty("success", out var sSuccessEl) && sSuccessEl.GetBoolean()))
+                continue;
+
+            profileStatus = ExtractBodyField(statusResp, "status");
+            if (profileStatus is "SUCCEEDED" or "WARNING" or "FAILED" or "CANCELLED")
+                break;
+        }
+
+        if (profileStatus is not ("SUCCEEDED" or "WARNING"))
+        {
+            return Results.Ok(new { success = false, message = $"Profile job did not succeed. Final status: {profileStatus}" });
+        }
+
+        // Step 8: Run the masking job
+        using var maskingExecResp = await RelayEngineHttpAsync("POST", "executions", new
+        {
+            jobId = int.Parse(maskingJobId)
+        });
+
+        if (!(maskingExecResp.RootElement.TryGetProperty("success", out var meSuccessEl) && meSuccessEl.GetBoolean()))
+        {
+            var msg = maskingExecResp.RootElement.TryGetProperty("message", out var m) ? m.GetString() : "Masking job execution failed to start.";
+            return Results.Ok(new { success = false, message = msg });
+        }
+
+        var maskingExecId = ExtractBodyField(maskingExecResp, "executionId");
+        if (string.IsNullOrEmpty(maskingExecId))
+            return Results.Ok(new { success = false, message = "Masking job execution returned no executionId." });
+
+        // Step 9: Poll masking job status every 2 seconds
+        var maskingStatus = "";
+        for (var i = 0; i < 300; i++)
+        {
+            await Task.Delay(2000);
+
+            using var statusResp = await RelayEngineHttpAsync("GET", $"executions/{maskingExecId}");
+            if (!(statusResp.RootElement.TryGetProperty("success", out var sSuccessEl) && sSuccessEl.GetBoolean()))
+                continue;
+
+            maskingStatus = ExtractBodyField(statusResp, "status");
+            if (maskingStatus is "SUCCEEDED" or "WARNING" or "FAILED" or "CANCELLED")
+                break;
+        }
+
+        if (maskingStatus is not ("SUCCEEDED" or "WARNING"))
+        {
+            return Results.Ok(new { success = false, message = $"Masking job did not succeed. Final status: {maskingStatus}" });
+        }
+
+        _ = clientTableService.AppendEventAsync(partitionKey, "dry_run",
+            $"Dry run completed: fileFormatId={fileFormatId}, fileRulesetId={fileRulesetId}, " +
+            $"profileJobId={profileJobId} ({profileStatus}), maskingJobId={maskingJobId} ({maskingStatus})");
+
+        return Results.Ok(new
+        {
+            success = true,
+            fileFormatId,
+            fileRulesetId,
+            fileMetadataIds,
+            profileJobId,
+            profileStatus,
+            maskingJobId,
+            maskingStatus
+        });
     }
     catch (TimeoutException)
     {

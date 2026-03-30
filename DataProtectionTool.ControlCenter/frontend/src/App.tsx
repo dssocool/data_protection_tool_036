@@ -34,6 +34,10 @@ export default function App() {
   const [previewLoading, setPreviewLoading] = useState(false);
   const [previewError, setPreviewError] = useState<string | null>(null);
   const [previewBlobFilenames, setPreviewBlobFilenames] = useState<string[]>([]);
+  const [originalData, setOriginalData] = useState<PreviewData | null>(null);
+  const [maskedData, setMaskedData] = useState<PreviewData | null>(null);
+  const [activePreviewTab, setActivePreviewTab] = useState("Original");
+  const [diffTab, setDiffTab] = useState<{ name: string; leftTab: string; rightTab: string } | null>(null);
   const [connectionsPanelWidth, setConnectionsPanelWidth] = useState(260);
   const [statusEvents, setStatusEvents] = useState<StatusEvent[]>([]);
   const [showEventDialog, setShowEventDialog] = useState(false);
@@ -184,6 +188,10 @@ export default function App() {
     setPreviewLoading(true);
     setPreviewError(null);
     setPreviewData(null);
+    setOriginalData(null);
+    setMaskedData(null);
+    setActivePreviewTab("Original");
+    setDiffTab(null);
 
     try {
       const res = await fetch(`/api/agents/${agentPath}/preview-table`, {
@@ -298,6 +306,10 @@ export default function App() {
     setPreviewLoading(true);
     setPreviewError(null);
     setPreviewData(null);
+    setOriginalData(null);
+    setMaskedData(null);
+    setActivePreviewTab("Original");
+    setDiffTab(null);
 
     try {
       const res = await fetch(`/api/agents/${agentPath}/preview-query`, {
@@ -341,6 +353,10 @@ export default function App() {
     const agentPath = getAgentPath();
     if (!agentPath) return;
 
+    if (previewData) {
+      setOriginalData({ ...previewData });
+    }
+
     try {
       const res = await fetch(`/api/agents/${agentPath}/dry-run`, {
         method: "POST",
@@ -355,7 +371,16 @@ export default function App() {
 
       const result = await res.json();
       if (result.success) {
-        console.log(`Dry run succeeded — fileFormatId: ${result.fileFormatId}, fileRulesetId: ${result.fileRulesetId}, fileMetadataIds: ${JSON.stringify(result.fileMetadataIds)}`);
+        const mergeRes = await fetch("/api/blob/preview-merge", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ filenames: previewBlobFilenames }),
+        });
+        if (mergeRes.ok) {
+          const masked = await mergeRes.json();
+          setMaskedData(masked as PreviewData);
+          setActivePreviewTab("Masked");
+        }
       } else {
         console.error("Dry run failed:", result.message);
       }
@@ -400,6 +425,20 @@ export default function App() {
             loading={previewLoading}
             error={previewError}
             data={previewData}
+            originalData={originalData}
+            maskedData={maskedData}
+            activeTab={activePreviewTab}
+            diffTab={diffTab}
+            onTabChange={setActivePreviewTab}
+            onDiffSelect={(leftTab, rightTab) => {
+              const name = `${leftTab} vs ${rightTab}`;
+              setDiffTab({ name, leftTab, rightTab });
+              setActivePreviewTab(name);
+            }}
+            onDiffClose={() => {
+              setDiffTab(null);
+              setActivePreviewTab("Original");
+            }}
             panelLeft={showConnections ? connectionsPanelWidth + 16 : 0}
             onClose={() => {
               setSelectedTable(null);
@@ -407,6 +446,10 @@ export default function App() {
               setPreviewData(null);
               setPreviewError(null);
               setPreviewBlobFilenames([]);
+              setOriginalData(null);
+              setMaskedData(null);
+              setActivePreviewTab("Original");
+              setDiffTab(null);
             }}
           />
         )}
