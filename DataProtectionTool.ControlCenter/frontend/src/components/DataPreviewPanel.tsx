@@ -148,8 +148,15 @@ export default function DataPreviewPanel({
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; tab: string } | null>(null);
   const contextMenuRef = useRef<HTMLDivElement>(null);
   const tableRef = useRef<HTMLTableElement>(null);
+  const columnRulesScrollRef = useRef<HTMLDivElement>(null);
   const [colWidths, setColWidths] = useState<number[]>([]);
   const [selectedRule, setSelectedRule] = useState<Record<string, unknown> | null>(null);
+
+  const handleDataScroll = useCallback((e: React.UIEvent<HTMLDivElement>) => {
+    if (columnRulesScrollRef.current) {
+      columnRulesScrollRef.current.scrollLeft = e.currentTarget.scrollLeft;
+    }
+  }, []);
 
   const rulesByField = useMemo(() => {
     const map = new Map<string, Record<string, unknown>>();
@@ -300,27 +307,23 @@ export default function DataPreviewPanel({
           </div>
         )}
       </div>
-      <div className="data-preview-scroll-wrapper">
-        <div className="data-preview-body">
-          <div className="data-preview-scroll-content">
-            <div className="data-preview-data-area">
-              {loading ? (
-                <div className="data-preview-loading">Loading preview...</div>
-              ) : error ? (
-                <div className="data-preview-error">{error}</div>
-              ) : isDiffActive && leftData && rightData ? (
-                <DiffView left={leftData} right={rightData} ref={tableRef} />
-              ) : activeData ? (
-                <DataTable data={activeData} ref={tableRef} />
-              ) : null}
-            </div>
+      <div className="data-preview-body" onScroll={handleDataScroll}>
+        {loading ? (
+          <div className="data-preview-loading">Loading preview...</div>
+        ) : error ? (
+          <div className="data-preview-error">{error}</div>
+        ) : isDiffActive && leftData && rightData ? (
+          <DiffView left={leftData} right={rightData} ref={tableRef} />
+        ) : activeData ? (
+          <DataTable data={activeData} ref={tableRef} />
+        ) : null}
+      </div>
+      {currentHeaders.length > 0 && (
+        <div className="data-preview-column-rules">
+          <div className="data-preview-column-rules-header">
+            <span className="data-preview-column-rules-tab">Column Rules</span>
           </div>
-        </div>
-        {currentHeaders.length > 0 && (
-          <div className="data-preview-column-rules">
-            <div className="data-preview-column-rules-header">
-              <span className="data-preview-column-rules-tab">Column Rules</span>
-            </div>
+          <div className="data-preview-column-rules-scroll" ref={columnRulesScrollRef}>
             <table className="data-preview-table data-preview-column-rules-table">
               {colWidths.length > 0 && (
                 <colgroup>
@@ -353,8 +356,8 @@ export default function DataPreviewPanel({
               </tbody>
             </table>
           </div>
-        )}
-      </div>
+        </div>
+      )}
       {selectedRule && (
         <div className="column-rule-modal-overlay" onClick={() => setSelectedRule(null)}>
           <div className="column-rule-modal" onClick={(e) => e.stopPropagation()}>
