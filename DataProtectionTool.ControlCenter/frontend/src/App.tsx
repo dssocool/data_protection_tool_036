@@ -30,6 +30,7 @@ export default function App() {
   const [previewData, setPreviewData] = useState<PreviewData | null>(null);
   const [previewLoading, setPreviewLoading] = useState(false);
   const [previewError, setPreviewError] = useState<string | null>(null);
+  const [previewBlobFilenames, setPreviewBlobFilenames] = useState<string[]>([]);
   const [connectionsPanelWidth, setConnectionsPanelWidth] = useState(260);
 
   const fetchConnections = useCallback(async () => {
@@ -116,6 +117,36 @@ export default function App() {
     }
   }
 
+  async function fetchPreviewFromFilenames(filenames: string[]) {
+    setPreviewBlobFilenames(filenames);
+
+    const mergeRes = await fetch("/api/blob/preview-merge", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ filenames }),
+    });
+    if (!mergeRes.ok) {
+      setPreviewError(`Failed to fetch preview data: ${mergeRes.status}`);
+      return;
+    }
+
+    const data = await mergeRes.json();
+    setPreviewData(data as PreviewData);
+  }
+
+  async function deletePreviewBlobs(filenames: string[]) {
+    if (filenames.length === 0) return;
+    try {
+      await fetch("/api/blob/delete-preview", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ filenames }),
+      });
+    } catch {
+      // best-effort cleanup
+    }
+  }
+
   async function handleTableClick(rowKey: string, schema: string, tableName: string) {
     const agentPath = getAgentPath();
     if (!agentPath) return;
@@ -144,14 +175,8 @@ export default function App() {
         return;
       }
 
-      const blobRes = await fetch(`/api/blob/${result.filename}`);
-      if (!blobRes.ok) {
-        setPreviewError(`Failed to fetch preview data: ${blobRes.status}`);
-        return;
-      }
-
-      const data = await blobRes.json();
-      setPreviewData(data as PreviewData);
+      const filenames: string[] = result.filenames ?? (result.filename ? [result.filename] : []);
+      await fetchPreviewFromFilenames(filenames);
     } catch (e) {
       setPreviewError(`Preview failed: ${e instanceof Error ? e.message : String(e)}`);
     } finally {
@@ -264,18 +289,23 @@ export default function App() {
         return;
       }
 
-      const blobRes = await fetch(`/api/blob/${result.filename}`);
-      if (!blobRes.ok) {
-        setPreviewError(`Failed to fetch preview data: ${blobRes.status}`);
-        return;
-      }
-
-      const data = await blobRes.json();
-      setPreviewData(data as PreviewData);
+      const filenames: string[] = result.filenames ?? (result.filename ? [result.filename] : []);
+      await fetchPreviewFromFilenames(filenames);
     } catch (e) {
       setPreviewError(`Preview failed: ${e instanceof Error ? e.message : String(e)}`);
     } finally {
       setPreviewLoading(false);
+    }
+  }
+
+  async function handleReloadPreview() {
+    await deletePreviewBlobs(previewBlobFilenames);
+    setPreviewBlobFilenames([]);
+
+    if (selectedTable) {
+      handleTableClick(selectedTable.rowKey, selectedTable.schema, selectedTable.tableName);
+    } else if (selectedQuery) {
+      handleQueryClick(selectedQuery.connectionRowKey, selectedQuery.queryRowKey, selectedQuery.queryText);
     }
   }
 
@@ -299,7 +329,7 @@ export default function App() {
             onExpandConnection={handleExpandConnection}
             onTableClick={handleTableClick}
             onQueryClick={handleQueryClick}
-            onReloadPreview={handleTableClick}
+            onReloadPreview={handleReloadPreview}
             onClose={() => setShowConnections(false)}
             onWidthChange={setConnectionsPanelWidth}
           />
@@ -320,6 +350,7 @@ export default function App() {
               setSelectedQuery(null);
               setPreviewData(null);
               setPreviewError(null);
+              setPreviewBlobFilenames([]);
             }}
           />
         )}

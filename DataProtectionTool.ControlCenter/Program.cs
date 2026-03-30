@@ -255,6 +255,122 @@ app.MapGet("/api/blob/{filename}", async (string filename, BlobServiceClient blo
     }
 });
 
+app.MapPost("/api/blob/preview-merge", async (HttpRequest request, BlobServiceClient blobClient, BlobStorageConfig blobConfig) =>
+{
+    string body;
+    using (var sr = new StreamReader(request.Body))
+        body = await sr.ReadToEndAsync();
+
+    try
+    {
+        using var doc = JsonDocument.Parse(body);
+        if (!doc.RootElement.TryGetProperty("filenames", out var filenamesEl)
+            || filenamesEl.ValueKind != JsonValueKind.Array
+            || filenamesEl.GetArrayLength() == 0)
+        {
+            return Results.BadRequest(new { error = "filenames array is required." });
+        }
+
+        var filenames = filenamesEl.EnumerateArray().Select(e => e.GetString() ?? "").ToList();
+        if (filenames.Any(f => !f.EndsWith("_preview.parquet")))
+            return Results.BadRequest(new { error = "Invalid filename in list." });
+
+        var containerClient = blobClient.GetBlobContainerClient(blobConfig.Container);
+        List<string>? headers = null;
+        var rows = new List<List<string?>>();
+
+        foreach (var filename in filenames)
+        {
+            var blob = containerClient.GetBlobClient(filename);
+            if (!await blob.ExistsAsync())
+                return Results.NotFound(new { error = $"Blob not found: {filename}" });
+
+            var download = await blob.DownloadContentAsync();
+            using var ms = new MemoryStream(download.Value.Content.ToArray());
+            using var reader = await ParquetReader.CreateAsync(ms);
+
+            var dataFields = reader.Schema.GetDataFields();
+            var fileHeaders = dataFields.Select(f => f.Name).ToList();
+
+            if (headers == null)
+            {
+                headers = fileHeaders;
+            }
+            else if (!headers.SequenceEqual(fileHeaders))
+            {
+                return Results.BadRequest(new { error = $"Schema mismatch in {filename}." });
+            }
+
+            for (int g = 0; g < reader.RowGroupCount; g++)
+            {
+                using var groupReader = reader.OpenRowGroupReader(g);
+                var columns = new Array[dataFields.Length];
+                int rowCount = 0;
+
+                for (int c = 0; c < dataFields.Length; c++)
+                {
+                    var col = await groupReader.ReadColumnAsync(dataFields[c]);
+                    columns[c] = col.Data;
+                    rowCount = col.Data.Length;
+                }
+
+                for (int r = 0; r < rowCount; r++)
+                {
+                    var row = new List<string?>();
+                    for (int c = 0; c < dataFields.Length; c++)
+                    {
+                        var val = columns[c].GetValue(r);
+                        row.Add(val?.ToString() ?? "");
+                    }
+                    rows.Add(row);
+                }
+            }
+        }
+
+        return Results.Json(new { headers = headers ?? new List<string>(), rows });
+    }
+    catch (Exception ex)
+    {
+        return Results.Problem($"Failed to merge blobs: {ex.Message}");
+    }
+});
+
+app.MapPost("/api/blob/delete-preview", async (HttpRequest request, BlobServiceClient blobClient, BlobStorageConfig blobConfig) =>
+{
+    string body;
+    using (var sr = new StreamReader(request.Body))
+        body = await sr.ReadToEndAsync();
+
+    try
+    {
+        using var doc = JsonDocument.Parse(body);
+        if (!doc.RootElement.TryGetProperty("filenames", out var filenamesEl)
+            || filenamesEl.ValueKind != JsonValueKind.Array)
+        {
+            return Results.BadRequest(new { error = "filenames array is required." });
+        }
+
+        var filenames = filenamesEl.EnumerateArray().Select(e => e.GetString() ?? "").ToList();
+        if (filenames.Any(f => !f.EndsWith("_preview.parquet")))
+            return Results.BadRequest(new { error = "Invalid filename in list." });
+
+        var containerClient = blobClient.GetBlobContainerClient(blobConfig.Container);
+        int deleted = 0;
+        foreach (var filename in filenames)
+        {
+            var blob = containerClient.GetBlobClient(filename);
+            if (await blob.DeleteIfExistsAsync())
+                deleted++;
+        }
+
+        return Results.Ok(new { success = true, deleted });
+    }
+    catch (Exception ex)
+    {
+        return Results.Problem($"Failed to delete blobs: {ex.Message}");
+    }
+});
+
 app.MapGet("/api/agents/{path}/connections", async (string path, AgentRegistry registry, ClientTableService clientTableService) =>
 {
     if (!registry.TryGet(path, out var info) || info is null)

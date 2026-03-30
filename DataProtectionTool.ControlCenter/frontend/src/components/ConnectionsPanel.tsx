@@ -43,7 +43,7 @@ interface ConnectionsPanelProps {
   onExpandConnection: (rowKey: string) => void;
   onTableClick: (rowKey: string, schema: string, tableName: string) => void;
   onQueryClick: (connectionRowKey: string, queryRowKey: string, queryText: string) => void;
-  onReloadPreview: (rowKey: string, schema: string, tableName: string) => void;
+  onReloadPreview: () => void;
   onClose: () => void;
   onWidthChange?: (width: number) => void;
 }
@@ -276,11 +276,10 @@ export default function ConnectionsPanel({
           onMouseDown={(e) => e.stopPropagation()}
         >
           <div
-            className={`conn-context-menu-item${contextMenu.isQuery ? " conn-context-menu-item-disabled" : ""}`}
+            className="conn-context-menu-item"
             onClick={() => {
-              if (contextMenu.isQuery) return;
               setContextMenu(null);
-              onReloadPreview(contextMenu.rowKey, contextMenu.schema, contextMenu.tableName);
+              onReloadPreview();
             }}
           >
             Reload Data Preview

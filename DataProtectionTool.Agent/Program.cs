@@ -410,32 +410,23 @@ static async Task HandlePreviewTableAsync(
 
         Console.WriteLine($"[Agent] Previewing table [{schema}].[{tableName}] for connection {rowKey}...");
 
-        var parquetStream = await connManager.ExecuteWithRetryAsync(rowKey, call, agentId, oid, tid,
+        var filenames = await connManager.ExecuteWithRetryAsync(rowKey, call, agentId, oid, tid,
             async (sqlConn) =>
             {
                 await using var cmd = sqlConn.CreateCommand();
                 cmd.CommandText = $"SELECT * FROM [{schema}].[{tableName}] TABLESAMPLE (200 ROWS)";
 
                 await using var reader = await cmd.ExecuteReaderAsync();
-                return await WriteReaderToParquetStream(reader);
+                return await StreamReaderToParquetBlobs(reader, call, agentId, oid, tid, sasManager);
             });
 
-        var filename = $"{Guid.NewGuid():N}_preview.parquet";
-
-        var sasInfo = await sasManager.RequestSasTokenAsync(call, agentId, oid, tid);
-
-        var blobUri = new Uri($"{sasInfo.BlobEndpoint}/{sasInfo.Container}/{filename}?{sasInfo.SasToken}");
-        var blobClient = new BlobClient(blobUri);
-        parquetStream.Position = 0;
-        await blobClient.UploadAsync(parquetStream, overwrite: true);
-
-        Console.WriteLine($"[Agent] Uploaded preview Parquet: {filename}");
+        Console.WriteLine($"[Agent] Uploaded {filenames.Count} preview Parquet file(s) for [{schema}].[{tableName}]");
 
         var resultPayload = JsonSerializer.Serialize(new
         {
             correlationId,
             success = true,
-            filename
+            filenames
         });
 
         await call.RequestStream.WriteAsync(new AgentMessage
@@ -581,32 +572,23 @@ static async Task HandlePreviewQueryAsync(
 
         Console.WriteLine($"[Agent] Previewing query for connection {connectionRowKey}...");
 
-        var parquetStream = await connManager.ExecuteWithRetryAsync(connectionRowKey, call, agentId, oid, tid,
+        var filenames = await connManager.ExecuteWithRetryAsync(connectionRowKey, call, agentId, oid, tid,
             async (sqlConn) =>
             {
                 await using var cmd = sqlConn.CreateCommand();
                 cmd.CommandText = $"SELECT TOP 200 * FROM ({queryText}) AS _q";
 
                 await using var reader = await cmd.ExecuteReaderAsync();
-                return await WriteReaderToParquetStream(reader);
+                return await StreamReaderToParquetBlobs(reader, call, agentId, oid, tid, sasManager);
             });
 
-        var filename = $"{Guid.NewGuid():N}_preview.parquet";
-
-        var sasInfo = await sasManager.RequestSasTokenAsync(call, agentId, oid, tid);
-
-        var blobUri = new Uri($"{sasInfo.BlobEndpoint}/{sasInfo.Container}/{filename}?{sasInfo.SasToken}");
-        var blobClient = new BlobClient(blobUri);
-        parquetStream.Position = 0;
-        await blobClient.UploadAsync(parquetStream, overwrite: true);
-
-        Console.WriteLine($"[Agent] Uploaded query preview Parquet: {filename}");
+        Console.WriteLine($"[Agent] Uploaded {filenames.Count} query preview Parquet file(s)");
 
         var resultPayload = JsonSerializer.Serialize(new
         {
             correlationId,
             success = true,
-            filename
+            filenames
         });
 
         await call.RequestStream.WriteAsync(new AgentMessage
@@ -747,68 +729,117 @@ static async Task HandleHttpRequestAsync(
     }
 }
 
-static async Task<MemoryStream> WriteReaderToParquetStream(SqlDataReader reader)
+const int PreviewBatchSize = 10_000;
+
+static async Task<List<string>> StreamReaderToParquetBlobs(
+    SqlDataReader reader,
+    AsyncDuplexStreamingCall<AgentMessage, ServerMessage> call,
+    string agentId, string oid, string tid,
+    SasTokenManager sasManager)
 {
     var columnCount = reader.FieldCount;
     var columnNames = new string[columnCount];
     var parquetTypes = new Type[columnCount];
-    var columnData = new List<object?>[columnCount];
+    var dataFields = new DataField[columnCount];
 
     for (int i = 0; i < columnCount; i++)
     {
         columnNames[i] = reader.GetName(i);
         parquetTypes[i] = MapToParquetType(reader.GetFieldType(i));
-        columnData[i] = new List<object?>();
-    }
-
-    while (await reader.ReadAsync())
-    {
-        for (int i = 0; i < columnCount; i++)
-        {
-            if (reader.IsDBNull(i))
-            {
-                columnData[i].Add(null);
-            }
-            else
-            {
-                var val = reader.GetValue(i);
-                var pt = parquetTypes[i];
-                if (pt == typeof(int))
-                    columnData[i].Add(Convert.ToInt32(val));
-                else if (pt == typeof(long))
-                    columnData[i].Add(Convert.ToInt64(val));
-                else if (pt == typeof(float))
-                    columnData[i].Add(Convert.ToSingle(val));
-                else if (pt == typeof(double))
-                    columnData[i].Add(Convert.ToDouble(val));
-                else if (pt == typeof(bool))
-                    columnData[i].Add(Convert.ToBoolean(val));
-                else if (pt == typeof(byte[]))
-                    columnData[i].Add((byte[])val);
-                else
-                    columnData[i].Add(val?.ToString() ?? "");
-            }
-        }
-    }
-
-    var dataFields = new DataField[columnCount];
-    for (int i = 0; i < columnCount; i++)
         dataFields[i] = new DataField(columnNames[i], parquetTypes[i], isNullable: true);
+    }
 
     var parquetSchema = new ParquetSchema(dataFields);
+    var sasInfo = await sasManager.RequestSasTokenAsync(call, agentId, oid, tid);
+    var filenames = new List<string>();
+    bool hasMoreRows = true;
 
-    var ms = new MemoryStream();
-    using (var writer = await ParquetWriter.CreateAsync(parquetSchema, ms))
+    while (hasMoreRows)
     {
-        using var rowGroup = writer.CreateRowGroup();
+        var columnData = new List<object?>[columnCount];
         for (int i = 0; i < columnCount; i++)
+            columnData[i] = new List<object?>();
+
+        int rowsInBatch = 0;
+        while (rowsInBatch < PreviewBatchSize && (hasMoreRows = await reader.ReadAsync()))
         {
-            var column = new DataColumn(dataFields[i], ToTypedArray(columnData[i], parquetTypes[i]));
-            await rowGroup.WriteColumnAsync(column);
+            for (int i = 0; i < columnCount; i++)
+            {
+                if (reader.IsDBNull(i))
+                {
+                    columnData[i].Add(null);
+                }
+                else
+                {
+                    var val = reader.GetValue(i);
+                    var pt = parquetTypes[i];
+                    if (pt == typeof(int))
+                        columnData[i].Add(Convert.ToInt32(val));
+                    else if (pt == typeof(long))
+                        columnData[i].Add(Convert.ToInt64(val));
+                    else if (pt == typeof(float))
+                        columnData[i].Add(Convert.ToSingle(val));
+                    else if (pt == typeof(double))
+                        columnData[i].Add(Convert.ToDouble(val));
+                    else if (pt == typeof(bool))
+                        columnData[i].Add(Convert.ToBoolean(val));
+                    else if (pt == typeof(byte[]))
+                        columnData[i].Add((byte[])val);
+                    else
+                        columnData[i].Add(val?.ToString() ?? "");
+                }
+            }
+            rowsInBatch++;
         }
+
+        if (rowsInBatch == 0 && filenames.Count > 0)
+            break;
+
+        using var ms = new MemoryStream();
+        using (var writer = await ParquetWriter.CreateAsync(parquetSchema, ms))
+        {
+            using var rowGroup = writer.CreateRowGroup();
+            for (int i = 0; i < columnCount; i++)
+            {
+                var column = new DataColumn(dataFields[i], ToTypedArray(columnData[i], parquetTypes[i]));
+                await rowGroup.WriteColumnAsync(column);
+            }
+        }
+
+        var filename = $"{Guid.NewGuid():N}_preview.parquet";
+        var blobUri = new Uri($"{sasInfo.BlobEndpoint}/{sasInfo.Container}/{filename}?{sasInfo.SasToken}");
+        var blobClient = new BlobClient(blobUri);
+        ms.Position = 0;
+        await blobClient.UploadAsync(ms, overwrite: true);
+        filenames.Add(filename);
+
+        Console.WriteLine($"[Agent] Uploaded batch Parquet ({rowsInBatch} rows): {filename}");
     }
 
-    return ms;
+    if (filenames.Count == 0)
+    {
+        using var ms = new MemoryStream();
+        using (var writer = await ParquetWriter.CreateAsync(parquetSchema, ms))
+        {
+            using var rowGroup = writer.CreateRowGroup();
+            for (int i = 0; i < columnCount; i++)
+            {
+                var column = new DataColumn(dataFields[i], ToTypedArray(new List<object?>(), parquetTypes[i]));
+                await rowGroup.WriteColumnAsync(column);
+            }
+        }
+
+        var filename = $"{Guid.NewGuid():N}_preview.parquet";
+        var blobUri = new Uri($"{sasInfo.BlobEndpoint}/{sasInfo.Container}/{filename}?{sasInfo.SasToken}");
+        var blobClient = new BlobClient(blobUri);
+        ms.Position = 0;
+        await blobClient.UploadAsync(ms, overwrite: true);
+        filenames.Add(filename);
+
+        Console.WriteLine($"[Agent] Uploaded empty preview Parquet: {filename}");
+    }
+
+    return filenames;
 }
 
 static Type MapToParquetType(Type clrType)
