@@ -229,7 +229,7 @@
 
 .conn-context-menu {
   position: fixed;
-  z-index: 100;
+  z-index: 10000;
   min-width: 200px;
   background: #fff;
   border-radius: 6px;

@@ -149,7 +149,7 @@ export default function DataPreviewPanel({
   const contextMenuRef = useRef<HTMLDivElement>(null);
   const tableRef = useRef<HTMLTableElement>(null);
   const columnRulesScrollRef = useRef<HTMLDivElement>(null);
-  const [colWidths, setColWidths] = useState<number[]>([]);
+  const [colWidths, setColWidths] = useState<{ left: number; width: number }[]>([]);
   const [selectedRule, setSelectedRule] = useState<Record<string, unknown> | null>(null);
 
   const handleDataScroll = useCallback((e: React.UIEvent<HTMLDivElement>) => {
@@ -228,7 +228,11 @@ export default function DataPreviewPanel({
     const ths = table.querySelectorAll("thead th");
     if (!ths.length) return;
     const measure = () => {
-      const widths = Array.from(ths).map((th) => th.getBoundingClientRect().width);
+      const tableRect = table.getBoundingClientRect();
+      const widths = Array.from(ths).map((th) => {
+        const rect = th.getBoundingClientRect();
+        return { left: rect.left - tableRect.left, width: rect.width };
+      });
       setColWidths(widths);
     };
     const ro = new ResizeObserver(measure);
@@ -324,37 +328,36 @@ export default function DataPreviewPanel({
             <span className="data-preview-column-rules-tab">Column Rules</span>
           </div>
           <div className="data-preview-column-rules-scroll" ref={columnRulesScrollRef}>
-            <table className="data-preview-table data-preview-column-rules-table">
-              {colWidths.length > 0 && (
-                <colgroup>
-                  {colWidths.map((w, i) => (
-                    <col key={i} style={{ width: w, minWidth: w }} />
-                  ))}
-                </colgroup>
-              )}
-              <tbody>
-                <tr>
-                  {currentHeaders.map((header, i) => {
-                    const rule = rulesByField.get(header);
-                    return (
-                      <td key={i}>
-                        {columnRulesLoading ? (
-                          <span className="column-rule-loading">...</span>
-                        ) : rule ? (
-                          <button
-                            className="column-rule-btn"
-                            onClick={() => setSelectedRule(rule)}
-                            title={`View rule for ${header}`}
-                          >
-                            {header}
-                          </button>
-                        ) : null}
-                      </td>
-                    );
-                  })}
-                </tr>
-              </tbody>
-            </table>
+            <div
+              className="data-preview-column-rules-row"
+              style={colWidths.length > 0 ? {
+                width: colWidths[colWidths.length - 1].left + colWidths[colWidths.length - 1].width,
+              } : undefined}
+            >
+              {currentHeaders.map((header, i) => {
+                const rule = rulesByField.get(header);
+                const pos = colWidths[i];
+                return (
+                  <div
+                    key={i}
+                    className="data-preview-column-rules-cell"
+                    style={pos ? { left: pos.left, width: pos.width } : undefined}
+                  >
+                    {columnRulesLoading ? (
+                      <span className="column-rule-loading">...</span>
+                    ) : rule ? (
+                      <button
+                        className="column-rule-btn"
+                        onClick={() => setSelectedRule(rule)}
+                        title={`View rule for ${header}`}
+                      >
+                        {header}
+                      </button>
+                    ) : null}
+                  </div>
+                );
+              })}
+            </div>
           </div>
         </div>
       )}

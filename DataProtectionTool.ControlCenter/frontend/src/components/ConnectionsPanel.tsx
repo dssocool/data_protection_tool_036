@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import "./ConnectionsPanel.css";
 
 export interface SavedConnection {
@@ -162,6 +163,7 @@ export default function ConnectionsPanel({
   const queries = (rowKey: string) => connectionQueries[rowKey];
 
   return (
+    <>
     <div className="connections-panel" style={{ width }}>
       <div className="connections-panel-header">
         <h3 className="connections-panel-title">Connections</h3>
@@ -275,76 +277,78 @@ export default function ConnectionsPanel({
           ))}
         </div>
       )}
-      {contextMenu && (
-        <div
-          className="conn-context-menu"
-          style={{ top: contextMenu.y, left: contextMenu.x }}
-          onMouseDown={(e) => e.stopPropagation()}
-        >
-          {contextMenu.isConnection ? (
-            <div
-              className="conn-context-menu-item"
-              onClick={() => {
-                const { rowKey } = contextMenu;
-                setContextMenu(null);
-                onRefreshConnection(rowKey);
-              }}
-            >
-              Refresh
-            </div>
-          ) : (
-            <>
-              <div
-                className="conn-context-menu-item"
-                onClick={() => {
-                  setContextMenu(null);
-                  onReloadPreview();
-                }}
-              >
-                Refresh
-              </div>
-              {!contextMenu.isQuery && (
-                <>
-                  <div
-                    className="conn-context-menu-item"
-                    onClick={() => {
-                      const { rowKey, schema, tableName } = contextMenu;
-                      setContextMenu(null);
-                      onDryRun(rowKey, schema, tableName);
-                    }}
-                  >
-                    Data Protection: Dry Run
-                  </div>
-                  {(() => {
-                    const t = connectionTables[contextMenu.rowKey]?.find(
-                      (ti) => ti.schema === contextMenu.schema && ti.name === contextMenu.tableName
-                    );
-                    const hasFormat = !!t?.fileFormatId;
-                    return (
-                      <div
-                        className={`conn-context-menu-item${hasFormat ? "" : " conn-context-menu-item-disabled"}`}
-                        title={hasFormat ? undefined : "You must do Dry Run first."}
-                        onClick={() => {
-                          if (!hasFormat) return;
-                          const { rowKey, schema, tableName } = contextMenu;
-                          setContextMenu(null);
-                          onFullRun(rowKey, schema, tableName);
-                        }}
-                      >
-                        Data Protection: Full Run
-                      </div>
-                    );
-                  })()}
-                </>
-              )}
-            </>
-          )}
-        </div>
-      )}
       <div
         className="connections-panel-resize"
         onMouseDown={handleResizeStart}
       />
     </div>
+    {contextMenu && createPortal(
+      <div
+        className="conn-context-menu"
+        style={{ top: contextMenu.y, left: contextMenu.x }}
+        onMouseDown={(e) => e.stopPropagation()}
+      >
+        {contextMenu.isConnection ? (
+          <div
+            className="conn-context-menu-item"
+            onClick={() => {
+              const { rowKey } = contextMenu;
+              setContextMenu(null);
+              onRefreshConnection(rowKey);
+            }}
+          >
+            Refresh
+          </div>
+        ) : (
+          <>
+            <div
+              className="conn-context-menu-item"
+              onClick={() => {
+                setContextMenu(null);
+                onReloadPreview();
+              }}
+            >
+              Refresh
+            </div>
+            {!contextMenu.isQuery && (
+              <>
+                <div
+                  className="conn-context-menu-item"
+                  onClick={() => {
+                    const { rowKey, schema, tableName } = contextMenu;
+                    setContextMenu(null);
+                    onDryRun(rowKey, schema, tableName);
+                  }}
+                >
+                  Data Protection: Dry Run
+                </div>
+                {(() => {
+                  const t = connectionTables[contextMenu.rowKey]?.find(
+                    (ti) => ti.schema === contextMenu.schema && ti.name === contextMenu.tableName
+                  );
+                  const hasFormat = !!t?.fileFormatId;
+                  return (
+                    <div
+                      className={`conn-context-menu-item${hasFormat ? "" : " conn-context-menu-item-disabled"}`}
+                      title={hasFormat ? undefined : "You must do Dry Run first."}
+                      onClick={() => {
+                        if (!hasFormat) return;
+                        const { rowKey, schema, tableName } = contextMenu;
+                        setContextMenu(null);
+                        onFullRun(rowKey, schema, tableName);
+                      }}
+                    >
+                      Data Protection: Full Run
+                    </div>
+                  );
+                })()}
+              </>
+            )}
+          </>
+        )}
+      </div>,
+      document.body,
+    )}
+    </>
   );
 }
