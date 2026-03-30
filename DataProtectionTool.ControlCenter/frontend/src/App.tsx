@@ -175,6 +175,38 @@ export default function App() {
     }
   }
 
+  async function handleRefreshConnection(rowKey: string) {
+    const agentPath = getAgentPath();
+    if (!agentPath) return;
+
+    setLoadingTables((prev) => new Set(prev).add(rowKey));
+
+    try {
+      const tablesRes = await fetch(`/api/agents/${agentPath}/list-tables`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ rowKey, refresh: true }),
+      });
+
+      if (tablesRes.ok) {
+        const result = await tablesRes.json();
+        if (result.success && result.tables) {
+          setConnectionTables((prev) => ({ ...prev, [rowKey]: result.tables }));
+        } else {
+          setConnectionTables((prev) => ({ ...prev, [rowKey]: [] }));
+        }
+      }
+    } catch {
+      setConnectionTables((prev) => ({ ...prev, [rowKey]: [] }));
+    } finally {
+      setLoadingTables((prev) => {
+        const next = new Set(prev);
+        next.delete(rowKey);
+        return next;
+      });
+    }
+  }
+
   async function fetchPreviewFromFilenames(filenames: string[]) {
     setPreviewBlobFilenames(filenames);
 
@@ -463,6 +495,7 @@ export default function App() {
             onTableClick={handleTableClick}
             onQueryClick={handleQueryClick}
             onReloadPreview={handleReloadPreview}
+            onRefreshConnection={handleRefreshConnection}
             onDryRun={handleDryRun}
             onClose={() => setShowConnections(false)}
             onWidthChange={setConnectionsPanelWidth}

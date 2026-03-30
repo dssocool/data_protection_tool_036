@@ -31,6 +31,7 @@ interface ContextMenuState {
   schema: string;
   tableName: string;
   isQuery: boolean;
+  isConnection: boolean;
 }
 
 interface ConnectionsPanelProps {
@@ -44,6 +45,7 @@ interface ConnectionsPanelProps {
   onTableClick: (rowKey: string, schema: string, tableName: string) => void;
   onQueryClick: (connectionRowKey: string, queryRowKey: string, queryText: string) => void;
   onReloadPreview: () => void;
+  onRefreshConnection: (rowKey: string) => void;
   onDryRun: (rowKey: string, schema: string, tableName: string) => void;
   onClose: () => void;
   onWidthChange?: (width: number) => void;
@@ -64,6 +66,7 @@ export default function ConnectionsPanel({
   onTableClick,
   onQueryClick,
   onReloadPreview,
+  onRefreshConnection,
   onDryRun,
   onClose,
   onWidthChange,
@@ -120,9 +123,11 @@ export default function ConnectionsPanel({
     schema: string,
     tableName: string,
     isQuery = false,
+    isConnection = false,
   ) {
     e.preventDefault();
-    setContextMenu({ x: e.clientX, y: e.clientY, rowKey, schema, tableName, isQuery });
+    e.stopPropagation();
+    setContextMenu({ x: e.clientX, y: e.clientY, rowKey, schema, tableName, isQuery, isConnection });
   }
 
   const grouped = useMemo(() => {
@@ -179,6 +184,7 @@ export default function ConnectionsPanel({
                     <div
                       className="connections-list-item"
                       onClick={() => handleToggle(conn.rowKey)}
+                      onContextMenu={(e) => handleTableContextMenu(e, conn.rowKey, "", "", false, true)}
                     >
                       <button
                         className={`conn-expand-btn ${isExpanded(conn.rowKey) ? "expanded" : ""}`}
@@ -272,26 +278,41 @@ export default function ConnectionsPanel({
           style={{ top: contextMenu.y, left: contextMenu.x }}
           onMouseDown={(e) => e.stopPropagation()}
         >
-          <div
-            className="conn-context-menu-item"
-            onClick={() => {
-              setContextMenu(null);
-              onReloadPreview();
-            }}
-          >
-            Reload Data Preview
-          </div>
-          {!contextMenu.isQuery && (
+          {contextMenu.isConnection ? (
             <div
               className="conn-context-menu-item"
               onClick={() => {
-                const { rowKey, schema, tableName } = contextMenu;
+                const { rowKey } = contextMenu;
                 setContextMenu(null);
-                onDryRun(rowKey, schema, tableName);
+                onRefreshConnection(rowKey);
               }}
             >
-              Data Protection: Dry Run
+              Refresh
             </div>
+          ) : (
+            <>
+              <div
+                className="conn-context-menu-item"
+                onClick={() => {
+                  setContextMenu(null);
+                  onReloadPreview();
+                }}
+              >
+                Refresh
+              </div>
+              {!contextMenu.isQuery && (
+                <div
+                  className="conn-context-menu-item"
+                  onClick={() => {
+                    const { rowKey, schema, tableName } = contextMenu;
+                    setContextMenu(null);
+                    onDryRun(rowKey, schema, tableName);
+                  }}
+                >
+                  Data Protection: Dry Run
+                </div>
+              )}
+            </>
           )}
         </div>
       )}

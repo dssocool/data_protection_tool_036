@@ -38,6 +38,7 @@ builder.Services.AddSingleton(sp => new ClientTableService(
     sp.GetRequiredService<TableServiceClient>(),
     "Users",
     "ControlCenter",
+    "DataItem",
     sp.GetRequiredService<ILogger<ClientTableService>>()));
 
 var blobSection = builder.Configuration.GetSection("AzureBlobStorage");
@@ -74,6 +75,8 @@ var app = builder.Build();
     await usersTable.CreateIfNotExistsAsync();
     var controlCenterTable = tableServiceClient.GetTableClient("ControlCenter");
     await controlCenterTable.CreateIfNotExistsAsync();
+    var dataItemTable = tableServiceClient.GetTableClient("DataItem");
+    await dataItemTable.CreateIfNotExistsAsync();
 }
 
 app.UseStaticFiles();
@@ -224,6 +227,34 @@ app.MapPost("/api/agents/{path}/list-tables", async (string path, HttpRequest re
     using (var reader = new StreamReader(request.Body))
         body = await reader.ReadToEndAsync();
 
+    string rowKey;
+    bool refresh = false;
+    try
+    {
+        using var bodyDoc = JsonDocument.Parse(body);
+        rowKey = bodyDoc.RootElement.TryGetProperty("rowKey", out var rkEl) ? rkEl.GetString() ?? "" : "";
+        refresh = bodyDoc.RootElement.TryGetProperty("refresh", out var rfEl) && rfEl.GetBoolean();
+    }
+    catch
+    {
+        return Results.BadRequest(new { error = "Invalid request body." });
+    }
+
+    var connEntity = await clientTableService.GetConnectionByRowKeyAsync(partitionKey, rowKey);
+    if (connEntity == null)
+        return Results.NotFound(new { error = "Connection not found." });
+
+    if (!refresh)
+    {
+        var cached = await clientTableService.GetDataItemsAsync(partitionKey, connEntity.ServerName, connEntity.DatabaseName);
+        if (cached.Count > 0)
+        {
+            var cachedTables = cached.Select(d => new { schema = d.Schema, name = d.TableName }).ToList();
+            _ = clientTableService.AppendEventAsync(partitionKey, "list_tables", $"Listed {cachedTables.Count} tables (cached)");
+            return Results.Ok(new { success = true, tables = cachedTables });
+        }
+    }
+
     try
     {
         var result = await connection.SendCommandAsync("list_tables", body, TimeSpan.FromSeconds(30));
@@ -231,8 +262,18 @@ app.MapPost("/api/agents/{path}/list-tables", async (string path, HttpRequest re
         try
         {
             using var doc = JsonDocument.Parse(result);
-            var tables = doc.RootElement.TryGetProperty("tables", out var tEl) ? tEl.GetArrayLength() : 0;
-            _ = clientTableService.AppendEventAsync(partitionKey, "list_tables", $"Listed {tables} tables");
+            if (doc.RootElement.TryGetProperty("tables", out var tEl) && tEl.ValueKind == JsonValueKind.Array)
+            {
+                var tableList = new List<(string schema, string name)>();
+                foreach (var item in tEl.EnumerateArray())
+                {
+                    var schema = item.TryGetProperty("schema", out var sEl) ? sEl.GetString() ?? "" : "";
+                    var name = item.TryGetProperty("name", out var nEl) ? nEl.GetString() ?? "" : "";
+                    tableList.Add((schema, name));
+                }
+                _ = clientTableService.SaveDataItemsAsync(partitionKey, connEntity.ServerName, connEntity.DatabaseName, rowKey, tableList);
+                _ = clientTableService.AppendEventAsync(partitionKey, "list_tables", $"Listed {tableList.Count} tables");
+            }
         }
         catch { }
 

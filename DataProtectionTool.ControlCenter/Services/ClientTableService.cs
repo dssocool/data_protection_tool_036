@@ -9,15 +9,17 @@ public class ClientTableService
     private readonly string _tableName;
     private readonly TableClient _tableClient;
     private readonly TableClient _controlCenterTableClient;
+    private readonly TableClient _dataItemTableClient;
     private readonly ILogger<ClientTableService> _logger;
     private bool _tableInitialized;
 
-    public ClientTableService(TableServiceClient serviceClient, string tableName, string controlCenterTableName, ILogger<ClientTableService> logger)
+    public ClientTableService(TableServiceClient serviceClient, string tableName, string controlCenterTableName, string dataItemTableName, ILogger<ClientTableService> logger)
     {
         _tableName = tableName;
         _logger = logger;
         _tableClient = serviceClient.GetTableClient(_tableName);
         _controlCenterTableClient = serviceClient.GetTableClient(controlCenterTableName);
+        _dataItemTableClient = serviceClient.GetTableClient(dataItemTableName);
     }
 
     private void EnsureTableExists()
@@ -345,5 +347,62 @@ public class ClientTableService
         {
             return null;
         }
+    }
+
+    public async Task<List<DataItemEntity>> GetDataItemsAsync(string partitionKey, string serverName, string dbName)
+    {
+        var prefix = DataItemEntity.BuildRowKeyPrefix(serverName, dbName);
+        var items = new List<DataItemEntity>();
+
+        await foreach (var entity in _dataItemTableClient.QueryAsync<DataItemEntity>(
+            e => e.PartitionKey == partitionKey
+                 && e.RowKey.CompareTo(prefix) >= 0
+                 && e.RowKey.CompareTo(prefix + "~") < 0))
+        {
+            items.Add(entity);
+        }
+
+        return items;
+    }
+
+    public async Task SaveDataItemsAsync(
+        string partitionKey, string serverName, string dbName, string connectionRowKey,
+        List<(string schema, string name)> tables)
+    {
+        var prefix = DataItemEntity.BuildRowKeyPrefix(serverName, dbName);
+
+        var existing = new List<DataItemEntity>();
+        await foreach (var entity in _dataItemTableClient.QueryAsync<DataItemEntity>(
+            e => e.PartitionKey == partitionKey
+                 && e.RowKey.CompareTo(prefix) >= 0
+                 && e.RowKey.CompareTo(prefix + "~") < 0))
+        {
+            existing.Add(entity);
+        }
+
+        foreach (var old in existing)
+        {
+            await _dataItemTableClient.DeleteEntityAsync(old.PartitionKey, old.RowKey);
+        }
+
+        foreach (var (schema, name) in tables)
+        {
+            var uuid = Guid.NewGuid().ToString("N");
+            var entity = new DataItemEntity
+            {
+                PartitionKey = partitionKey,
+                RowKey = DataItemEntity.BuildRowKey(serverName, dbName, $"{schema}.{name}", uuid),
+                ServerName = serverName,
+                DatabaseName = dbName,
+                Schema = schema,
+                TableName = name,
+                ConnectionRowKey = connectionRowKey
+            };
+            await _dataItemTableClient.AddEntityAsync(entity);
+        }
+
+        _logger.LogInformation(
+            "Saved {Count} data items — partitionKey={PK}, server={Server}, db={Db}",
+            tables.Count, partitionKey, serverName, dbName);
     }
 }
