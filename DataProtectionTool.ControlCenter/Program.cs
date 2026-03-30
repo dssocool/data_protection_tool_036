@@ -67,7 +67,7 @@ builder.Services.AddSingleton(dataEngineConfig);
 
 var app = builder.Build();
 var previewFilenameRegex = new Regex(
-    "^preview_(\\d+)_([0-9a-fA-F]{32})(?:_([2-9]\\d*))?\\.parquet$",
+    "^(?:dryrun_[0-9a-fA-F]{32}_)?preview_(\\d+)_([0-9a-fA-F]{32})(?:_([2-9]\\d*))?\\.parquet$",
     RegexOptions.Compiled | RegexOptions.CultureInvariant);
 
 {
@@ -1197,6 +1197,21 @@ app.MapPost("/api/agents/{path}/dry-run", async (string path, HttpContext httpCo
             return;
         }
 
+        // Step 10: Copy masked files from engine container back to preview container
+        await WriteSseEvent("status", "Copying masked results...");
+        var maskedFilenames = new List<string>();
+        foreach (var previewFile in previewFilenames)
+        {
+            var maskedBlob = engineContainerClient.GetBlobClient(previewFile);
+            var maskedName = $"dryrun_{dryRunUuid}_{previewFile}";
+            var destBlob = previewContainerClient.GetBlobClient(maskedName);
+            using var maskedStream = new MemoryStream();
+            await maskedBlob.DownloadToAsync(maskedStream);
+            maskedStream.Position = 0;
+            await destBlob.UploadAsync(maskedStream, overwrite: true);
+            maskedFilenames.Add(maskedName);
+        }
+
         _ = clientTableService.AppendEventAsync(partitionKey, "dry_run",
             $"Dry run completed: fileFormatId={fileFormatId}, fileRulesetId={fileRulesetId}, " +
             $"profileJobId={profileJobId} ({profileStatus}), maskingJobId={maskingJobId} ({maskingStatus})");
@@ -1210,7 +1225,8 @@ app.MapPost("/api/agents/{path}/dry-run", async (string path, HttpContext httpCo
             profileJobId,
             profileStatus,
             maskingJobId,
-            maskingStatus
+            maskingStatus,
+            maskedFilenames
         });
         await WriteSseEvent("complete", completeJson);
     }

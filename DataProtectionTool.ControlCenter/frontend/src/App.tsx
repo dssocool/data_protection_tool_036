@@ -744,10 +744,17 @@ export default function App() {
               }
             } else if (eventType === "complete") {
               completed = true;
+              let maskedFilenames = filenames;
+              try {
+                const completeData = JSON.parse(eventData);
+                if (Array.isArray(completeData.maskedFilenames) && completeData.maskedFilenames.length > 0) {
+                  maskedFilenames = completeData.maskedFilenames;
+                }
+              } catch { /* use original filenames as fallback */ }
               const mergeRes = await fetch("/api/blob/preview-merge", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ filenames }),
+                body: JSON.stringify({ filenames: maskedFilenames }),
               });
               if (mergeRes.ok) {
                 const masked = await mergeRes.json();
