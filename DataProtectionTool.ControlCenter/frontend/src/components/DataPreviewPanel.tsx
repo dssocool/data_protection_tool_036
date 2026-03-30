@@ -22,9 +22,7 @@ interface DataPreviewPanelProps {
   diffTab: DiffTab | null;
   onTabChange: (tab: string) => void;
   onDiffSelect: (leftTab: string, rightTab: string) => void;
-  onDiffClose: () => void;
   panelLeft: number;
-  onClose: () => void;
 }
 
 function resolveTabData(
@@ -113,9 +111,7 @@ export default function DataPreviewPanel({
   diffTab,
   onTabChange,
   onDiffSelect,
-  onDiffClose,
   panelLeft,
-  onClose,
 }: DataPreviewPanelProps) {
   const dataTabs = useMemo(() => {
     const list: string[] = ["Original"];
@@ -165,83 +161,52 @@ export default function DataPreviewPanel({
   return (
     <div className="data-preview-panel" style={{ left: panelLeft + 16 }}>
       <div className="data-preview-header">
-        <div style={{ display: "flex", alignItems: "center", gap: 12, minWidth: 0, flex: 1 }}>
-          <div className="data-preview-tabs">
-            {tabs.map((tab) => (
-              <button
-                key={tab}
-                className={`data-preview-tab${activeTab === tab ? " data-preview-tab-active" : ""}`}
-                onClick={() => onTabChange(tab)}
-              >
-                {tab}
-                {diffTab && tab === diffTab.name && (
-                  <span
-                    className="data-preview-tab-close"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      onDiffClose();
-                    }}
-                  >
-                    ×
-                  </span>
-                )}
-              </button>
-            ))}
-          </div>
-          {dataTabs.length > 1 && (
-            <div className="data-preview-diff-controls">
-              <label className="data-preview-diff-select-label">
-                Left
-                <select
-                  className="data-preview-diff-select"
-                  value={leftDiffTab}
-                  onChange={(e) => {
-                    const nextLeft = e.target.value;
-                    setLeftDiffTab(nextLeft);
-                    if (nextLeft && rightDiffTab && nextLeft !== rightDiffTab) {
-                      onDiffSelect(nextLeft, rightDiffTab);
-                    }
-                  }}
-                >
-                  {dataTabs.map((tab) => (
-                    <option key={tab} value={tab} disabled={tab === rightDiffTab}>
-                      {tab}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label className="data-preview-diff-select-label">
-                Right
-                <select
-                  className="data-preview-diff-select"
-                  value={rightDiffTab}
-                  onChange={(e) => {
-                    const nextRight = e.target.value;
-                    setRightDiffTab(nextRight);
-                    if (leftDiffTab && nextRight && leftDiffTab !== nextRight) {
-                      onDiffSelect(leftDiffTab, nextRight);
-                    }
-                  }}
-                >
-                  {dataTabs.map((tab) => (
-                    <option key={tab} value={tab} disabled={tab === leftDiffTab}>
-                      {tab}
-                    </option>
-                  ))}
-                </select>
-              </label>
-            </div>
-          )}
+        <div className="data-preview-tabs">
+          {tabs.map((tab) => (
+            <button
+              key={tab}
+              className={`data-preview-tab${activeTab === tab ? " data-preview-tab-active" : ""}`}
+              onClick={() => onTabChange(tab)}
+            >
+              {tab}
+            </button>
+          ))}
         </div>
-        <button
-          className="data-preview-close"
-          onClick={onClose}
-          aria-label="Close preview"
-        >
-          <svg width="14" height="14" viewBox="0 0 14 14">
-            <path d="M3 3 L11 11 M11 3 L3 11" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
-          </svg>
-        </button>
+        {dataTabs.length > 1 && (
+          <div className="data-preview-diff-controls">
+            <select
+              className="data-preview-diff-select"
+              value={leftDiffTab}
+              onChange={(e) => setLeftDiffTab(e.target.value)}
+            >
+              {dataTabs.map((tab) => (
+                <option key={tab} value={tab} disabled={tab === rightDiffTab}>
+                  {tab}
+                </option>
+              ))}
+            </select>
+            <span className="data-preview-diff-select-arrow">{"\u2192"}</span>
+            <select
+              className="data-preview-diff-select"
+              value={rightDiffTab}
+              onChange={(e) => setRightDiffTab(e.target.value)}
+            >
+              {dataTabs.map((tab) => (
+                <option key={tab} value={tab} disabled={tab === leftDiffTab}>
+                  {tab}
+                </option>
+              ))}
+            </select>
+            <button
+              type="button"
+              className="data-preview-diff-button"
+              disabled={!leftDiffTab || !rightDiffTab || leftDiffTab === rightDiffTab}
+              onClick={() => onDiffSelect(leftDiffTab, rightDiffTab)}
+            >
+              Diff
+            </button>
+          </div>
+        )}
       </div>
       <div className="data-preview-body">
         {loading ? (

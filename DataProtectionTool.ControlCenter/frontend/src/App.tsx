@@ -645,22 +645,7 @@ export default function App() {
               setDiffTab({ name, leftTab, rightTab });
               setActivePreviewTab(name);
             }}
-            onDiffClose={() => {
-              setDiffTab(null);
-              setActivePreviewTab("Original");
-            }}
             panelLeft={showConnections ? connectionsPanelWidth + 16 : 0}
-            onClose={() => {
-              setSelectedTable(null);
-              setSelectedQuery(null);
-              setPreviewData(null);
-              setPreviewError(null);
-              setPreviewBlobFilenames([]);
-              setOriginalData(null);
-              setMaskedData(null);
-              setActivePreviewTab("Original");
-              setDiffTab(null);
-            }}
           />
         )}
       </main>
