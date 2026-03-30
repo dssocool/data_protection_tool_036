@@ -30,14 +30,13 @@ builder.Services.AddGrpc(options =>
 
 builder.Services.AddSingleton<AgentRegistry>();
 
-var tableStorageSection = builder.Configuration.GetSection("AzureTableStorage");
-var tableConnectionString = tableStorageSection["ConnectionString"]
+var tableConnectionString = builder.Configuration.GetSection("AzureTableStorage")["ConnectionString"]
     ?? throw new InvalidOperationException("AzureTableStorage:ConnectionString is not configured.");
-var tableName = tableStorageSection["TableName"] ?? "Clients";
-builder.Services.AddSingleton(new TableServiceClient(tableConnectionString));
+var tableServiceClient = new TableServiceClient(tableConnectionString);
+builder.Services.AddSingleton(tableServiceClient);
 builder.Services.AddSingleton(sp => new ClientTableService(
     sp.GetRequiredService<TableServiceClient>(),
-    tableName,
+    "Users",
     sp.GetRequiredService<ILogger<ClientTableService>>()));
 
 var blobSection = builder.Configuration.GetSection("AzureBlobStorage");
@@ -67,6 +66,13 @@ var app = builder.Build();
     var containerClient = app.Services.GetRequiredService<BlobServiceClient>()
         .GetBlobContainerClient(blobStorageConfig.Container);
     await containerClient.CreateIfNotExistsAsync();
+}
+
+{
+    var usersTable = tableServiceClient.GetTableClient("Users");
+    await usersTable.CreateIfNotExistsAsync();
+    var controlCenterTable = tableServiceClient.GetTableClient("ControlCenter");
+    await controlCenterTable.CreateIfNotExistsAsync();
 }
 
 app.UseStaticFiles();
