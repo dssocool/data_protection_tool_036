@@ -64,6 +64,7 @@ export default function App() {
   const [fullRunTarget, setFullRunTarget] = useState<{ rowKey: string; schema: string; tableName: string } | null>(null);
   const [columnRules, setColumnRules] = useState<Record<string, unknown>[]>([]);
   const [columnRulesLoading, setColumnRulesLoading] = useState(false);
+  const [dryRunningTables, setDryRunningTables] = useState<Set<string>>(new Set());
   const eventsTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const previewCacheRef = useRef<Map<string, string[]>>(new Map());
   const tableCacheRef = useRef<Map<string, TablePreviewCache>>(new Map());
@@ -666,6 +667,7 @@ export default function App() {
         activePreviewTab: newLabel,
         dryRunInProgress: true,
       } as TablePreviewCache);
+      setDryRunningTables((prev) => new Set(prev).add(key));
 
       const updateDryRunStatus = (status: string) => {
         setDryRuns((prev) =>
@@ -694,6 +696,7 @@ export default function App() {
             previewError: errMsg,
           });
         }
+        setDryRunningTables((prev) => { const next = new Set(prev); next.delete(key); return next; });
       };
 
       try {
@@ -777,6 +780,7 @@ export default function App() {
                     dryRunInProgress: false,
                   });
                 }
+                setDryRunningTables((prev) => { const next = new Set(prev); next.delete(key); return next; });
 
                 if (isViewingTable(rowKey, schema, tableName)) {
                   setDryRuns(finishDryRun);
@@ -791,6 +795,7 @@ export default function App() {
                 if (latestCached) {
                   tableCacheRef.current.set(key, { ...latestCached, dryRunInProgress: false });
                 }
+                setDryRunningTables((prev) => { const next = new Set(prev); next.delete(key); return next; });
               }
             } else if (eventType === "error") {
               let errMsg = "Dry run failed.";
@@ -812,6 +817,7 @@ export default function App() {
                     previewError: errMsg,
                   });
                 }
+                setDryRunningTables((prev) => { const next = new Set(prev); next.delete(key); return next; });
               }
             }
           }
@@ -836,6 +842,7 @@ export default function App() {
               previewError: errMsg,
             });
           }
+          setDryRunningTables((prev) => { const next = new Set(prev); next.delete(key); return next; });
         }
       }
     } catch (e) {
@@ -904,6 +911,7 @@ export default function App() {
             connectionTables={connectionTables}
             connectionQueries={connectionQueries}
             loadingTables={loadingTables}
+            dryRunningTables={dryRunningTables}
             selectedTable={selectedTable}
             selectedQuery={selectedQuery}
             onExpandConnection={handleExpandConnection}

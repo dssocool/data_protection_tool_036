@@ -41,6 +41,7 @@ interface ConnectionsPanelProps {
   connectionTables: Record<string, TableInfo[]>;
   connectionQueries: Record<string, QueryInfo[]>;
   loadingTables: Set<string>;
+  dryRunningTables: Set<string>;
   selectedTable: { rowKey: string; schema: string; tableName: string } | null;
   selectedQuery: { connectionRowKey: string; queryRowKey: string; queryText: string } | null;
   onExpandConnection: (rowKey: string) => void;
@@ -63,6 +64,7 @@ export default function ConnectionsPanel({
   connectionTables,
   connectionQueries,
   loadingTables,
+  dryRunningTables,
   selectedTable,
   selectedQuery,
   onExpandConnection,
@@ -246,6 +248,7 @@ export default function ConnectionsPanel({
                                     const isSelected = selectedTable?.rowKey === conn.rowKey
                                       && selectedTable?.schema === t.schema
                                       && selectedTable?.tableName === t.name;
+                                    const isDryRunning = dryRunningTables.has(`${conn.rowKey}:${t.schema}:${t.name}`);
                                     return (
                                       <li
                                         key={`${t.schema}.${t.name}`}
@@ -253,6 +256,11 @@ export default function ConnectionsPanel({
                                         onClick={() => onTableClick(conn.rowKey, t.schema, t.name)}
                                         onContextMenu={(e) => handleTableContextMenu(e, conn.rowKey, t.schema, t.name)}
                                       >
+                                        {isDryRunning && (
+                                          <svg className="conn-table-running-icon" width="14" height="14" viewBox="0 0 14 14">
+                                            <circle cx="7" cy="7" r="5.5" fill="none" stroke="currentColor" strokeWidth="1.5" strokeDasharray="20 12" />
+                                          </svg>
+                                        )}
                                         <svg className="conn-table-icon" width="14" height="14" viewBox="0 0 14 14">
                                           <rect x="1" y="1" width="12" height="12" rx="1.5" fill="none" stroke="currentColor" strokeWidth="1" />
                                           <line x1="1" y1="5" x2="13" y2="5" stroke="currentColor" strokeWidth="1" />

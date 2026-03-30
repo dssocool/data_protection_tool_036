@@ -260,6 +260,17 @@
   background: none;
 }
 
+.conn-table-running-icon {
+  flex-shrink: 0;
+  color: #0078d4;
+  animation: conn-spin 1s linear infinite;
+}
+
+@keyframes conn-spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
 .conn-query-icon {
   color: #0078d4;
 }
