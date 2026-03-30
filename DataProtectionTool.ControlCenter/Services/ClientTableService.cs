@@ -8,14 +8,16 @@ public class ClientTableService
 {
     private readonly string _tableName;
     private readonly TableClient _tableClient;
+    private readonly TableClient _controlCenterTableClient;
     private readonly ILogger<ClientTableService> _logger;
     private bool _tableInitialized;
 
-    public ClientTableService(TableServiceClient serviceClient, string tableName, ILogger<ClientTableService> logger)
+    public ClientTableService(TableServiceClient serviceClient, string tableName, string controlCenterTableName, ILogger<ClientTableService> logger)
     {
         _tableName = tableName;
         _logger = logger;
         _tableClient = serviceClient.GetTableClient(_tableName);
+        _controlCenterTableClient = serviceClient.GetTableClient(controlCenterTableName);
     }
 
     private void EnsureTableExists()
@@ -62,8 +64,10 @@ public class ClientTableService
                 LastConnectedAt = DateTime.UtcNow
             };
             await _tableClient.AddEntityAsync(entity);
+
+            var uniqueId = await AssignUserIdAsync(partitionKey);
             _logger.LogInformation(
-                "Created new client — oid={Oid}, tid={Tid}", oid, tid);
+                "Created new client — oid={Oid}, tid={Tid}, uniqueId={UniqueId}", oid, tid, uniqueId);
             return entity;
         }
     }
@@ -285,6 +289,61 @@ public class ClientTableService
         catch (Azure.RequestFailedException ex) when (ex.Status == 404)
         {
             return new List<EventRecord>();
+        }
+    }
+
+    public async Task<int> GetNextUserIdAsync()
+    {
+        int maxId = 0;
+
+        await foreach (var entity in _controlCenterTableClient.QueryAsync<IdMappingEntity>(
+            e => e.PartitionKey == "id_to_user"))
+        {
+            if (int.TryParse(entity.RowKey, out var id) && id > maxId)
+                maxId = id;
+        }
+
+        return maxId + 1;
+    }
+
+    public async Task<int> AssignUserIdAsync(string userPartitionKey)
+    {
+        var nextId = await GetNextUserIdAsync();
+        var idStr = nextId.ToString();
+
+        var idMapping = new IdMappingEntity
+        {
+            PartitionKey = "id_to_user",
+            RowKey = idStr,
+            Value = userPartitionKey
+        };
+        await _controlCenterTableClient.AddEntityAsync(idMapping);
+
+        var uniqueId = new UniqueIdEntity
+        {
+            PartitionKey = userPartitionKey,
+            RowKey = "unique_id",
+            Value = idStr
+        };
+        await _tableClient.AddEntityAsync(uniqueId);
+
+        _logger.LogInformation(
+            "Assigned unique ID {UniqueId} to user {UserPartitionKey}", idStr, userPartitionKey);
+
+        return nextId;
+    }
+
+    public async Task<string?> GetUserIdAsync(string partitionKey)
+    {
+        EnsureTableExists();
+        try
+        {
+            var response = await _tableClient.GetEntityAsync<UniqueIdEntity>(partitionKey, "unique_id");
+            return response.Value.Value;
+        }
+        catch (Azure.RequestFailedException ex) when (ex.Status == 404)
+        {
+            return null;
         }
     }
 }

@@ -37,6 +37,7 @@ builder.Services.AddSingleton(tableServiceClient);
 builder.Services.AddSingleton(sp => new ClientTableService(
     sp.GetRequiredService<TableServiceClient>(),
     "Users",
+    "ControlCenter",
     sp.GetRequiredService<ILogger<ClientTableService>>()));
 
 var blobSection = builder.Configuration.GetSection("AzureBlobStorage");
