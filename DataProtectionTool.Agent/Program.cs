@@ -655,25 +655,50 @@ static async Task<MemoryStream> WriteReaderToParquetStream(SqlDataReader reader)
 {
     var columnCount = reader.FieldCount;
     var columnNames = new string[columnCount];
-    var columnData = new List<string?>[columnCount];
+    var parquetTypes = new Type[columnCount];
+    var columnData = new List<object?>[columnCount];
 
     for (int i = 0; i < columnCount; i++)
     {
         columnNames[i] = reader.GetName(i);
-        columnData[i] = new List<string?>();
+        parquetTypes[i] = MapToParquetType(reader.GetFieldType(i));
+        columnData[i] = new List<object?>();
     }
 
     while (await reader.ReadAsync())
     {
         for (int i = 0; i < columnCount; i++)
         {
-            columnData[i].Add(reader.IsDBNull(i) ? null : reader.GetValue(i)?.ToString() ?? "");
+            if (reader.IsDBNull(i))
+            {
+                columnData[i].Add(null);
+            }
+            else
+            {
+                var val = reader.GetValue(i);
+                var pt = parquetTypes[i];
+                if (pt == typeof(int))
+                    columnData[i].Add(Convert.ToInt32(val));
+                else if (pt == typeof(long))
+                    columnData[i].Add(Convert.ToInt64(val));
+                else if (pt == typeof(float))
+                    columnData[i].Add(Convert.ToSingle(val));
+                else if (pt == typeof(double))
+                    columnData[i].Add(Convert.ToDouble(val));
+                else if (pt == typeof(bool))
+                    columnData[i].Add(Convert.ToBoolean(val));
+                else if (pt == typeof(byte[]))
+                    columnData[i].Add((byte[])val);
+                else
+                    columnData[i].Add(val?.ToString() ?? "");
+            }
         }
     }
 
-    var dataFields = columnNames
-        .Select(name => new DataField(name, typeof(string), isNullable: true))
-        .ToArray();
+    var dataFields = new DataField[columnCount];
+    for (int i = 0; i < columnCount; i++)
+        dataFields[i] = new DataField(columnNames[i], parquetTypes[i], isNullable: true);
+
     var parquetSchema = new ParquetSchema(dataFields);
 
     var ms = new MemoryStream();
@@ -682,12 +707,40 @@ static async Task<MemoryStream> WriteReaderToParquetStream(SqlDataReader reader)
         using var rowGroup = writer.CreateRowGroup();
         for (int i = 0; i < columnCount; i++)
         {
-            var column = new DataColumn(dataFields[i], columnData[i].ToArray());
+            var column = new DataColumn(dataFields[i], ToTypedArray(columnData[i], parquetTypes[i]));
             await rowGroup.WriteColumnAsync(column);
         }
     }
 
     return ms;
+}
+
+static Type MapToParquetType(Type clrType)
+{
+    if (clrType == typeof(bool)) return typeof(bool);
+    if (clrType == typeof(byte) || clrType == typeof(short) || clrType == typeof(int)) return typeof(int);
+    if (clrType == typeof(long)) return typeof(long);
+    if (clrType == typeof(float)) return typeof(float);
+    if (clrType == typeof(double)) return typeof(double);
+    if (clrType == typeof(byte[])) return typeof(byte[]);
+    return typeof(string);
+}
+
+static Array ToTypedArray(List<object?> data, Type clrType)
+{
+    if (clrType == typeof(bool))
+        return data.Select(v => (bool?)v).ToArray();
+    if (clrType == typeof(int))
+        return data.Select(v => v == null ? (int?)null : Convert.ToInt32(v)).ToArray();
+    if (clrType == typeof(long))
+        return data.Select(v => v == null ? (long?)null : Convert.ToInt64(v)).ToArray();
+    if (clrType == typeof(float))
+        return data.Select(v => v == null ? (float?)null : Convert.ToSingle(v)).ToArray();
+    if (clrType == typeof(double))
+        return data.Select(v => v == null ? (double?)null : Convert.ToDouble(v)).ToArray();
+    if (clrType == typeof(byte[]))
+        return data.Select(v => (byte[]?)v).ToArray();
+    return data.Select(v => (string?)v).ToArray();
 }
 
 static string GetLocalIpAddress()
