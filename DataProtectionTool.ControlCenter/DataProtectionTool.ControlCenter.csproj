@@ -17,10 +17,4 @@
     <ProjectReference Include="..\DataProtectionTool.Contracts\DataProtectionTool.Contracts.csproj" />
   </ItemGroup>
 
-  <ItemGroup>
-    <None Update="dataEngineConfig.json">
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-    </None>
-  </ItemGroup>
-
 </Project>

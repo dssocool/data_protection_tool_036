@@ -61,7 +61,6 @@ wwwroot/
 ## ControlCenter config files (use *.example.json as templates)
 DataProtectionTool.ControlCenter/appsettings.json
 DataProtectionTool.ControlCenter/appsettings.Development.json
-DataProtectionTool.ControlCenter/dataEngineConfig.json
 
 ## Misc
 *.swp

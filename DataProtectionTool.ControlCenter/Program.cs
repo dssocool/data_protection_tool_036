@@ -57,12 +57,8 @@ var blobServiceClient = new BlobServiceClient(blobServiceUri, blobCredential);
 builder.Services.AddSingleton(blobServiceClient);
 builder.Services.AddSingleton(blobCredential);
 
-var dataEngineConfigRoot = JsonSerializer.Deserialize<Dictionary<string, DataEngineConfig>>(
-    File.ReadAllText("dataEngineConfig.json"),
-    new JsonSerializerOptions { PropertyNameCaseInsensitive = true })
-    ?? throw new InvalidOperationException("Failed to parse dataEngineConfig.json.");
-var dataEngineConfig = dataEngineConfigRoot.GetValueOrDefault("DataEngine")
-    ?? throw new InvalidOperationException("dataEngineConfig.json is missing the 'DataEngine' section.");
+var dataEngineConfig = builder.Configuration.GetSection("DataEngine").Get<DataEngineConfig>()
+    ?? throw new InvalidOperationException("DataEngine section is not configured in appsettings.");
 builder.Services.AddSingleton(dataEngineConfig);
 
 var app = builder.Build();
@@ -626,13 +622,13 @@ app.MapPost("/api/agents/{path}/dry-run", async (string path, HttpRequest reques
             return Results.Ok(new { success = false, message = "No preview files available. Please preview the table first." });
 
         if (string.IsNullOrEmpty(dataEngineConfig.EngineUrl) || string.IsNullOrEmpty(dataEngineConfig.AuthorizationToken))
-            return Results.Ok(new { success = false, message = "Data engine is not configured. Set EngineUrl and AuthorizationToken in dataEngineConfig.json." });
+            return Results.Ok(new { success = false, message = "Data engine is not configured. Set EngineUrl and AuthorizationToken in appsettings.json." });
 
         if (string.IsNullOrEmpty(dataEngineConfig.ConnectorId))
-            return Results.Ok(new { success = false, message = "Data engine ConnectorId is not configured. Set ConnectorId in dataEngineConfig.json." });
+            return Results.Ok(new { success = false, message = "Data engine ConnectorId is not configured. Set ConnectorId in appsettings.json." });
 
         if (string.IsNullOrEmpty(dataEngineConfig.ProfileSetId))
-            return Results.Ok(new { success = false, message = "Data engine ProfileSetId is not configured. Set ProfileSetId in dataEngineConfig.json." });
+            return Results.Ok(new { success = false, message = "Data engine ProfileSetId is not configured. Set ProfileSetId in appsettings.json." });
 
         // Step 1: Get or create file format
         var existing = await clientTableService.GetTableFormatAsync(partitionKey, rowKey, schema, tableName);
