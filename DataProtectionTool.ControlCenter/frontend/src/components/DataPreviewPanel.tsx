@@ -29,6 +29,9 @@ interface DataPreviewPanelProps {
   activeTab: string;
   diffTab: DiffTab | null;
   columnRules: Record<string, unknown>[];
+  columnRuleAlgorithms: Record<string, unknown>[];
+  columnRuleDomains: Record<string, unknown>[];
+  columnRuleFrameworks: Record<string, unknown>[];
   columnRulesLoading: boolean;
   onTabChange: (tab: string) => void;
   onTabClose: (tab: string) => void;
@@ -126,6 +129,9 @@ export default function DataPreviewPanel({
   activeTab,
   diffTab,
   columnRules,
+  columnRuleAlgorithms,
+  columnRuleDomains,
+  columnRuleFrameworks,
   columnRulesLoading,
   onTabChange,
   onTabClose,
@@ -379,31 +385,65 @@ export default function DataPreviewPanel({
           </div>
         </div>
       )}
-      {selectedRule && (
-        <div className="column-rule-modal-overlay" onClick={() => setSelectedRule(null)}>
-          <div className="column-rule-modal" onClick={(e) => e.stopPropagation()}>
-            <div className="column-rule-modal-header">
-              <span className="column-rule-modal-title">
-                Column Rule: {String(selectedRule.fieldName ?? "")}
-              </span>
-              <button
-                className="column-rule-modal-close"
-                onClick={() => setSelectedRule(null)}
-                aria-label="Close"
-              >
-                <svg width="14" height="14" viewBox="0 0 14 14">
-                  <path d="M3 3 L11 11 M11 3 L3 11" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
-                </svg>
-              </button>
-            </div>
-            <div className="column-rule-modal-body">
-              <pre className="column-rule-json">
-                {JSON.stringify(selectedRule, null, 2)}
-              </pre>
+      {selectedRule && (() => {
+        const algName = typeof selectedRule.algorithmName === "string" ? selectedRule.algorithmName : "";
+        const domName = typeof selectedRule.domainName === "string" ? selectedRule.domainName : "";
+        const matchedAlg = algName ? columnRuleAlgorithms.find(a => a.algorithmName === algName) : undefined;
+        const matchedDom = domName ? columnRuleDomains.find(d => d.domainName === domName) : undefined;
+        const fwId = matchedAlg && matchedAlg.frameworkId != null ? String(matchedAlg.frameworkId) : "";
+        const matchedFw = fwId ? columnRuleFrameworks.find(f => String(f.frameworkId) === fwId) : undefined;
+
+        return (
+          <div className="column-rule-modal-overlay" onClick={() => setSelectedRule(null)}>
+            <div className="column-rule-modal" onClick={(e) => e.stopPropagation()}>
+              <div className="column-rule-modal-header">
+                <span className="column-rule-modal-title">
+                  Column Rule: {String(selectedRule.fieldName ?? "")}
+                </span>
+                <button
+                  className="column-rule-modal-close"
+                  onClick={() => setSelectedRule(null)}
+                  aria-label="Close"
+                >
+                  <svg width="14" height="14" viewBox="0 0 14 14">
+                    <path d="M3 3 L11 11 M11 3 L3 11" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+                  </svg>
+                </button>
+              </div>
+              <div className="column-rule-modal-body">
+                <div className="column-rule-section-title">Rule</div>
+                <pre className="column-rule-json">
+                  {JSON.stringify(selectedRule, null, 2)}
+                </pre>
+                {matchedAlg && (
+                  <>
+                    <div className="column-rule-section-title">Algorithm</div>
+                    <pre className="column-rule-json">
+                      {JSON.stringify(matchedAlg, null, 2)}
+                    </pre>
+                  </>
+                )}
+                {matchedDom && (
+                  <>
+                    <div className="column-rule-section-title">Domain</div>
+                    <pre className="column-rule-json">
+                      {JSON.stringify(matchedDom, null, 2)}
+                    </pre>
+                  </>
+                )}
+                {matchedFw && (
+                  <>
+                    <div className="column-rule-section-title">Framework</div>
+                    <pre className="column-rule-json">
+                      {JSON.stringify(matchedFw, null, 2)}
+                    </pre>
+                  </>
+                )}
+              </div>
             </div>
           </div>
-        </div>
-      )}
+        );
+      })()}
     </div>
   );
 }

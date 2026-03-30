@@ -24,6 +24,9 @@ interface TablePreviewCache {
   previewError: string | null;
   dryRunInProgress: boolean;
   columnRules: Record<string, unknown>[];
+  columnRuleAlgorithms: Record<string, unknown>[];
+  columnRuleDomains: Record<string, unknown>[];
+  columnRuleFrameworks: Record<string, unknown>[];
 }
 
 function tableKey(rowKey: string, schema: string, tableName: string) {
@@ -63,6 +66,9 @@ export default function App() {
   const [userUniqueId, setUserUniqueId] = useState<string | null>(null);
   const [fullRunTarget, setFullRunTarget] = useState<{ rowKey: string; schema: string; tableName: string } | null>(null);
   const [columnRules, setColumnRules] = useState<Record<string, unknown>[]>([]);
+  const [columnRuleAlgorithms, setColumnRuleAlgorithms] = useState<Record<string, unknown>[]>([]);
+  const [columnRuleDomains, setColumnRuleDomains] = useState<Record<string, unknown>[]>([]);
+  const [columnRuleFrameworks, setColumnRuleFrameworks] = useState<Record<string, unknown>[]>([]);
   const [columnRulesLoading, setColumnRulesLoading] = useState(false);
   const [dryRunningTables, setDryRunningTables] = useState<Set<string>>(new Set());
   const eventsTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -292,6 +298,9 @@ export default function App() {
       previewError,
       dryRunInProgress: existing?.dryRunInProgress ?? false,
       columnRules,
+      columnRuleAlgorithms,
+      columnRuleDomains,
+      columnRuleFrameworks,
     });
   }
 
@@ -305,6 +314,9 @@ export default function App() {
     setPreviewError(cached.previewError);
     setPreviewLoading(cached.dryRunInProgress);
     setColumnRules(cached.columnRules);
+    setColumnRuleAlgorithms(cached.columnRuleAlgorithms);
+    setColumnRuleDomains(cached.columnRuleDomains);
+    setColumnRuleFrameworks(cached.columnRuleFrameworks);
   }
 
   async function fetchColumnRules(agentPath: string, fileFormatId: string) {
@@ -316,14 +328,20 @@ export default function App() {
       if (res.ok) {
         const result = await res.json();
         if (result.success && Array.isArray(result.responseList)) {
-          const parsed: Record<string, unknown>[] = result.responseList.map((item: unknown) => {
-            if (typeof item === "string") {
-              try { return JSON.parse(item); } catch { return { raw: item }; }
-            }
-            return item as Record<string, unknown>;
-          });
-          setColumnRules(parsed);
-          return parsed;
+          const parseArray = (arr: unknown): Record<string, unknown>[] => {
+            if (!Array.isArray(arr)) return [];
+            return arr.map((item: unknown) => {
+              if (typeof item === "string") {
+                try { return JSON.parse(item); } catch { return { raw: item }; }
+              }
+              return item as Record<string, unknown>;
+            });
+          };
+          setColumnRules(parseArray(result.responseList));
+          setColumnRuleAlgorithms(parseArray(result.algorithms));
+          setColumnRuleDomains(parseArray(result.domains));
+          setColumnRuleFrameworks(parseArray(result.frameworks));
+          return parseArray(result.responseList);
         }
       }
     } catch {
@@ -332,6 +350,9 @@ export default function App() {
       setColumnRulesLoading(false);
     }
     setColumnRules([]);
+    setColumnRuleAlgorithms([]);
+    setColumnRuleDomains([]);
+    setColumnRuleFrameworks([]);
     return [];
   }
 
@@ -360,6 +381,9 @@ export default function App() {
     setActivePreviewTab("Original");
     setDiffTab(null);
     setColumnRules([]);
+    setColumnRuleAlgorithms([]);
+    setColumnRuleDomains([]);
+    setColumnRuleFrameworks([]);
 
     const tableInfo = connectionTables[rowKey]?.find(
       (t) => t.schema === schema && t.name === tableName
@@ -488,6 +512,9 @@ export default function App() {
     setActivePreviewTab("Original");
     setDiffTab(null);
     setColumnRules([]);
+    setColumnRuleAlgorithms([]);
+    setColumnRuleDomains([]);
+    setColumnRuleFrameworks([]);
 
     const cacheKey = `query:${connectionRowKey}:${queryRowKey}`;
     const cached = previewCacheRef.current.get(cacheKey);
@@ -660,7 +687,7 @@ export default function App() {
         ...(currentCached ?? {
           previewData, originalData, dryRuns: prevDryRuns, activePreviewTab,
           diffTab, previewBlobFilenames: filenames, previewError: null,
-          columnRules,
+          columnRules, columnRuleAlgorithms, columnRuleDomains, columnRuleFrameworks,
         }),
         previewBlobFilenames: filenames,
         dryRuns: updatedDryRunsWithPending,
@@ -935,6 +962,9 @@ export default function App() {
             activeTab={activePreviewTab}
             diffTab={diffTab}
             columnRules={columnRules}
+            columnRuleAlgorithms={columnRuleAlgorithms}
+            columnRuleDomains={columnRuleDomains}
+            columnRuleFrameworks={columnRuleFrameworks}
             columnRulesLoading={columnRulesLoading}
             onTabChange={setActivePreviewTab}
             onTabClose={(tab) => {

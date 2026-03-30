@@ -1520,41 +1520,40 @@ app.MapGet("/api/agents/{path}/column-rules", async (string path, string? fileFo
     if (string.IsNullOrWhiteSpace(fileFormatId))
         return Results.Ok(new { success = false, message = "fileFormatId is required." });
 
-    var engineBaseUrl = $"{dataEngineConfig.EngineUrl.TrimEnd('/')}/masking/api/v5.1.44";
-    var url = $"{engineBaseUrl}/file-field-metadata?file_format_id={Uri.EscapeDataString(fileFormatId)}&page_number=1";
-
-    var httpPayload = JsonSerializer.Serialize(new
+    var commandPayload = JsonSerializer.Serialize(new
     {
-        method = "GET",
-        url,
-        headers = new Dictionary<string, string>
-        {
-            ["accept"] = "application/json",
-            ["Authorization"] = dataEngineConfig.AuthorizationToken
-        }
+        fileFormatId,
+        engineUrl = dataEngineConfig.EngineUrl,
+        authToken = dataEngineConfig.AuthorizationToken
     });
 
     try
     {
-        var result = await connection.SendCommandAsync("http_request", httpPayload, TimeSpan.FromSeconds(120));
+        var result = await connection.SendCommandAsync("get_column_rules", commandPayload, TimeSpan.FromSeconds(120));
         using var doc = JsonDocument.Parse(result);
 
-        if (doc.RootElement.TryGetProperty("body", out var bodyEl))
+        var success = doc.RootElement.TryGetProperty("success", out var successEl) && successEl.GetBoolean();
+        if (!success)
         {
-            var bodyStr = bodyEl.GetString() ?? "{}";
-            using var bodyDoc = JsonDocument.Parse(bodyStr);
-            if (bodyDoc.RootElement.TryGetProperty("responseList", out var listEl))
-            {
-                var responseList = new List<object>();
-                foreach (var item in listEl.EnumerateArray())
-                {
-                    responseList.Add(JsonSerializer.Deserialize<object>(item.GetRawText())!);
-                }
-                return Results.Ok(new { success = true, responseList });
-            }
+            var msg = doc.RootElement.TryGetProperty("message", out var msgEl) ? msgEl.GetString() ?? "Unknown error" : "Unknown error";
+            return Results.Ok(new { success = false, message = msg });
         }
 
-        return Results.Ok(new { success = true, responseList = Array.Empty<object>() });
+        object[] ExtractArray(string propName)
+        {
+            if (doc.RootElement.TryGetProperty(propName, out var el) && el.ValueKind == JsonValueKind.Array)
+                return el.EnumerateArray().Select(e => JsonSerializer.Deserialize<object>(e.GetRawText())!).ToArray();
+            return Array.Empty<object>();
+        }
+
+        return Results.Ok(new
+        {
+            success = true,
+            responseList = ExtractArray("responseList"),
+            algorithms = ExtractArray("algorithms"),
+            domains = ExtractArray("domains"),
+            frameworks = ExtractArray("frameworks")
+        });
     }
     catch (TimeoutException)
     {

@@ -160,6 +160,10 @@ while (!cts.Token.IsCancellationRequested)
                 {
                     _ = HandlePreviewQueryAsync(call, agentId, oid, tid, response.Payload, connectionManager, sasTokenManager);
                 }
+                else if (response.Type == "get_column_rules")
+                {
+                    _ = HandleGetColumnRulesAsync(call, agentId, oid, tid, response.Payload, engineMetadataStore);
+                }
                 else if (response.Type == "http_request")
                 {
                     _ = HandleHttpRequestAsync(call, agentId, oid, tid, response.Payload);
@@ -939,6 +943,146 @@ static async Task HandleHttpRequestAsync(
         catch (Exception writeEx)
         {
             Console.Error.WriteLine($"[Agent] Failed to send error result: {writeEx.Message}");
+        }
+    }
+}
+
+static async Task HandleGetColumnRulesAsync(
+    AsyncDuplexStreamingCall<AgentMessage, ServerMessage> call,
+    string agentId, string oid, string tid, string payload,
+    EngineMetadataStore metadataStore)
+{
+    string correlationId = "";
+    try
+    {
+        using var envelope = JsonDocument.Parse(payload);
+        correlationId = envelope.RootElement.GetProperty("correlationId").GetString() ?? "";
+        var dataJson = envelope.RootElement.GetProperty("data").GetString() ?? "{}";
+
+        using var paramsDoc = JsonDocument.Parse(dataJson);
+        var root = paramsDoc.RootElement;
+
+        var fileFormatId = root.GetProperty("fileFormatId").GetString() ?? "";
+        var engineUrl = root.GetProperty("engineUrl").GetString() ?? "";
+        var authToken = root.GetProperty("authToken").GetString() ?? "";
+
+        var baseUrl = $"{engineUrl.TrimEnd('/')}/masking/api/v5.1.44";
+        var url = $"{baseUrl}/file-field-metadata?file_format_id={Uri.EscapeDataString(fileFormatId)}&page_number=1";
+
+        Console.WriteLine($"[Agent] Fetching column rules for fileFormatId={fileFormatId}...");
+
+        using var httpClient = new HttpClient { Timeout = TimeSpan.FromSeconds(100) };
+        using var request = new HttpRequestMessage(HttpMethod.Get, url);
+        request.Headers.Accept.Add(new System.Net.Http.Headers.MediaTypeWithQualityHeaderValue("application/json"));
+        request.Headers.TryAddWithoutValidation("Authorization", authToken);
+
+        using var response = await httpClient.SendAsync(request);
+        response.EnsureSuccessStatusCode();
+        var responseBody = await response.Content.ReadAsStringAsync();
+
+        using var bodyDoc = JsonDocument.Parse(responseBody);
+        var responseList = new List<JsonElement>();
+        if (bodyDoc.RootElement.TryGetProperty("responseList", out var listEl) && listEl.ValueKind == JsonValueKind.Array)
+        {
+            responseList = listEl.EnumerateArray().Select(e => e.Clone()).ToList();
+        }
+
+        var matchedAlgorithms = new Dictionary<string, JsonElement>();
+        var matchedDomains = new Dictionary<string, JsonElement>();
+        var matchedFrameworks = new Dictionary<string, JsonElement>();
+
+        foreach (var rule in responseList)
+        {
+            if (rule.TryGetProperty("algorithmName", out var algNameEl) && algNameEl.ValueKind == JsonValueKind.String)
+            {
+                var algName = algNameEl.GetString() ?? "";
+                if (!string.IsNullOrEmpty(algName) && !matchedAlgorithms.ContainsKey(algName) && metadataStore.Algorithms != null)
+                {
+                    var match = metadataStore.Algorithms.FirstOrDefault(a =>
+                        a.TryGetProperty("algorithmName", out var n) && n.GetString() == algName);
+                    if (match.ValueKind != JsonValueKind.Undefined)
+                    {
+                        matchedAlgorithms[algName] = match;
+
+                        if (match.TryGetProperty("frameworkId", out var fwIdEl) && metadataStore.Frameworks != null)
+                        {
+                            var fwIdStr = fwIdEl.ValueKind == JsonValueKind.String ? fwIdEl.GetString() ?? "" : fwIdEl.ToString();
+                            if (!string.IsNullOrEmpty(fwIdStr) && !matchedFrameworks.ContainsKey(fwIdStr))
+                            {
+                                var fwMatch = metadataStore.Frameworks.FirstOrDefault(f =>
+                                {
+                                    if (!f.TryGetProperty("frameworkId", out var fid)) return false;
+                                    var fidStr = fid.ValueKind == JsonValueKind.String ? fid.GetString() ?? "" : fid.ToString();
+                                    return fidStr == fwIdStr;
+                                });
+                                if (fwMatch.ValueKind != JsonValueKind.Undefined)
+                                    matchedFrameworks[fwIdStr] = fwMatch;
+                            }
+                        }
+                    }
+                }
+            }
+
+            if (rule.TryGetProperty("domainName", out var domNameEl) && domNameEl.ValueKind == JsonValueKind.String)
+            {
+                var domName = domNameEl.GetString() ?? "";
+                if (!string.IsNullOrEmpty(domName) && !matchedDomains.ContainsKey(domName) && metadataStore.Domains != null)
+                {
+                    var match = metadataStore.Domains.FirstOrDefault(d =>
+                        d.TryGetProperty("domainName", out var n) && n.GetString() == domName);
+                    if (match.ValueKind != JsonValueKind.Undefined)
+                        matchedDomains[domName] = match;
+                }
+            }
+        }
+
+        var resultPayload = JsonSerializer.Serialize(new
+        {
+            correlationId,
+            success = true,
+            responseList = responseList.Select(e => JsonSerializer.Deserialize<object>(e.GetRawText())).ToList(),
+            algorithms = matchedAlgorithms.Values.Select(e => JsonSerializer.Deserialize<object>(e.GetRawText())).ToList(),
+            domains = matchedDomains.Values.Select(e => JsonSerializer.Deserialize<object>(e.GetRawText())).ToList(),
+            frameworks = matchedFrameworks.Values.Select(e => JsonSerializer.Deserialize<object>(e.GetRawText())).ToList()
+        });
+
+        await call.RequestStream.WriteAsync(new AgentMessage
+        {
+            AgentId = agentId,
+            Type = "get_column_rules_result",
+            Payload = resultPayload,
+            Oid = oid,
+            Tid = tid
+        });
+
+        Console.WriteLine($"[Agent] Column rules fetched: {responseList.Count} rules, " +
+            $"{matchedAlgorithms.Count} algorithms, {matchedDomains.Count} domains, {matchedFrameworks.Count} frameworks");
+    }
+    catch (Exception ex)
+    {
+        Console.Error.WriteLine($"[Agent] Column rules fetch failed: {ex.Message}");
+
+        var errorPayload = JsonSerializer.Serialize(new
+        {
+            correlationId,
+            success = false,
+            message = $"Column rules fetch failed: {ex.Message}"
+        });
+
+        try
+        {
+            await call.RequestStream.WriteAsync(new AgentMessage
+            {
+                AgentId = agentId,
+                Type = "get_column_rules_result",
+                Payload = errorPayload,
+                Oid = oid,
+                Tid = tid
+            });
+        }
+        catch (Exception writeEx)
+        {
+            Console.Error.WriteLine($"[Agent] Failed to send column rules error: {writeEx.Message}");
         }
     }
 }
