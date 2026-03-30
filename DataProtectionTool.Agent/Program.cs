@@ -180,7 +180,7 @@ while (!cts.Token.IsCancellationRequested)
 
                 await call.RequestStream.WriteAsync(message, cts.Token);
                 Console.WriteLine($"[Agent] Sent heartbeat seq={sequence - 1}");
-                await Task.Delay(TimeSpan.FromSeconds(5), cts.Token);
+                await Task.Delay(TimeSpan.FromSeconds(60), cts.Token);
             }
         });
 
