@@ -11,6 +11,7 @@ import type { PreviewData } from "./components/DataPreviewPanel";
 import StatusBar from "./components/StatusBar";
 import type { StatusEvent } from "./components/StatusBar";
 import EventDialog from "./components/EventDialog";
+import FullRunModal from "./components/FullRunModal";
 import "./App.css";
 
 function getAgentPath(): string | null {
@@ -44,6 +45,7 @@ export default function App() {
   const [agentOid, setAgentOid] = useState("");
   const [agentTid, setAgentTid] = useState("");
   const [userUniqueId, setUserUniqueId] = useState<string | null>(null);
+  const [fullRunTarget, setFullRunTarget] = useState<{ rowKey: string; schema: string; tableName: string } | null>(null);
   const eventsTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const previewCacheRef = useRef<Map<string, string[]>>(new Map());
 
@@ -555,6 +557,48 @@ export default function App() {
     }
   }
 
+  function handleFullRunOpen(rowKey: string, schema: string, tableName: string) {
+    setFullRunTarget({ rowKey, schema, tableName });
+  }
+
+  async function handleFullRunExecute(destConnectionRowKey: string, destSchema: string) {
+    const agentPath = getAgentPath();
+    if (!agentPath || !fullRunTarget) return;
+
+    setFullRunTarget(null);
+    setPreviewLoading(true);
+    setPreviewError(null);
+
+    try {
+      const res = await fetch(`/api/agents/${agentPath}/full-run`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          rowKey: fullRunTarget.rowKey,
+          schema: fullRunTarget.schema,
+          tableName: fullRunTarget.tableName,
+          destConnectionRowKey,
+          destSchema,
+        }),
+      });
+
+      if (!res.ok) {
+        setPreviewError(`Full run request failed: server error ${res.status}`);
+        return;
+      }
+
+      const result = await res.json();
+      if (!result.success) {
+        setPreviewError(result.message ?? "Full run failed.");
+      }
+    } catch (e) {
+      setPreviewError(`Full run failed: ${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      setPreviewLoading(false);
+      fetchEvents();
+    }
+  }
+
   return (
     <div className="app">
       <MenuBar
@@ -581,6 +625,7 @@ export default function App() {
             onReloadPreview={handleReloadPreview}
             onRefreshConnection={handleRefreshConnection}
             onDryRun={handleDryRun}
+            onFullRun={handleFullRunOpen}
             onClose={() => setShowConnections(false)}
             onWidthChange={setConnectionsPanelWidth}
           />
@@ -647,6 +692,16 @@ export default function App() {
           onClose={() => setShowQueryModal(false)}
           onSave={handleSaveQuery}
           onValidate={handleValidateQuery}
+        />
+      )}
+      {fullRunTarget && (
+        <FullRunModal
+          connections={connections}
+          schema={fullRunTarget.schema}
+          tableName={fullRunTarget.tableName}
+          agentPath={getAgentPath() ?? ""}
+          onClose={() => setFullRunTarget(null)}
+          onRun={handleFullRunExecute}
         />
       )}
     </div>

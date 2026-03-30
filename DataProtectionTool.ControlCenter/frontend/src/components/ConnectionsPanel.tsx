@@ -15,6 +15,7 @@ export interface SavedConnection {
 export interface TableInfo {
   schema: string;
   name: string;
+  fileFormatId?: string;
 }
 
 export interface QueryInfo {
@@ -47,6 +48,7 @@ interface ConnectionsPanelProps {
   onReloadPreview: () => void;
   onRefreshConnection: (rowKey: string) => void;
   onDryRun: (rowKey: string, schema: string, tableName: string) => void;
+  onFullRun: (rowKey: string, schema: string, tableName: string) => void;
   onClose: () => void;
   onWidthChange?: (width: number) => void;
 }
@@ -68,6 +70,7 @@ export default function ConnectionsPanel({
   onReloadPreview,
   onRefreshConnection,
   onDryRun,
+  onFullRun,
   onClose,
   onWidthChange,
 }: ConnectionsPanelProps) {
@@ -301,16 +304,38 @@ export default function ConnectionsPanel({
                 Refresh
               </div>
               {!contextMenu.isQuery && (
-                <div
-                  className="conn-context-menu-item"
-                  onClick={() => {
-                    const { rowKey, schema, tableName } = contextMenu;
-                    setContextMenu(null);
-                    onDryRun(rowKey, schema, tableName);
-                  }}
-                >
-                  Data Protection: Dry Run
-                </div>
+                <>
+                  <div
+                    className="conn-context-menu-item"
+                    onClick={() => {
+                      const { rowKey, schema, tableName } = contextMenu;
+                      setContextMenu(null);
+                      onDryRun(rowKey, schema, tableName);
+                    }}
+                  >
+                    Data Protection: Dry Run
+                  </div>
+                  {(() => {
+                    const t = connectionTables[contextMenu.rowKey]?.find(
+                      (ti) => ti.schema === contextMenu.schema && ti.name === contextMenu.tableName
+                    );
+                    const hasFormat = !!t?.fileFormatId;
+                    return (
+                      <div
+                        className={`conn-context-menu-item${hasFormat ? "" : " conn-context-menu-item-disabled"}`}
+                        title={hasFormat ? undefined : "You must do Dry Run first."}
+                        onClick={() => {
+                          if (!hasFormat) return;
+                          const { rowKey, schema, tableName } = contextMenu;
+                          setContextMenu(null);
+                          onFullRun(rowKey, schema, tableName);
+                        }}
+                      >
+                        Data Protection: Full Run
+                      </div>
+                    );
+                  })()}
+                </>
               )}
             </>
           )}

@@ -254,7 +254,7 @@ app.MapPost("/api/agents/{path}/list-tables", async (string path, HttpRequest re
         var cached = await clientTableService.GetDataItemsAsync(partitionKey, connEntity.ServerName, connEntity.DatabaseName);
         if (cached.Count > 0)
         {
-            var cachedTables = cached.Select(d => new { schema = d.Schema, name = d.TableName }).ToList();
+            var cachedTables = cached.Select(d => new { schema = d.Schema, name = d.TableName, fileFormatId = d.FileFormatId }).ToList();
             _ = clientTableService.AppendEventAsync(partitionKey, "list_tables", $"Listed {cachedTables.Count} tables (cached)");
             return Results.Ok(new { success = true, tables = cachedTables });
         }
@@ -313,6 +313,30 @@ app.MapPost("/api/agents/{path}/list-tables", async (string path, HttpRequest re
     {
         _ = clientTableService.AppendEventAsync(partitionKey, "list_tables", $"List tables error: {ex.Message}");
         return Results.Ok(new { success = false, message = $"List tables error: {ex.Message}" });
+    }
+});
+
+app.MapGet("/api/agents/{path}/list-schemas", async (string path, string rowKey, AgentRegistry registry) =>
+{
+    if (!registry.TryGetConnection(path, out var connection) || connection is null)
+        return Results.NotFound(new { error = "Agent not found or not connected." });
+
+    if (string.IsNullOrEmpty(rowKey))
+        return Results.BadRequest(new { error = "rowKey query parameter is required." });
+
+    try
+    {
+        var payload = JsonSerializer.Serialize(new { rowKey });
+        var result = await connection.SendCommandAsync("list_schemas", payload, TimeSpan.FromSeconds(30));
+        return Results.Content(result, "application/json");
+    }
+    catch (TimeoutException)
+    {
+        return Results.Ok(new { success = false, message = "Agent did not respond within 30 seconds." });
+    }
+    catch (Exception ex)
+    {
+        return Results.Ok(new { success = false, message = $"List schemas error: {ex.Message}" });
     }
 });
 
@@ -1114,6 +1138,240 @@ app.MapPost("/api/agents/{path}/dry-run", async (string path, HttpRequest reques
     {
         _ = clientTableService.AppendEventAsync(partitionKey, "dry_run", $"Dry run error: {ex.Message}");
         return Results.Ok(new { success = false, message = $"Dry run error: {ex.Message}" });
+    }
+});
+
+app.MapPost("/api/agents/{path}/full-run", async (string path, HttpRequest request, AgentRegistry registry,
+    ClientTableService clientTableService, DataEngineConfig dataEngineConfig) =>
+{
+    if (!registry.TryGetConnection(path, out var connection) || connection is null)
+        return Results.NotFound(new { error = "Agent not found or not connected." });
+
+    var partitionKey = ClientEntity.BuildPartitionKey(connection.Info.Oid, connection.Info.Tid);
+
+    string body;
+    using (var reader = new StreamReader(request.Body))
+        body = await reader.ReadToEndAsync();
+
+    try
+    {
+        using var bodyDoc = JsonDocument.Parse(body);
+        var root = bodyDoc.RootElement;
+        var rowKey = root.GetProperty("rowKey").GetString() ?? "";
+        var schema = root.GetProperty("schema").GetString() ?? "";
+        var tableName = root.GetProperty("tableName").GetString() ?? "";
+
+        if (string.IsNullOrEmpty(dataEngineConfig.EngineUrl) || string.IsNullOrEmpty(dataEngineConfig.AuthorizationToken))
+            return Results.Ok(new { success = false, message = "Data engine is not configured. Set EngineUrl and AuthorizationToken in appsettings.json." });
+
+        if (string.IsNullOrEmpty(dataEngineConfig.ConnectorId))
+            return Results.Ok(new { success = false, message = "Data engine ConnectorId is not configured. Set ConnectorId in appsettings.json." });
+
+        var connEntity = await clientTableService.GetConnectionByRowKeyAsync(partitionKey, rowKey);
+        if (connEntity == null)
+            return Results.Ok(new { success = false, message = "Connection not found." });
+
+        var dataItem = await clientTableService.GetDataItemByTableAsync(
+            partitionKey, connEntity.ServerName, connEntity.DatabaseName, schema, tableName);
+
+        var fileFormatId = dataItem != null ? dataItem.FileFormatId : "";
+        if (string.IsNullOrEmpty(fileFormatId))
+            return Results.Ok(new { success = false, message = "File format not found. Please run Dry Run first." });
+
+        // Step 1: Export full table via agent
+        var uniqueId = await clientTableService.GetUserIdAsync(partitionKey);
+        if (string.IsNullOrWhiteSpace(uniqueId) || !IsDigitsOnly(uniqueId))
+            return Results.BadRequest(new { success = false, message = "User unique ID is missing." });
+
+        var exportPayload = JsonSerializer.Serialize(new { rowKey, schema, tableName, uniqueId });
+        var exportResult = await connection.SendCommandAsync("export_table", exportPayload, TimeSpan.FromSeconds(600));
+
+        using var exportDoc = JsonDocument.Parse(exportResult);
+        var exportRoot = exportDoc.RootElement;
+
+        if (!(exportRoot.TryGetProperty("success", out var exportSuccessEl) && exportSuccessEl.GetBoolean()))
+        {
+            var msg = exportRoot.TryGetProperty("message", out var mEl) ? mEl.GetString() : "Export failed.";
+            return Results.Ok(new { success = false, message = msg });
+        }
+
+        var exportFilenames = new List<string>();
+        if (exportRoot.TryGetProperty("filenames", out var fnEl) && fnEl.ValueKind == JsonValueKind.Array)
+        {
+            foreach (var el in fnEl.EnumerateArray())
+            {
+                var fname = el.GetString();
+                if (!string.IsNullOrEmpty(fname))
+                    exportFilenames.Add(fname);
+            }
+        }
+
+        if (exportFilenames.Count == 0)
+            return Results.Ok(new { success = false, message = "Export produced no files." });
+
+        _ = clientTableService.AppendEventAsync(partitionKey, "full_run",
+            $"Full run: exported {exportFilenames.Count} file(s) for {schema}.{tableName}");
+
+        // Step 2: Create file ruleset
+        var fullRunUuid = Guid.NewGuid().ToString("N");
+        var rulesetPayload = JsonSerializer.Serialize(new
+        {
+            engineUrl = dataEngineConfig.EngineUrl,
+            authToken = dataEngineConfig.AuthorizationToken,
+            rulesetName = $"fullrun_ruleset_{fullRunUuid}",
+            fileConnectorId = dataEngineConfig.ConnectorId
+        });
+
+        var rulesetResult = await connection.SendCommandAsync("create_file_ruleset", rulesetPayload, TimeSpan.FromSeconds(120));
+
+        using var rulesetDoc = JsonDocument.Parse(rulesetResult);
+        var rulesetRoot = rulesetDoc.RootElement;
+
+        if (!(rulesetRoot.TryGetProperty("success", out var rulesetSuccessEl) && rulesetSuccessEl.GetBoolean()))
+        {
+            var rulesetMsg = rulesetRoot.TryGetProperty("message", out var rmEl) ? rmEl.GetString() : "File ruleset creation failed.";
+            return Results.Ok(new { success = false, message = rulesetMsg });
+        }
+
+        var fileRulesetId = rulesetRoot.TryGetProperty("fileRulesetId", out var friEl)
+            ? friEl.GetString() ?? "" : "";
+
+        // Step 3: Create file metadata for each exported file
+        var fileMetadataIds = new List<string>();
+        foreach (var exportFile in exportFilenames)
+        {
+            var metadataPayload = JsonSerializer.Serialize(new
+            {
+                engineUrl = dataEngineConfig.EngineUrl,
+                authToken = dataEngineConfig.AuthorizationToken,
+                fileName = exportFile,
+                rulesetId = fileRulesetId,
+                fileFormatId,
+                fileType = "PARQUET"
+            });
+
+            var metadataResult = await connection.SendCommandAsync("create_file_metadata", metadataPayload, TimeSpan.FromSeconds(120));
+
+            using var metadataDoc = JsonDocument.Parse(metadataResult);
+            var metadataRoot = metadataDoc.RootElement;
+
+            if (!(metadataRoot.TryGetProperty("success", out var metaSuccessEl) && metaSuccessEl.GetBoolean()))
+            {
+                var metaMsg = metadataRoot.TryGetProperty("message", out var mmEl) ? mmEl.GetString() : $"File metadata creation failed for {exportFile}.";
+                return Results.Ok(new { success = false, message = metaMsg });
+            }
+
+            var fileMetadataId = metadataRoot.TryGetProperty("fileMetadataId", out var fmiEl)
+                ? fmiEl.GetString() ?? "" : "";
+            fileMetadataIds.Add(fileMetadataId);
+        }
+
+        var engineBaseUrl = $"{dataEngineConfig.EngineUrl.TrimEnd('/')}/masking/api/v5.1.44";
+
+        async Task<JsonDocument> RelayEngineHttpAsync(string method, string relativeUrl, object? requestBody = null)
+        {
+            var httpPayload = JsonSerializer.Serialize(new
+            {
+                method,
+                url = $"{engineBaseUrl}/{relativeUrl}",
+                headers = new Dictionary<string, string>
+                {
+                    ["accept"] = "application/json",
+                    ["Authorization"] = dataEngineConfig.AuthorizationToken,
+                    ["Content-Type"] = "application/json"
+                },
+                body = requestBody != null ? JsonSerializer.Serialize(requestBody) : null
+            });
+            var result = await connection.SendCommandAsync("http_request", httpPayload, TimeSpan.FromSeconds(120));
+            return JsonDocument.Parse(result);
+        }
+
+        string ExtractBodyField(JsonDocument relayResponse, string fieldName)
+        {
+            if (!relayResponse.RootElement.TryGetProperty("body", out var bodyEl))
+                return "";
+            using var bodyDoc = JsonDocument.Parse(bodyEl.GetString() ?? "{}");
+            return bodyDoc.RootElement.TryGetProperty(fieldName, out var valEl) ? valEl.ToString() : "";
+        }
+
+        // Step 4: Create masking job (skip profiling)
+        using var maskingJobResp = await RelayEngineHttpAsync("POST", "masking-jobs", new
+        {
+            jobName = $"fullrun_masking_{fullRunUuid}",
+            rulesetId = int.Parse(fileRulesetId),
+            onTheFlyMasking = false
+        });
+
+        if (!(maskingJobResp.RootElement.TryGetProperty("success", out var mjSuccessEl) && mjSuccessEl.GetBoolean()))
+        {
+            var msg = maskingJobResp.RootElement.TryGetProperty("message", out var m) ? m.GetString() : "Masking job creation failed.";
+            return Results.Ok(new { success = false, message = msg });
+        }
+
+        var maskingJobId = ExtractBodyField(maskingJobResp, "maskingJobId");
+        if (string.IsNullOrEmpty(maskingJobId))
+            return Results.Ok(new { success = false, message = "Masking job creation returned no maskingJobId." });
+
+        // Step 5: Execute masking job
+        using var maskingExecResp = await RelayEngineHttpAsync("POST", "executions", new
+        {
+            jobId = int.Parse(maskingJobId)
+        });
+
+        if (!(maskingExecResp.RootElement.TryGetProperty("success", out var meSuccessEl) && meSuccessEl.GetBoolean()))
+        {
+            var msg = maskingExecResp.RootElement.TryGetProperty("message", out var m) ? m.GetString() : "Masking job execution failed to start.";
+            return Results.Ok(new { success = false, message = msg });
+        }
+
+        var maskingExecId = ExtractBodyField(maskingExecResp, "executionId");
+        if (string.IsNullOrEmpty(maskingExecId))
+            return Results.Ok(new { success = false, message = "Masking job execution returned no executionId." });
+
+        // Step 6: Poll masking job status
+        var maskingStatus = "";
+        for (var i = 0; i < 600; i++)
+        {
+            await Task.Delay(2000);
+
+            using var statusResp = await RelayEngineHttpAsync("GET", $"executions/{maskingExecId}");
+            if (!(statusResp.RootElement.TryGetProperty("success", out var sSuccessEl) && sSuccessEl.GetBoolean()))
+                continue;
+
+            maskingStatus = ExtractBodyField(statusResp, "status");
+            if (maskingStatus is "SUCCEEDED" or "WARNING" or "FAILED" or "CANCELLED")
+                break;
+        }
+
+        if (maskingStatus is not ("SUCCEEDED" or "WARNING"))
+        {
+            return Results.Ok(new { success = false, message = $"Masking job did not succeed. Final status: {maskingStatus}" });
+        }
+
+        _ = clientTableService.AppendEventAsync(partitionKey, "full_run",
+            $"Full run completed: fileFormatId={fileFormatId}, fileRulesetId={fileRulesetId}, " +
+            $"maskingJobId={maskingJobId} ({maskingStatus}), files={exportFilenames.Count}");
+
+        return Results.Ok(new
+        {
+            success = true,
+            fileFormatId,
+            fileRulesetId,
+            fileMetadataIds,
+            maskingJobId,
+            maskingStatus,
+            exportFilenames
+        });
+    }
+    catch (TimeoutException)
+    {
+        _ = clientTableService.AppendEventAsync(partitionKey, "full_run", "Full run: timeout", "Agent did not respond in time.");
+        return Results.Ok(new { success = false, message = "Agent did not respond in time." });
+    }
+    catch (Exception ex)
+    {
+        _ = clientTableService.AppendEventAsync(partitionKey, "full_run", $"Full run error: {ex.Message}");
+        return Results.Ok(new { success = false, message = $"Full run error: {ex.Message}" });
     }
 });
 

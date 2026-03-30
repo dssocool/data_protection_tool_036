@@ -153,6 +153,14 @@ while (!cts.Token.IsCancellationRequested)
                 {
                     _ = HandleCreateFileMetadataAsync(call, agentId, oid, tid, response.Payload);
                 }
+                else if (response.Type == "list_schemas")
+                {
+                    _ = HandleListSchemasAsync(call, agentId, oid, tid, response.Payload, connectionManager);
+                }
+                else if (response.Type == "export_table")
+                {
+                    _ = HandleExportTableAsync(call, agentId, oid, tid, response.Payload, connectionManager, sasTokenManager);
+                }
                 else if (response.Type == "connection_details_result")
                 {
                     connectionManager.HandleConnectionDetailsResponse(response.Payload);
@@ -391,6 +399,169 @@ static async Task HandleListTablesAsync(
             {
                 AgentId = agentId,
                 Type = "list_tables_result",
+                Payload = resultPayload,
+                Oid = oid,
+                Tid = tid
+            });
+        }
+        catch (Exception writeEx)
+        {
+            Console.Error.WriteLine($"[Agent] Failed to send error result: {writeEx.Message}");
+        }
+    }
+}
+
+static async Task HandleListSchemasAsync(
+    AsyncDuplexStreamingCall<AgentMessage, ServerMessage> call,
+    string agentId, string oid, string tid, string payload,
+    SqlConnectionManager connManager)
+{
+    string correlationId = "";
+    try
+    {
+        using var envelope = JsonDocument.Parse(payload);
+        correlationId = envelope.RootElement.GetProperty("correlationId").GetString() ?? "";
+        var dataJson = envelope.RootElement.GetProperty("data").GetString() ?? "{}";
+
+        using var paramsDoc = JsonDocument.Parse(dataJson);
+        var rowKey = paramsDoc.RootElement.GetProperty("rowKey").GetString() ?? "";
+
+        Console.WriteLine($"[Agent] Listing schemas for connection {rowKey}...");
+
+        var schemas = await connManager.ExecuteWithRetryAsync(rowKey, call, agentId, oid, tid,
+            async (sqlConn) =>
+            {
+                var result = new List<string>();
+                await using var cmd = sqlConn.CreateCommand();
+                cmd.CommandText = @"SELECT DISTINCT TABLE_SCHEMA
+                    FROM INFORMATION_SCHEMA.TABLES
+                    WHERE TABLE_TYPE = 'BASE TABLE'
+                    ORDER BY TABLE_SCHEMA";
+
+                await using var reader = await cmd.ExecuteReaderAsync();
+                while (await reader.ReadAsync())
+                {
+                    result.Add(reader.GetString(0));
+                }
+                return result;
+            });
+
+        var resultPayload = JsonSerializer.Serialize(new
+        {
+            correlationId,
+            success = true,
+            schemas
+        });
+
+        await call.RequestStream.WriteAsync(new AgentMessage
+        {
+            AgentId = agentId,
+            Type = "list_schemas_result",
+            Payload = resultPayload,
+            Oid = oid,
+            Tid = tid
+        });
+
+        Console.WriteLine($"[Agent] Listed {schemas.Count} schemas for connection {rowKey}.");
+    }
+    catch (Exception ex)
+    {
+        Console.Error.WriteLine($"[Agent] List schemas failed: {ex.Message}");
+
+        var resultPayload = JsonSerializer.Serialize(new
+        {
+            correlationId,
+            success = false,
+            message = $"List schemas failed: {ex.Message}"
+        });
+
+        try
+        {
+            await call.RequestStream.WriteAsync(new AgentMessage
+            {
+                AgentId = agentId,
+                Type = "list_schemas_result",
+                Payload = resultPayload,
+                Oid = oid,
+                Tid = tid
+            });
+        }
+        catch (Exception writeEx)
+        {
+            Console.Error.WriteLine($"[Agent] Failed to send error result: {writeEx.Message}");
+        }
+    }
+}
+
+static async Task HandleExportTableAsync(
+    AsyncDuplexStreamingCall<AgentMessage, ServerMessage> call,
+    string agentId, string oid, string tid, string payload,
+    SqlConnectionManager connManager, SasTokenManager sasManager)
+{
+    string correlationId = "";
+    try
+    {
+        using var envelope = JsonDocument.Parse(payload);
+        correlationId = envelope.RootElement.GetProperty("correlationId").GetString() ?? "";
+        var dataJson = envelope.RootElement.GetProperty("data").GetString() ?? "{}";
+
+        using var paramsDoc = JsonDocument.Parse(dataJson);
+        var rowKey = paramsDoc.RootElement.GetProperty("rowKey").GetString() ?? "";
+        var schema = paramsDoc.RootElement.GetProperty("schema").GetString() ?? "";
+        var tableName = paramsDoc.RootElement.GetProperty("tableName").GetString() ?? "";
+        var uniqueId = paramsDoc.RootElement.GetProperty("uniqueId").GetString() ?? "";
+
+        if (string.IsNullOrWhiteSpace(uniqueId))
+            throw new InvalidOperationException("Missing uniqueId in export request.");
+
+        Console.WriteLine($"[Agent] Exporting full table [{schema}].[{tableName}] for connection {rowKey}...");
+
+        var filenames = await connManager.ExecuteWithRetryAsync(rowKey, call, agentId, oid, tid,
+            async (sqlConn) =>
+            {
+                await using var cmd = sqlConn.CreateCommand();
+                cmd.CommandText = $"SELECT * FROM [{schema}].[{tableName}]";
+                cmd.CommandTimeout = 0;
+
+                await using var reader = await cmd.ExecuteReaderAsync();
+                return await StreamReaderToParquetBlobs(reader, call, agentId, oid, tid, uniqueId, sasManager);
+            });
+
+        Console.WriteLine($"[Agent] Exported {filenames.Count} Parquet file(s) for [{schema}].[{tableName}]");
+
+        var resultPayload = JsonSerializer.Serialize(new
+        {
+            correlationId,
+            success = true,
+            filenames
+        });
+
+        await call.RequestStream.WriteAsync(new AgentMessage
+        {
+            AgentId = agentId,
+            Type = "export_table_result",
+            Payload = resultPayload,
+            Oid = oid,
+            Tid = tid
+        });
+    }
+    catch (Exception ex)
+    {
+        Console.Error.WriteLine($"[Agent] Export table failed: {ex.Message}");
+
+        var resultPayload = JsonSerializer.Serialize(new
+        {
+            correlationId,
+            success = false,
+            message = $"Export failed: {ex.Message}"
+        });
+
+        try
+        {
+            await call.RequestStream.WriteAsync(new AgentMessage
+            {
+                AgentId = agentId,
+                Type = "export_table_result",
                 Payload = resultPayload,
                 Oid = oid,
                 Tid = tid
