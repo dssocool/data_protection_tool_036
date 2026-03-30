@@ -59,6 +59,7 @@ var headers = new Metadata
 
 var connectionManager = new SqlConnectionManager();
 var sasTokenManager = new SasTokenManager();
+var engineMetadataStore = new EngineMetadataStore();
 
 using var cts = new CancellationTokenSource();
 Console.CancelKeyPress += (_, e) =>
@@ -107,6 +108,28 @@ while (!cts.Token.IsCancellationRequested)
                 {
                     connectionManager.LoadConnectionDetails(response.Payload);
                     Console.WriteLine("[Agent] Loaded connection details from ControlCenter.");
+                    continue;
+                }
+
+                if (response.Type == "fetch_engine_metadata")
+                {
+                    _ = Task.Run(async () =>
+                    {
+                        try
+                        {
+                            using var metaDoc = JsonDocument.Parse(response.Payload);
+                            var engineUrl = metaDoc.RootElement.GetProperty("engineUrl").GetString() ?? "";
+                            var authToken = metaDoc.RootElement.GetProperty("authToken").GetString() ?? "";
+                            Console.WriteLine("[Agent] Fetching engine metadata (algorithms, domains, frameworks)...");
+                            await engineMetadataStore.FetchAllAsync(engineUrl, authToken);
+                            Console.WriteLine($"[Agent] Engine metadata loaded: {engineMetadataStore.Algorithms?.Count ?? 0} algorithms, " +
+                                $"{engineMetadataStore.Domains?.Count ?? 0} domains, {engineMetadataStore.Frameworks?.Count ?? 0} frameworks");
+                        }
+                        catch (Exception ex)
+                        {
+                            Console.Error.WriteLine($"[Agent] Failed to fetch engine metadata: {ex.Message}");
+                        }
+                    });
                     continue;
                 }
 
@@ -1605,6 +1628,44 @@ class SasTokenInfo
     public string SasToken { get; set; } = "";
     public string BlobEndpoint { get; set; } = "";
     public string Container { get; set; } = "";
+}
+
+class EngineMetadataStore
+{
+    public List<JsonElement>? Algorithms { get; private set; }
+    public List<JsonElement>? Domains { get; private set; }
+    public List<JsonElement>? Frameworks { get; private set; }
+    public bool IsLoaded { get; private set; }
+
+    public async Task FetchAllAsync(string engineUrl, string authToken)
+    {
+        var baseUrl = $"{engineUrl.TrimEnd('/')}/masking/api/v5.1.44";
+        using var httpClient = new HttpClient { Timeout = TimeSpan.FromSeconds(60) };
+
+        Algorithms = await FetchListAsync(httpClient, $"{baseUrl}/algorithms?page_number=1", authToken);
+        Domains = await FetchListAsync(httpClient, $"{baseUrl}/domains?page_number=1", authToken);
+        Frameworks = await FetchListAsync(httpClient, $"{baseUrl}/algorithm/frameworks/?include_schema=false&page_number=1", authToken);
+
+        IsLoaded = true;
+    }
+
+    private static async Task<List<JsonElement>> FetchListAsync(HttpClient client, string url, string authToken)
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Get, url);
+        request.Headers.Accept.Add(new System.Net.Http.Headers.MediaTypeWithQualityHeaderValue("application/json"));
+        request.Headers.TryAddWithoutValidation("Authorization", authToken);
+
+        using var response = await client.SendAsync(request);
+        response.EnsureSuccessStatusCode();
+
+        var body = await response.Content.ReadAsStringAsync();
+        using var doc = JsonDocument.Parse(body);
+        if (doc.RootElement.TryGetProperty("responseList", out var listEl) && listEl.ValueKind == JsonValueKind.Array)
+        {
+            return listEl.EnumerateArray().Select(e => e.Clone()).ToList();
+        }
+        return new List<JsonElement>();
+    }
 }
 
 class SasTokenManager

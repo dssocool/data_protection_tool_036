@@ -14,19 +14,22 @@ public class AgentHubService : AgentHub.AgentHubBase
     private readonly ClientTableService _clientTableService;
     private readonly BlobStorageConfig _blobStorageConfig;
     private readonly StorageSharedKeyCredential _blobCredential;
+    private readonly DataEngineConfig _dataEngineConfig;
 
     public AgentHubService(
         ILogger<AgentHubService> logger,
         AgentRegistry registry,
         ClientTableService clientTableService,
         BlobStorageConfig blobStorageConfig,
-        StorageSharedKeyCredential blobCredential)
+        StorageSharedKeyCredential blobCredential,
+        DataEngineConfig dataEngineConfig)
     {
         _logger = logger;
         _registry = registry;
         _clientTableService = clientTableService;
         _blobStorageConfig = blobStorageConfig;
         _blobCredential = blobCredential;
+        _dataEngineConfig = dataEngineConfig;
     }
 
     public override async Task Connect(
@@ -103,6 +106,28 @@ public class AgentHubService : AgentHub.AgentHubBase
             catch (Exception ex)
             {
                 _logger.LogWarning(ex, "Failed to push connections to agent {AgentId}", firstMessage.AgentId);
+            }
+
+            if (!string.IsNullOrEmpty(_dataEngineConfig.EngineUrl) && !string.IsNullOrEmpty(_dataEngineConfig.AuthorizationToken))
+            {
+                try
+                {
+                    var enginePayload = JsonSerializer.Serialize(new
+                    {
+                        engineUrl = _dataEngineConfig.EngineUrl,
+                        authToken = _dataEngineConfig.AuthorizationToken
+                    });
+                    await responseStream.WriteAsync(new ServerMessage
+                    {
+                        Type = "fetch_engine_metadata",
+                        Payload = enginePayload
+                    });
+                    _logger.LogInformation("Sent fetch_engine_metadata to agent {AgentId}", firstMessage.AgentId);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Failed to send fetch_engine_metadata to agent {AgentId}", firstMessage.AgentId);
+                }
             }
 
             var readTask = Task.Run(async () =>
