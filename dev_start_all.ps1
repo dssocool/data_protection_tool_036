@@ -7,7 +7,7 @@ $ccProj      = Join-Path $scriptDir "DataProtectionTool.ControlCenter\DataProtec
 $agentProj   = Join-Path $scriptDir "DataProtectionTool.Agent\DataProtectionTool.Agent.csproj"
 
 $noAzurite = $args -contains "--no-azurite"
-$noTest    = $args -contains "--no-test"
+$noTest    = $args -contains "--agent-no-test-mode"
 $processes = @()
 
 function Kill-ProcessTree($pid) {
