@@ -10,6 +10,9 @@ using Azure.Storage.Blobs;
 using Grpc.Core;
 using Grpc.Net.Client;
 using Microsoft.Data.SqlClient;
+using Parquet;
+using Parquet.Data;
+using Parquet.Schema;
 using DataProtectionTool.Contracts;
 
 var testMode = args.Any(a => a.Equals("test", StringComparison.OrdinalIgnoreCase));
@@ -411,48 +414,26 @@ static async Task HandlePreviewTableAsync(
 
         Console.WriteLine($"[Agent] Previewing table [{schema}].[{tableName}] for connection {rowKey}...");
 
-        var csvContent = await connManager.ExecuteWithRetryAsync(rowKey, call, agentId, oid, tid,
+        var parquetStream = await connManager.ExecuteWithRetryAsync(rowKey, call, agentId, oid, tid,
             async (sqlConn) =>
             {
                 await using var cmd = sqlConn.CreateCommand();
                 cmd.CommandText = $"SELECT * FROM [{schema}].[{tableName}] TABLESAMPLE (200 ROWS)";
 
                 await using var reader = await cmd.ExecuteReaderAsync();
-                var sb = new StringBuilder();
-
-                var columnCount = reader.FieldCount;
-                for (int i = 0; i < columnCount; i++)
-                {
-                    if (i > 0) sb.Append(',');
-                    sb.Append(CsvEnclose(reader.GetName(i)));
-                }
-                sb.AppendLine();
-
-                while (await reader.ReadAsync())
-                {
-                    for (int i = 0; i < columnCount; i++)
-                    {
-                        if (i > 0) sb.Append(',');
-                        var value = reader.IsDBNull(i) ? "" : reader.GetValue(i)?.ToString() ?? "";
-                        sb.Append(CsvEnclose(value));
-                    }
-                    sb.AppendLine();
-                }
-
-                return sb.ToString();
+                return await WriteReaderToParquetStream(reader);
             });
 
-        var filename = $"{Guid.NewGuid():N}_preview.csv";
+        var filename = $"{Guid.NewGuid():N}_preview.parquet";
 
         var sasInfo = await sasManager.RequestSasTokenAsync(call, agentId, oid, tid);
 
         var blobUri = new Uri($"{sasInfo.BlobEndpoint}/{sasInfo.Container}/{filename}?{sasInfo.SasToken}");
         var blobClient = new BlobClient(blobUri);
-        var csvBytes = Encoding.UTF8.GetBytes(csvContent);
-        using var stream = new MemoryStream(csvBytes);
-        await blobClient.UploadAsync(stream, overwrite: true);
+        parquetStream.Position = 0;
+        await blobClient.UploadAsync(parquetStream, overwrite: true);
 
-        Console.WriteLine($"[Agent] Uploaded preview CSV: {filename}");
+        Console.WriteLine($"[Agent] Uploaded preview Parquet: {filename}");
 
         var resultPayload = JsonSerializer.Serialize(new
         {
@@ -604,48 +585,26 @@ static async Task HandlePreviewQueryAsync(
 
         Console.WriteLine($"[Agent] Previewing query for connection {connectionRowKey}...");
 
-        var csvContent = await connManager.ExecuteWithRetryAsync(connectionRowKey, call, agentId, oid, tid,
+        var parquetStream = await connManager.ExecuteWithRetryAsync(connectionRowKey, call, agentId, oid, tid,
             async (sqlConn) =>
             {
                 await using var cmd = sqlConn.CreateCommand();
                 cmd.CommandText = $"SELECT TOP 200 * FROM ({queryText}) AS _q";
 
                 await using var reader = await cmd.ExecuteReaderAsync();
-                var sb = new StringBuilder();
-
-                var columnCount = reader.FieldCount;
-                for (int i = 0; i < columnCount; i++)
-                {
-                    if (i > 0) sb.Append(',');
-                    sb.Append(CsvEnclose(reader.GetName(i)));
-                }
-                sb.AppendLine();
-
-                while (await reader.ReadAsync())
-                {
-                    for (int i = 0; i < columnCount; i++)
-                    {
-                        if (i > 0) sb.Append(',');
-                        var value = reader.IsDBNull(i) ? "" : reader.GetValue(i)?.ToString() ?? "";
-                        sb.Append(CsvEnclose(value));
-                    }
-                    sb.AppendLine();
-                }
-
-                return sb.ToString();
+                return await WriteReaderToParquetStream(reader);
             });
 
-        var filename = $"{Guid.NewGuid():N}_preview.csv";
+        var filename = $"{Guid.NewGuid():N}_preview.parquet";
 
         var sasInfo = await sasManager.RequestSasTokenAsync(call, agentId, oid, tid);
 
         var blobUri = new Uri($"{sasInfo.BlobEndpoint}/{sasInfo.Container}/{filename}?{sasInfo.SasToken}");
         var blobClient = new BlobClient(blobUri);
-        var csvBytes = Encoding.UTF8.GetBytes(csvContent);
-        using var stream = new MemoryStream(csvBytes);
-        await blobClient.UploadAsync(stream, overwrite: true);
+        parquetStream.Position = 0;
+        await blobClient.UploadAsync(parquetStream, overwrite: true);
 
-        Console.WriteLine($"[Agent] Uploaded query preview CSV: {filename}");
+        Console.WriteLine($"[Agent] Uploaded query preview Parquet: {filename}");
 
         var resultPayload = JsonSerializer.Serialize(new
         {
@@ -692,9 +651,43 @@ static async Task HandlePreviewQueryAsync(
     }
 }
 
-static string CsvEnclose(string value)
+static async Task<MemoryStream> WriteReaderToParquetStream(SqlDataReader reader)
 {
-    return "\"" + value.Replace("\"", "\"\"") + "\"";
+    var columnCount = reader.FieldCount;
+    var columnNames = new string[columnCount];
+    var columnData = new List<string?>[columnCount];
+
+    for (int i = 0; i < columnCount; i++)
+    {
+        columnNames[i] = reader.GetName(i);
+        columnData[i] = new List<string?>();
+    }
+
+    while (await reader.ReadAsync())
+    {
+        for (int i = 0; i < columnCount; i++)
+        {
+            columnData[i].Add(reader.IsDBNull(i) ? null : reader.GetValue(i)?.ToString() ?? "");
+        }
+    }
+
+    var dataFields = columnNames
+        .Select(name => new DataField(name, typeof(string), isNullable: true))
+        .ToArray();
+    var parquetSchema = new ParquetSchema(dataFields);
+
+    var ms = new MemoryStream();
+    using (var writer = await ParquetWriter.CreateAsync(parquetSchema, ms))
+    {
+        using var rowGroup = writer.CreateRowGroup();
+        for (int i = 0; i < columnCount; i++)
+        {
+            var column = new DataColumn(dataFields[i], columnData[i].ToArray());
+            await rowGroup.WriteColumnAsync(column);
+        }
+    }
+
+    return ms;
 }
 
 static string GetLocalIpAddress()

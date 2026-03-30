@@ -116,53 +116,6 @@ export default function App() {
     }
   }
 
-  function parseCsv(text: string): PreviewData {
-    const rows: string[][] = [];
-    let i = 0;
-    while (i < text.length) {
-      const row: string[] = [];
-      while (i < text.length) {
-        if (text[i] === '"') {
-          i++;
-          let val = "";
-          while (i < text.length) {
-            if (text[i] === '"') {
-              if (i + 1 < text.length && text[i + 1] === '"') {
-                val += '"';
-                i += 2;
-              } else {
-                i++;
-                break;
-              }
-            } else {
-              val += text[i];
-              i++;
-            }
-          }
-          row.push(val);
-        } else {
-          let val = "";
-          while (i < text.length && text[i] !== ',' && text[i] !== '\n' && text[i] !== '\r') {
-            val += text[i];
-            i++;
-          }
-          row.push(val);
-        }
-        if (i < text.length && text[i] === ',') {
-          i++;
-        } else {
-          break;
-        }
-      }
-      if (i < text.length && text[i] === '\r') i++;
-      if (i < text.length && text[i] === '\n') i++;
-      if (row.length > 0 && !(row.length === 1 && row[0] === "")) {
-        rows.push(row);
-      }
-    }
-    return { headers: rows[0] ?? [], rows: rows.slice(1) };
-  }
-
   async function handleTableClick(rowKey: string, schema: string, tableName: string) {
     const agentPath = getAgentPath();
     if (!agentPath) return;
@@ -193,12 +146,12 @@ export default function App() {
 
       const blobRes = await fetch(`/api/blob/${result.filename}`);
       if (!blobRes.ok) {
-        setPreviewError(`Failed to fetch CSV: ${blobRes.status}`);
+        setPreviewError(`Failed to fetch preview data: ${blobRes.status}`);
         return;
       }
 
-      const csvText = await blobRes.text();
-      setPreviewData(parseCsv(csvText));
+      const data = await blobRes.json();
+      setPreviewData(data as PreviewData);
     } catch (e) {
       setPreviewError(`Preview failed: ${e instanceof Error ? e.message : String(e)}`);
     } finally {
@@ -313,12 +266,12 @@ export default function App() {
 
       const blobRes = await fetch(`/api/blob/${result.filename}`);
       if (!blobRes.ok) {
-        setPreviewError(`Failed to fetch CSV: ${blobRes.status}`);
+        setPreviewError(`Failed to fetch preview data: ${blobRes.status}`);
         return;
       }
 
-      const csvText = await blobRes.text();
-      setPreviewData(parseCsv(csvText));
+      const data = await blobRes.json();
+      setPreviewData(data as PreviewData);
     } catch (e) {
       setPreviewError(`Preview failed: ${e instanceof Error ? e.message : String(e)}`);
     } finally {

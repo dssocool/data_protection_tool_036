@@ -3,6 +3,7 @@ using Azure.Data.Tables;
 using Azure.Storage;
 using Azure.Storage.Blobs;
 using Microsoft.AspNetCore.Server.Kestrel.Core;
+using Parquet;
 using DataProtectionTool.ControlCenter.Interceptors;
 using DataProtectionTool.ControlCenter.Models;
 using DataProtectionTool.ControlCenter.Services;
@@ -202,7 +203,7 @@ app.MapPost("/api/agents/{path}/preview-table", async (string path, HttpRequest 
 
 app.MapGet("/api/blob/{filename}", async (string filename, BlobServiceClient blobClient, BlobStorageConfig blobConfig) =>
 {
-    if (!filename.EndsWith("_preview.csv"))
+    if (!filename.EndsWith("_preview.parquet"))
         return Results.BadRequest(new { error = "Invalid filename." });
 
     try
@@ -214,7 +215,39 @@ app.MapGet("/api/blob/{filename}", async (string filename, BlobServiceClient blo
             return Results.NotFound(new { error = "Blob not found." });
 
         var download = await blob.DownloadContentAsync();
-        return Results.Text(download.Value.Content.ToString(), "text/csv");
+        using var ms = new MemoryStream(download.Value.Content.ToArray());
+        using var reader = await ParquetReader.CreateAsync(ms);
+
+        var dataFields = reader.Schema.GetDataFields();
+        var headers = dataFields.Select(f => f.Name).ToList();
+        var rows = new List<List<string?>>();
+
+        for (int g = 0; g < reader.RowGroupCount; g++)
+        {
+            using var groupReader = reader.OpenRowGroupReader(g);
+            var columns = new Array[dataFields.Length];
+            int rowCount = 0;
+
+            for (int c = 0; c < dataFields.Length; c++)
+            {
+                var col = await groupReader.ReadColumnAsync(dataFields[c]);
+                columns[c] = col.Data;
+                rowCount = col.Data.Length;
+            }
+
+            for (int r = 0; r < rowCount; r++)
+            {
+                var row = new List<string?>();
+                for (int c = 0; c < dataFields.Length; c++)
+                {
+                    var val = columns[c].GetValue(r);
+                    row.Add(val?.ToString() ?? "");
+                }
+                rows.Add(row);
+            }
+        }
+
+        return Results.Json(new { headers, rows });
     }
     catch (Exception ex)
     {

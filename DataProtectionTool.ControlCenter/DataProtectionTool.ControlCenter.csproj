@@ -10,6 +10,7 @@
     <PackageReference Include="Azure.Data.Tables" Version="12.*" />
     <PackageReference Include="Azure.Storage.Blobs" Version="12.*" />
     <PackageReference Include="Grpc.AspNetCore" Version="2.*" />
+    <PackageReference Include="Parquet.Net" Version="5.*" />
   </ItemGroup>
 
   <ItemGroup>
