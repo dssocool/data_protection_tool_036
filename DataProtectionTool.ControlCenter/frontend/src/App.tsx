@@ -478,19 +478,58 @@ export default function App() {
     const agentPath = getAgentPath();
     if (!agentPath) return;
 
-    if (previewData) {
-      setOriginalData({ ...previewData });
-    }
+    const isSameTable = selectedTable?.rowKey === rowKey
+      && selectedTable?.schema === schema
+      && selectedTable?.tableName === tableName;
+
+    setSelectedTable({ rowKey, schema, tableName });
+    setSelectedQuery(null);
+    setPreviewLoading(true);
+    setPreviewError(null);
 
     try {
+      let filenames = previewBlobFilenames;
+
+      if (!isSameTable || filenames.length === 0) {
+        setPreviewData(null);
+        setOriginalData(null);
+        setMaskedData(null);
+        setActivePreviewTab("Original");
+        setDiffTab(null);
+
+        const previewRes = await fetch(`/api/agents/${agentPath}/preview-table`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ rowKey, schema, tableName }),
+        });
+
+        if (!previewRes.ok) {
+          setPreviewError(`Preview failed: server error ${previewRes.status}`);
+          return;
+        }
+
+        const previewResult = await previewRes.json();
+        if (!previewResult.success) {
+          setPreviewError(previewResult.message ?? "Preview failed.");
+          return;
+        }
+
+        filenames = previewResult.filenames ?? (previewResult.filename ? [previewResult.filename] : []);
+        await fetchPreviewFromFilenames(filenames);
+      }
+
+      if (previewData) {
+        setOriginalData({ ...previewData });
+      }
+
       const res = await fetch(`/api/agents/${agentPath}/dry-run`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ rowKey, schema, tableName, previewBlobFilenames }),
+        body: JSON.stringify({ rowKey, schema, tableName, previewBlobFilenames: filenames }),
       });
 
       if (!res.ok) {
-        console.error("Dry run request failed:", res.status);
+        setPreviewError(`Dry run request failed: server error ${res.status}`);
         return;
       }
 
@@ -499,7 +538,7 @@ export default function App() {
         const mergeRes = await fetch("/api/blob/preview-merge", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ filenames: previewBlobFilenames }),
+          body: JSON.stringify({ filenames }),
         });
         if (mergeRes.ok) {
           const masked = await mergeRes.json();
@@ -507,10 +546,12 @@ export default function App() {
           setActivePreviewTab("Masked");
         }
       } else {
-        console.error("Dry run failed:", result.message);
+        setPreviewError(result.message ?? "Dry run failed.");
       }
     } catch (e) {
-      console.error("Dry run error:", e instanceof Error ? e.message : String(e));
+      setPreviewError(`Dry run failed: ${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      setPreviewLoading(false);
     }
   }
 
