@@ -71,6 +71,7 @@ echo "[3/4] Starting ControlCenter (HTTP on port 8190, gRPC on port 8191)..."
 if [ "$NO_AZURITE" = false ]; then
     # Override storage settings to point to Azurite
     export AzureTableStorage__ConnectionString="UseDevelopmentStorage=true"
+    export AzureTableStorage__TableName="Clients"
     export AzureBlobStorage__StorageAccount="devstoreaccount1"
     export AzureBlobStorage__Container="preview"
     export AzureBlobStorage__AccessKey="Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw=="

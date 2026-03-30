@@ -6,15 +6,16 @@ namespace DataProtectionTool.ControlCenter.Services;
 
 public class ClientTableService
 {
-    private const string TableName = "Clients";
+    private readonly string _tableName;
     private readonly TableClient _tableClient;
     private readonly ILogger<ClientTableService> _logger;
     private bool _tableInitialized;
 
-    public ClientTableService(TableServiceClient serviceClient, ILogger<ClientTableService> logger)
+    public ClientTableService(TableServiceClient serviceClient, string tableName, ILogger<ClientTableService> logger)
     {
+        _tableName = tableName;
         _logger = logger;
-        _tableClient = serviceClient.GetTableClient(TableName);
+        _tableClient = serviceClient.GetTableClient(_tableName);
     }
 
     private void EnsureTableExists()
@@ -24,11 +25,11 @@ public class ClientTableService
         {
             _tableClient.CreateIfNotExists();
             _tableInitialized = true;
-            _logger.LogInformation("Azure Table Storage initialized — table '{Table}'", TableName);
+            _logger.LogInformation("Azure Table Storage initialized — table '{Table}'", _tableName);
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "Failed to ensure table '{Table}' exists; will retry on next call", TableName);
+            _logger.LogWarning(ex, "Failed to ensure table '{Table}' exists; will retry on next call", _tableName);
             throw;
         }
     }

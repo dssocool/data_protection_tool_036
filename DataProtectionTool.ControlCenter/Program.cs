@@ -30,10 +30,15 @@ builder.Services.AddGrpc(options =>
 
 builder.Services.AddSingleton<AgentRegistry>();
 
-var tableConnectionString = builder.Configuration.GetSection("AzureTableStorage")["ConnectionString"]
+var tableStorageSection = builder.Configuration.GetSection("AzureTableStorage");
+var tableConnectionString = tableStorageSection["ConnectionString"]
     ?? throw new InvalidOperationException("AzureTableStorage:ConnectionString is not configured.");
+var tableName = tableStorageSection["TableName"] ?? "Clients";
 builder.Services.AddSingleton(new TableServiceClient(tableConnectionString));
-builder.Services.AddSingleton<ClientTableService>();
+builder.Services.AddSingleton(sp => new ClientTableService(
+    sp.GetRequiredService<TableServiceClient>(),
+    tableName,
+    sp.GetRequiredService<ILogger<ClientTableService>>()));
 
 var blobSection = builder.Configuration.GetSection("AzureBlobStorage");
 var blobStorageConfig = new BlobStorageConfig

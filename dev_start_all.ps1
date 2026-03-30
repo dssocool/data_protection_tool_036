@@ -81,6 +81,7 @@ Write-Host "[3/4] Starting ControlCenter (HTTP on port 8190, gRPC on port 8191).
 if (-not $noAzurite) {
     # Override storage settings to point to Azurite
     $env:AzureTableStorage__ConnectionString = "UseDevelopmentStorage=true"
+    $env:AzureTableStorage__TableName = "Clients"
     $env:AzureBlobStorage__StorageAccount = "devstoreaccount1"
     $env:AzureBlobStorage__Container = "preview"
     $env:AzureBlobStorage__AccessKey = "Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw=="
