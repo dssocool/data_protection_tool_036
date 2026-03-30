@@ -25,6 +25,8 @@ interface DataPreviewPanelProps {
   dryRuns: DryRunResult[];
   activeTab: string;
   diffTab: DiffTab | null;
+  columnRules: Record<string, unknown>[];
+  columnRulesLoading: boolean;
   onTabChange: (tab: string) => void;
   onTabClose: (tab: string) => void;
   onDiffSelect: (leftTab: string, rightTab: string) => void;
@@ -120,6 +122,8 @@ export default function DataPreviewPanel({
   dryRuns,
   activeTab,
   diffTab,
+  columnRules,
+  columnRulesLoading,
   onTabChange,
   onTabClose,
   onDiffSelect,
@@ -145,6 +149,18 @@ export default function DataPreviewPanel({
   const contextMenuRef = useRef<HTMLDivElement>(null);
   const tableRef = useRef<HTMLTableElement>(null);
   const [colWidths, setColWidths] = useState<number[]>([]);
+  const [selectedRule, setSelectedRule] = useState<Record<string, unknown> | null>(null);
+
+  const rulesByField = useMemo(() => {
+    const map = new Map<string, Record<string, unknown>>();
+    for (const rule of columnRules) {
+      const fieldName = rule.fieldName;
+      if (typeof fieldName === "string") {
+        map.set(fieldName, rule);
+      }
+    }
+    return map;
+  }, [columnRules]);
 
   const closeContextMenu = useCallback(() => setContextMenu(null), []);
 
@@ -315,15 +331,55 @@ export default function DataPreviewPanel({
               )}
               <tbody>
                 <tr>
-                  {currentHeaders.map((_, i) => (
-                    <td key={i}></td>
-                  ))}
+                  {currentHeaders.map((header, i) => {
+                    const rule = rulesByField.get(header);
+                    return (
+                      <td key={i}>
+                        {columnRulesLoading ? (
+                          <span className="column-rule-loading">...</span>
+                        ) : rule ? (
+                          <button
+                            className="column-rule-btn"
+                            onClick={() => setSelectedRule(rule)}
+                            title={`View rule for ${header}`}
+                          >
+                            {header}
+                          </button>
+                        ) : null}
+                      </td>
+                    );
+                  })}
                 </tr>
               </tbody>
             </table>
           </div>
         )}
       </div>
+      {selectedRule && (
+        <div className="column-rule-modal-overlay" onClick={() => setSelectedRule(null)}>
+          <div className="column-rule-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="column-rule-modal-header">
+              <span className="column-rule-modal-title">
+                Column Rule: {String(selectedRule.fieldName ?? "")}
+              </span>
+              <button
+                className="column-rule-modal-close"
+                onClick={() => setSelectedRule(null)}
+                aria-label="Close"
+              >
+                <svg width="14" height="14" viewBox="0 0 14 14">
+                  <path d="M3 3 L11 11 M11 3 L3 11" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+                </svg>
+              </button>
+            </div>
+            <div className="column-rule-modal-body">
+              <pre className="column-rule-json">
+                {JSON.stringify(selectedRule, null, 2)}
+              </pre>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

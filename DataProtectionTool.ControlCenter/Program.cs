@@ -1418,6 +1418,60 @@ app.MapPost("/api/agents/{path}/http-request", async (string path, HttpRequest r
     }
 });
 
+app.MapGet("/api/agents/{path}/column-rules", async (string path, string? fileFormatId, AgentRegistry registry, DataEngineConfig dataEngineConfig) =>
+{
+    if (!registry.TryGetConnection(path, out var connection) || connection is null)
+        return Results.NotFound(new { error = "Agent not found or not connected." });
+
+    if (string.IsNullOrWhiteSpace(fileFormatId))
+        return Results.Ok(new { success = false, message = "fileFormatId is required." });
+
+    var engineBaseUrl = $"{dataEngineConfig.EngineUrl.TrimEnd('/')}/masking/api/v5.1.44";
+    var url = $"{engineBaseUrl}/file-field-metadata?file_format_id={Uri.EscapeDataString(fileFormatId)}&page_number=1";
+
+    var httpPayload = JsonSerializer.Serialize(new
+    {
+        method = "GET",
+        url,
+        headers = new Dictionary<string, string>
+        {
+            ["accept"] = "application/json",
+            ["Authorization"] = dataEngineConfig.AuthorizationToken
+        }
+    });
+
+    try
+    {
+        var result = await connection.SendCommandAsync("http_request", httpPayload, TimeSpan.FromSeconds(120));
+        using var doc = JsonDocument.Parse(result);
+
+        if (doc.RootElement.TryGetProperty("body", out var bodyEl))
+        {
+            var bodyStr = bodyEl.GetString() ?? "{}";
+            using var bodyDoc = JsonDocument.Parse(bodyStr);
+            if (bodyDoc.RootElement.TryGetProperty("responseList", out var listEl))
+            {
+                var responseList = new List<object>();
+                foreach (var item in listEl.EnumerateArray())
+                {
+                    responseList.Add(JsonSerializer.Deserialize<object>(item.GetRawText())!);
+                }
+                return Results.Ok(new { success = true, responseList });
+            }
+        }
+
+        return Results.Ok(new { success = true, responseList = Array.Empty<object>() });
+    }
+    catch (TimeoutException)
+    {
+        return Results.Ok(new { success = false, message = "Agent did not respond within 120 seconds." });
+    }
+    catch (Exception ex)
+    {
+        return Results.Ok(new { success = false, message = $"Column rules fetch error: {ex.Message}" });
+    }
+});
+
 app.MapGet("/api/agents/{path}/events", async (string path, AgentRegistry registry, ClientTableService clientTableService) =>
 {
     if (!registry.TryGet(path, out var info) || info is null)

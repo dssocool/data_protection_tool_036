@@ -23,6 +23,7 @@ interface TablePreviewCache {
   previewBlobFilenames: string[];
   previewError: string | null;
   dryRunInProgress: boolean;
+  columnRules: Record<string, unknown>[];
 }
 
 function tableKey(rowKey: string, schema: string, tableName: string) {
@@ -61,6 +62,8 @@ export default function App() {
   const [agentTid, setAgentTid] = useState("");
   const [userUniqueId, setUserUniqueId] = useState<string | null>(null);
   const [fullRunTarget, setFullRunTarget] = useState<{ rowKey: string; schema: string; tableName: string } | null>(null);
+  const [columnRules, setColumnRules] = useState<Record<string, unknown>[]>([]);
+  const [columnRulesLoading, setColumnRulesLoading] = useState(false);
   const eventsTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const previewCacheRef = useRef<Map<string, string[]>>(new Map());
   const tableCacheRef = useRef<Map<string, TablePreviewCache>>(new Map());
@@ -287,6 +290,7 @@ export default function App() {
       previewBlobFilenames,
       previewError,
       dryRunInProgress: existing?.dryRunInProgress ?? false,
+      columnRules,
     });
   }
 
@@ -299,6 +303,35 @@ export default function App() {
     setPreviewBlobFilenames(cached.previewBlobFilenames);
     setPreviewError(cached.previewError);
     setPreviewLoading(cached.dryRunInProgress);
+    setColumnRules(cached.columnRules);
+  }
+
+  async function fetchColumnRules(agentPath: string, fileFormatId: string) {
+    setColumnRulesLoading(true);
+    try {
+      const res = await fetch(
+        `/api/agents/${agentPath}/column-rules?fileFormatId=${encodeURIComponent(fileFormatId)}`
+      );
+      if (res.ok) {
+        const result = await res.json();
+        if (result.success && Array.isArray(result.responseList)) {
+          const parsed: Record<string, unknown>[] = result.responseList.map((item: unknown) => {
+            if (typeof item === "string") {
+              try { return JSON.parse(item); } catch { return { raw: item }; }
+            }
+            return item as Record<string, unknown>;
+          });
+          setColumnRules(parsed);
+          return parsed;
+        }
+      }
+    } catch {
+      // best-effort
+    } finally {
+      setColumnRulesLoading(false);
+    }
+    setColumnRules([]);
+    return [];
   }
 
   async function handleTableClick(rowKey: string, schema: string, tableName: string) {
@@ -325,6 +358,14 @@ export default function App() {
     setDryRuns([]);
     setActivePreviewTab("Original");
     setDiffTab(null);
+    setColumnRules([]);
+
+    const tableInfo = connectionTables[rowKey]?.find(
+      (t) => t.schema === schema && t.name === tableName
+    );
+    if (tableInfo?.fileFormatId) {
+      fetchColumnRules(agentPath, tableInfo.fileFormatId);
+    }
 
     try {
       const res = await fetch(`/api/agents/${agentPath}/preview-table`, {
@@ -445,6 +486,7 @@ export default function App() {
     setDryRuns([]);
     setActivePreviewTab("Original");
     setDiffTab(null);
+    setColumnRules([]);
 
     const cacheKey = `query:${connectionRowKey}:${queryRowKey}`;
     const cached = previewCacheRef.current.get(cacheKey);
@@ -607,6 +649,7 @@ export default function App() {
         ...(tableCacheRef.current.get(key) ?? {
           previewData, originalData, dryRuns, activePreviewTab,
           diffTab, previewBlobFilenames: filenames, previewError: null,
+          columnRules,
         }),
         previewBlobFilenames: filenames,
         dryRunInProgress: true,
@@ -785,6 +828,8 @@ export default function App() {
             dryRuns={dryRuns}
             activeTab={activePreviewTab}
             diffTab={diffTab}
+            columnRules={columnRules}
+            columnRulesLoading={columnRulesLoading}
             onTabChange={setActivePreviewTab}
             onTabClose={(tab) => {
               if (diffTab && tab === diffTab.name) {
