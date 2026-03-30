@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type UIEvent } from "react";
+import { forwardRef, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import "./DataPreviewPanel.css";
 
 export interface PreviewData {
@@ -43,70 +43,74 @@ function resolveTabData(
   return null;
 }
 
-function DataTable({ data }: { data: PreviewData }) {
-  return (
-    <table className="data-preview-table">
-      <thead>
-        <tr>
-          {data.headers.map((h, i) => (
-            <th key={i}>{h}</th>
-          ))}
-        </tr>
-      </thead>
-      <tbody>
-        {data.rows.map((row, ri) => (
-          <tr key={ri}>
-            {row.map((cell, ci) => (
-              <td key={ci}>{cell}</td>
+const DataTable = forwardRef<HTMLTableElement, { data: PreviewData }>(
+  function DataTable({ data }, ref) {
+    return (
+      <table className="data-preview-table" ref={ref}>
+        <thead>
+          <tr>
+            {data.headers.map((h, i) => (
+              <th key={i}>{h}</th>
             ))}
           </tr>
-        ))}
-      </tbody>
-    </table>
-  );
-}
-
-function DiffView({ left, right }: { left: PreviewData; right: PreviewData }) {
-  const headers = left.headers;
-  const maxRows = Math.max(left.rows.length, right.rows.length);
-
-  return (
-    <table className="data-preview-table data-preview-diff-table">
-      <thead>
-        <tr>
-          {headers.map((h, i) => (
-            <th key={i}>{h}</th>
-          ))}
-        </tr>
-      </thead>
-      <tbody>
-        {Array.from({ length: maxRows }, (_, ri) => {
-          const leftRow = left.rows[ri];
-          const rightRow = right.rows[ri];
-          return (
+        </thead>
+        <tbody>
+          {data.rows.map((row, ri) => (
             <tr key={ri}>
-              {headers.map((_, ci) => {
-                const lv = leftRow?.[ci] ?? "";
-                const rv = rightRow?.[ci] ?? "";
-                const changed = lv !== rv;
-                if (!changed) {
-                  return <td key={ci}>{lv}</td>;
-                }
-                return (
-                  <td key={ci} className="data-preview-diff-cell-changed">
-                    <span className="data-preview-diff-old">{lv}</span>
-                    <span className="data-preview-diff-arrow">{"\u2192"}</span>
-                    <span className="data-preview-diff-new">{rv}</span>
-                  </td>
-                );
-              })}
+              {row.map((cell, ci) => (
+                <td key={ci}>{cell}</td>
+              ))}
             </tr>
-          );
-        })}
-      </tbody>
-    </table>
-  );
-}
+          ))}
+        </tbody>
+      </table>
+    );
+  },
+);
+
+const DiffView = forwardRef<HTMLTableElement, { left: PreviewData; right: PreviewData }>(
+  function DiffView({ left, right }, ref) {
+    const headers = left.headers;
+    const maxRows = Math.max(left.rows.length, right.rows.length);
+
+    return (
+      <table className="data-preview-table data-preview-diff-table" ref={ref}>
+        <thead>
+          <tr>
+            {headers.map((h, i) => (
+              <th key={i}>{h}</th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {Array.from({ length: maxRows }, (_, ri) => {
+            const leftRow = left.rows[ri];
+            const rightRow = right.rows[ri];
+            return (
+              <tr key={ri}>
+                {headers.map((_, ci) => {
+                  const lv = leftRow?.[ci] ?? "";
+                  const rv = rightRow?.[ci] ?? "";
+                  const changed = lv !== rv;
+                  if (!changed) {
+                    return <td key={ci}>{lv}</td>;
+                  }
+                  return (
+                    <td key={ci} className="data-preview-diff-cell-changed">
+                      <span className="data-preview-diff-old">{lv}</span>
+                      <span className="data-preview-diff-arrow">{"\u2192"}</span>
+                      <span className="data-preview-diff-new">{rv}</span>
+                    </td>
+                  );
+                })}
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    );
+  },
+);
 
 export default function DataPreviewPanel({
   loading,
@@ -139,27 +143,8 @@ export default function DataPreviewPanel({
 
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; tab: string } | null>(null);
   const contextMenuRef = useRef<HTMLDivElement>(null);
-  const bodyRef = useRef<HTMLDivElement>(null);
-  const columnRulesRef = useRef<HTMLDivElement>(null);
-  const isSyncing = useRef(false);
-
-  const handleBodyScroll = useCallback((e: UIEvent<HTMLDivElement>) => {
-    if (isSyncing.current) return;
-    isSyncing.current = true;
-    if (columnRulesRef.current) {
-      columnRulesRef.current.scrollLeft = (e.target as HTMLDivElement).scrollLeft;
-    }
-    isSyncing.current = false;
-  }, []);
-
-  const handleColumnRulesScroll = useCallback((e: UIEvent<HTMLDivElement>) => {
-    if (isSyncing.current) return;
-    isSyncing.current = true;
-    if (bodyRef.current) {
-      bodyRef.current.scrollLeft = (e.target as HTMLDivElement).scrollLeft;
-    }
-    isSyncing.current = false;
-  }, []);
+  const tableRef = useRef<HTMLTableElement>(null);
+  const [colWidths, setColWidths] = useState<number[]>([]);
 
   const closeContextMenu = useCallback(() => setContextMenu(null), []);
 
@@ -213,6 +198,20 @@ export default function DataPreviewPanel({
   const currentHeaders = isDiffActive
     ? (leftData?.headers ?? [])
     : (activeData?.headers ?? []);
+
+  useEffect(() => {
+    const table = tableRef.current;
+    if (!table) return;
+    const ths = table.querySelectorAll("thead th");
+    if (!ths.length) return;
+    const measure = () => {
+      const widths = Array.from(ths).map((th) => th.getBoundingClientRect().width);
+      setColWidths(widths);
+    };
+    const ro = new ResizeObserver(measure);
+    ths.forEach((th) => ro.observe(th));
+    return () => ro.disconnect();
+  }, [activeData, leftData, rightData]);
 
   return (
     <div className="data-preview-panel" style={{ left: panelLeft + 16 }}>
@@ -285,28 +284,35 @@ export default function DataPreviewPanel({
           </div>
         )}
       </div>
-      <div className="data-preview-body" ref={bodyRef} onScroll={handleBodyScroll}>
-        <div className="data-preview-scroll-content">
-          <div className="data-preview-data-area">
-            {loading ? (
-              <div className="data-preview-loading">Loading preview...</div>
-            ) : error ? (
-              <div className="data-preview-error">{error}</div>
-            ) : isDiffActive && leftData && rightData ? (
-              <DiffView left={leftData} right={rightData} />
-            ) : activeData ? (
-              <DataTable data={activeData} />
-            ) : null}
+      <div className="data-preview-scroll-wrapper">
+        <div className="data-preview-body">
+          <div className="data-preview-scroll-content">
+            <div className="data-preview-data-area">
+              {loading ? (
+                <div className="data-preview-loading">Loading preview...</div>
+              ) : error ? (
+                <div className="data-preview-error">{error}</div>
+              ) : isDiffActive && leftData && rightData ? (
+                <DiffView left={leftData} right={rightData} ref={tableRef} />
+              ) : activeData ? (
+                <DataTable data={activeData} ref={tableRef} />
+              ) : null}
+            </div>
           </div>
         </div>
-      </div>
-      {currentHeaders.length > 0 && (
-        <div className="data-preview-column-rules">
-          <div className="data-preview-column-rules-header">
-            <span className="data-preview-column-rules-tab">Column Rules</span>
-          </div>
-          <div className="data-preview-column-rules-scroll" ref={columnRulesRef} onScroll={handleColumnRulesScroll}>
+        {currentHeaders.length > 0 && (
+          <div className="data-preview-column-rules">
+            <div className="data-preview-column-rules-header">
+              <span className="data-preview-column-rules-tab">Column Rules</span>
+            </div>
             <table className="data-preview-table data-preview-column-rules-table">
+              {colWidths.length > 0 && (
+                <colgroup>
+                  {colWidths.map((w, i) => (
+                    <col key={i} style={{ width: w, minWidth: w }} />
+                  ))}
+                </colgroup>
+              )}
               <tbody>
                 <tr>
                   {currentHeaders.map((_, i) => (
@@ -316,8 +322,8 @@ export default function DataPreviewPanel({
               </tbody>
             </table>
           </div>
-        </div>
-      )}
+        )}
+      </div>
     </div>
   );
 }

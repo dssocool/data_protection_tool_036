@@ -14,6 +14,21 @@ import EventDialog from "./components/EventDialog";
 import FullRunModal from "./components/FullRunModal";
 import "./App.css";
 
+interface TablePreviewCache {
+  previewData: PreviewData | null;
+  originalData: PreviewData | null;
+  dryRuns: DryRunResult[];
+  activePreviewTab: string;
+  diffTab: { name: string; leftTab: string; rightTab: string } | null;
+  previewBlobFilenames: string[];
+  previewError: string | null;
+  dryRunInProgress: boolean;
+}
+
+function tableKey(rowKey: string, schema: string, tableName: string) {
+  return `${rowKey}:${schema}:${tableName}`;
+}
+
 function getAgentPath(): string | null {
   const segments = window.location.pathname.split("/");
   const agentsIdx = segments.indexOf("agents");
@@ -48,6 +63,9 @@ export default function App() {
   const [fullRunTarget, setFullRunTarget] = useState<{ rowKey: string; schema: string; tableName: string } | null>(null);
   const eventsTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const previewCacheRef = useRef<Map<string, string[]>>(new Map());
+  const tableCacheRef = useRef<Map<string, TablePreviewCache>>(new Map());
+  const selectedTableRef = useRef(selectedTable);
+  selectedTableRef.current = selectedTable;
 
   const fetchEvents = useCallback(async () => {
     const agentPath = getAgentPath();
@@ -256,12 +274,50 @@ export default function App() {
     }
   }
 
+  function saveCurrentTableToCache() {
+    if (!selectedTable) return;
+    const key = tableKey(selectedTable.rowKey, selectedTable.schema, selectedTable.tableName);
+    const existing = tableCacheRef.current.get(key);
+    tableCacheRef.current.set(key, {
+      previewData,
+      originalData,
+      dryRuns,
+      activePreviewTab,
+      diffTab,
+      previewBlobFilenames,
+      previewError,
+      dryRunInProgress: existing?.dryRunInProgress ?? false,
+    });
+  }
+
+  function restoreTableFromCache(cached: TablePreviewCache) {
+    setPreviewData(cached.previewData);
+    setOriginalData(cached.originalData);
+    setDryRuns(cached.dryRuns);
+    setActivePreviewTab(cached.activePreviewTab);
+    setDiffTab(cached.diffTab);
+    setPreviewBlobFilenames(cached.previewBlobFilenames);
+    setPreviewError(cached.previewError);
+    setPreviewLoading(cached.dryRunInProgress);
+  }
+
   async function handleTableClick(rowKey: string, schema: string, tableName: string) {
     const agentPath = getAgentPath();
     if (!agentPath) return;
 
+    saveCurrentTableToCache();
+
+    const key = tableKey(rowKey, schema, tableName);
+    const cached = tableCacheRef.current.get(key);
+
     setSelectedTable({ rowKey, schema, tableName });
     setSelectedQuery(null);
+
+    if (cached) {
+      restoreTableFromCache(cached);
+      return;
+    }
+
     setPreviewLoading(true);
     setPreviewError(null);
     setPreviewData(null);
@@ -378,6 +434,8 @@ export default function App() {
     const agentPath = getAgentPath();
     if (!agentPath) return;
 
+    saveCurrentTableToCache();
+
     setSelectedQuery({ connectionRowKey, queryRowKey, queryText });
     setSelectedTable(null);
     setPreviewLoading(true);
@@ -428,6 +486,9 @@ export default function App() {
     if (!agentPath) return;
 
     if (selectedTable) {
+      const key = tableKey(selectedTable.rowKey, selectedTable.schema, selectedTable.tableName);
+      tableCacheRef.current.delete(key);
+
       setPreviewLoading(true);
       setPreviewError(null);
       setPreviewData(null);
@@ -476,23 +537,39 @@ export default function App() {
     }
   }
 
+  function isViewingTable(rowKey: string, schema: string, tName: string): boolean {
+    const cur = selectedTableRef.current;
+    return cur?.rowKey === rowKey && cur?.schema === schema && cur?.tableName === tName;
+  }
+
   async function handleDryRun(rowKey: string, schema: string, tableName: string) {
     const agentPath = getAgentPath();
     if (!agentPath) return;
 
+    const key = tableKey(rowKey, schema, tableName);
     const isSameTable = selectedTable?.rowKey === rowKey
       && selectedTable?.schema === schema
       && selectedTable?.tableName === tableName;
+
+    if (!isSameTable) {
+      saveCurrentTableToCache();
+    }
 
     setSelectedTable({ rowKey, schema, tableName });
     setSelectedQuery(null);
     setPreviewLoading(true);
     setPreviewError(null);
 
-    try {
-      let filenames = previewBlobFilenames;
+    let filenames = isSameTable ? previewBlobFilenames : [];
+    const cachedEntry = tableCacheRef.current.get(key);
+    if (!isSameTable && cachedEntry && cachedEntry.previewBlobFilenames.length > 0) {
+      filenames = cachedEntry.previewBlobFilenames;
+      restoreTableFromCache(cachedEntry);
+      setPreviewLoading(true);
+    }
 
-      if (!isSameTable || filenames.length === 0) {
+    try {
+      if (filenames.length === 0) {
         setPreviewData(null);
         setOriginalData(null);
         setDryRuns([]);
@@ -507,12 +584,14 @@ export default function App() {
 
         if (!previewRes.ok) {
           setPreviewError(`Preview failed: server error ${previewRes.status}`);
+          setPreviewLoading(false);
           return;
         }
 
         const previewResult = await previewRes.json();
         if (!previewResult.success) {
           setPreviewError(previewResult.message ?? "Preview failed.");
+          setPreviewLoading(false);
           return;
         }
 
@@ -524,40 +603,102 @@ export default function App() {
         setOriginalData({ ...previewData });
       }
 
-      const res = await fetch(`/api/agents/${agentPath}/dry-run`, {
+      tableCacheRef.current.set(key, {
+        ...(tableCacheRef.current.get(key) ?? {
+          previewData, originalData, dryRuns, activePreviewTab,
+          diffTab, previewBlobFilenames: filenames, previewError: null,
+        }),
+        previewBlobFilenames: filenames,
+        dryRunInProgress: true,
+      } as TablePreviewCache);
+
+      const dryRunFetch = fetch(`/api/agents/${agentPath}/dry-run`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ rowKey, schema, tableName, previewBlobFilenames: filenames }),
       });
 
-      if (!res.ok) {
-        setPreviewError(`Dry run request failed: server error ${res.status}`);
-        return;
-      }
+      dryRunFetch.then(async (res) => {
+        const cached = tableCacheRef.current.get(key);
 
-      const result = await res.json();
-      if (result.success) {
-        const mergeRes = await fetch("/api/blob/preview-merge", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ filenames }),
-        });
-        if (mergeRes.ok) {
-          const masked = await mergeRes.json();
-          const maskedPreview = masked as PreviewData;
-          let newLabel = "";
-          setDryRuns((prev) => {
-            newLabel = `Dry Run ${prev.length + 1}`;
-            return [...prev, { label: newLabel, data: maskedPreview }];
-          });
-          setActivePreviewTab(newLabel);
+        if (!res.ok) {
+          const errMsg = `Dry run request failed: server error ${res.status}`;
+          if (cached) {
+            tableCacheRef.current.set(key, { ...cached, dryRunInProgress: false, previewError: errMsg });
+          }
+          if (isViewingTable(rowKey, schema, tableName)) {
+            setPreviewError(errMsg);
+            setPreviewLoading(false);
+          }
+          return;
         }
-      } else {
-        setPreviewError(result.message ?? "Dry run failed.");
-      }
+
+        const result = await res.json();
+        if (result.success) {
+          const mergeRes = await fetch("/api/blob/preview-merge", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ filenames }),
+          });
+          if (mergeRes.ok) {
+            const masked = await mergeRes.json();
+            const maskedPreview = masked as PreviewData;
+
+            const latestCached = tableCacheRef.current.get(key);
+            const prevDryRuns = latestCached?.dryRuns ?? [];
+            const newLabel = `Dry Run ${prevDryRuns.length + 1}`;
+            const updatedDryRuns = [...prevDryRuns, { label: newLabel, data: maskedPreview }];
+
+            if (latestCached) {
+              tableCacheRef.current.set(key, {
+                ...latestCached,
+                dryRuns: updatedDryRuns,
+                activePreviewTab: newLabel,
+                originalData: latestCached.originalData ?? latestCached.previewData,
+                dryRunInProgress: false,
+              });
+            }
+
+            if (isViewingTable(rowKey, schema, tableName)) {
+              const finalCached = tableCacheRef.current.get(key);
+              setDryRuns(updatedDryRuns);
+              setActivePreviewTab(newLabel);
+              if (finalCached?.originalData) {
+                setOriginalData(finalCached.originalData);
+              }
+              setPreviewLoading(false);
+            }
+          } else {
+            if (cached) {
+              tableCacheRef.current.set(key, { ...cached, dryRunInProgress: false });
+            }
+            if (isViewingTable(rowKey, schema, tableName)) {
+              setPreviewLoading(false);
+            }
+          }
+        } else {
+          const errMsg = result.message ?? "Dry run failed.";
+          if (cached) {
+            tableCacheRef.current.set(key, { ...cached, dryRunInProgress: false, previewError: errMsg });
+          }
+          if (isViewingTable(rowKey, schema, tableName)) {
+            setPreviewError(errMsg);
+            setPreviewLoading(false);
+          }
+        }
+      }).catch((e) => {
+        const errMsg = `Dry run failed: ${e instanceof Error ? e.message : String(e)}`;
+        const cached = tableCacheRef.current.get(key);
+        if (cached) {
+          tableCacheRef.current.set(key, { ...cached, dryRunInProgress: false, previewError: errMsg });
+        }
+        if (isViewingTable(rowKey, schema, tableName)) {
+          setPreviewError(errMsg);
+          setPreviewLoading(false);
+        }
+      });
     } catch (e) {
       setPreviewError(`Dry run failed: ${e instanceof Error ? e.message : String(e)}`);
-    } finally {
       setPreviewLoading(false);
     }
   }
@@ -656,6 +797,22 @@ export default function App() {
                 }
                 if (activePreviewTab === tab) {
                   setActivePreviewTab("Original");
+                }
+              }
+              if (selectedTable) {
+                const key = tableKey(selectedTable.rowKey, selectedTable.schema, selectedTable.tableName);
+                const cached = tableCacheRef.current.get(key);
+                if (cached) {
+                  const updatedDryRuns = cached.dryRuns.filter((dr) => dr.label !== tab);
+                  const updatedDiffTab = (cached.diffTab && (tab === cached.diffTab.name || tab === cached.diffTab.leftTab || tab === cached.diffTab.rightTab))
+                    ? null : cached.diffTab;
+                  const updatedActiveTab = cached.activePreviewTab === tab ? "Original" : cached.activePreviewTab;
+                  tableCacheRef.current.set(key, {
+                    ...cached,
+                    dryRuns: updatedDryRuns,
+                    diffTab: updatedDiffTab,
+                    activePreviewTab: updatedActiveTab,
+                  });
                 }
               }
             }}
