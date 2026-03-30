@@ -12,7 +12,6 @@ public class AgentHubService : AgentHub.AgentHubBase
     private readonly ILogger<AgentHubService> _logger;
     private readonly AgentRegistry _registry;
     private readonly ClientTableService _clientTableService;
-    private readonly DataEngineConfig _dataEngineConfig;
     private readonly BlobStorageConfig _blobStorageConfig;
     private readonly StorageSharedKeyCredential _blobCredential;
 
@@ -20,14 +19,12 @@ public class AgentHubService : AgentHub.AgentHubBase
         ILogger<AgentHubService> logger,
         AgentRegistry registry,
         ClientTableService clientTableService,
-        DataEngineConfig dataEngineConfig,
         BlobStorageConfig blobStorageConfig,
         StorageSharedKeyCredential blobCredential)
     {
         _logger = logger;
         _registry = registry;
         _clientTableService = clientTableService;
-        _dataEngineConfig = dataEngineConfig;
         _blobStorageConfig = blobStorageConfig;
         _blobCredential = blobCredential;
     }
@@ -102,28 +99,6 @@ public class AgentHubService : AgentHub.AgentHubBase
             catch (Exception ex)
             {
                 _logger.LogWarning(ex, "Failed to push connections to agent {AgentId}", firstMessage.AgentId);
-            }
-
-            try
-            {
-                var engineConfigJson = JsonSerializer.Serialize(new
-                {
-                    engineUrl = _dataEngineConfig.EngineUrl,
-                    authorizationToken = _dataEngineConfig.AuthorizationToken,
-                    environmentId = _dataEngineConfig.EnvironmentId,
-                    connectorId = _dataEngineConfig.ConnectorId,
-                    profileSetId = _dataEngineConfig.ProfileSetId
-                });
-                await responseStream.WriteAsync(new ServerMessage
-                {
-                    Type = "data_engine_config",
-                    Payload = engineConfigJson
-                });
-                _logger.LogInformation("Pushed data engine config to agent {AgentId}", firstMessage.AgentId);
-            }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(ex, "Failed to push data engine config to agent {AgentId}", firstMessage.AgentId);
             }
 
             var readTask = Task.Run(async () =>

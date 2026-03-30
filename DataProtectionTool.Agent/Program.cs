@@ -59,7 +59,6 @@ var headers = new Metadata
 
 var connectionManager = new SqlConnectionManager();
 var sasTokenManager = new SasTokenManager();
-DataEngineConfig? dataEngineConfig = null;
 
 using var cts = new CancellationTokenSource();
 Console.CancelKeyPress += (_, e) =>
@@ -103,13 +102,6 @@ while (!cts.Token.IsCancellationRequested)
             {
                 connectionManager.LoadConnectionDetails(response.Payload);
                 Console.WriteLine("[Agent] Loaded connection details from ControlCenter.");
-            }
-            else if (response.Type == "data_engine_config")
-            {
-                dataEngineConfig = JsonSerializer.Deserialize<DataEngineConfig>(response.Payload,
-                    new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
-                Console.WriteLine($"[Agent] Loaded data engine config: {dataEngineConfig?.EngineUrl}");
-                break;
             }
             else
             {
@@ -772,15 +764,6 @@ class ConnectionDetails
     public string DatabaseName { get; set; } = "";
     public string Encrypt { get; set; } = "";
     public bool TrustServerCertificate { get; set; }
-}
-
-class DataEngineConfig
-{
-    public string EngineUrl { get; set; } = "";
-    public string AuthorizationToken { get; set; } = "";
-    public string EnvironmentId { get; set; } = "";
-    public string ConnectorId { get; set; } = "";
-    public string ProfileSetId { get; set; } = "";
 }
 
 class SqlConnectionManager : IDisposable
