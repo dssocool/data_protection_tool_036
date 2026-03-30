@@ -6,6 +6,7 @@ $frontendDir = Join-Path $scriptDir "DataProtectionTool.ControlCenter\frontend"
 $ccProj      = Join-Path $scriptDir "DataProtectionTool.ControlCenter\DataProtectionTool.ControlCenter.csproj"
 $agentProj   = Join-Path $scriptDir "DataProtectionTool.Agent\DataProtectionTool.Agent.csproj"
 
+$noAzurite = $args -contains "--no-azurite"
 $processes = @()
 
 function Kill-ProcessTree($pid) {
@@ -28,28 +29,37 @@ function Cleanup {
 
 Write-Host "========================================="
 Write-Host " Data Protection Tool - Dev Start All"
+if ($noAzurite) {
+    Write-Host " (Azurite DISABLED - using cloud Azure)"
+}
 Write-Host "========================================="
 Write-Host ""
 
-# --- [1/4] Azurite ---
-Write-Host "[1/4] Starting Azurite (Azure Storage Emulator)..."
+$azurite = $null
 
-$azuriteCmd = Get-Command azurite -ErrorAction SilentlyContinue
-if (-not $azuriteCmd) {
-    Write-Host "      Azurite not found. Installing via npm..."
-    & cmd /c "npm install -g azurite"
+if (-not $noAzurite) {
+    # --- [1/4] Azurite ---
+    Write-Host "[1/4] Starting Azurite (Azure Storage Emulator)..."
+
+    $azuriteCmd = Get-Command azurite -ErrorAction SilentlyContinue
+    if (-not $azuriteCmd) {
+        Write-Host "      Azurite not found. Installing via npm..."
+        & cmd /c "npm install -g azurite"
+    }
+
+    if (-not (Test-Path $azuriteData)) { New-Item -ItemType Directory -Path $azuriteData | Out-Null }
+
+    $azurite = Start-Process -FilePath "cmd.exe" `
+        -ArgumentList "/c","azurite --silent --skipApiVersionCheck --location `"$azuriteData`"" `
+        -NoNewWindow -PassThru
+    $processes += $azurite
+    Write-Host "      Azurite PID: $($azurite.Id)"
+
+    Write-Host "      Waiting 2 seconds for Azurite to initialize..."
+    Start-Sleep -Seconds 2
+} else {
+    Write-Host "[1/4] Skipping Azurite (--no-azurite flag set)"
 }
-
-if (-not (Test-Path $azuriteData)) { New-Item -ItemType Directory -Path $azuriteData | Out-Null }
-
-$azurite = Start-Process -FilePath "cmd.exe" `
-    -ArgumentList "/c","azurite --silent --skipApiVersionCheck --location `"$azuriteData`"" `
-    -NoNewWindow -PassThru
-$processes += $azurite
-Write-Host "      Azurite PID: $($azurite.Id)"
-
-Write-Host "      Waiting 2 seconds for Azurite to initialize..."
-Start-Sleep -Seconds 2
 
 # --- [2/4] Build Frontend ---
 Write-Host "[2/4] Building Frontend..."
@@ -67,6 +77,17 @@ Pop-Location
 
 # --- [3/4] ControlCenter ---
 Write-Host "[3/4] Starting ControlCenter (HTTP on port 8190, gRPC on port 8191)..."
+
+if (-not $noAzurite) {
+    # Override storage settings to point to Azurite
+    $env:AzureTableStorage__ConnectionString = "UseDevelopmentStorage=true"
+    $env:AzureBlobStorage__StorageAccount = "devstoreaccount1"
+    $env:AzureBlobStorage__Container = "preview"
+    $env:AzureBlobStorage__AccessKey = "Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw=="
+    Write-Host "      Using Azurite (local emulator) for storage"
+} else {
+    Write-Host "      Using appsettings.Development.json for cloud Azure storage"
+}
 
 $cc = Start-Process -FilePath "dotnet" `
     -ArgumentList "run","--project",$ccProj `
@@ -89,7 +110,9 @@ Write-Host "      Agent PID: $($agent.Id)"
 Write-Host ""
 Write-Host "========================================="
 Write-Host " All services started"
-Write-Host "   Azurite PID:       $($azurite.Id)"
+if (-not $noAzurite) {
+    Write-Host "   Azurite PID:       $($azurite.Id)"
+}
 Write-Host "   ControlCenter PID: $($cc.Id)"
 Write-Host "   Agent PID:         $($agent.Id)"
 Write-Host "========================================="
