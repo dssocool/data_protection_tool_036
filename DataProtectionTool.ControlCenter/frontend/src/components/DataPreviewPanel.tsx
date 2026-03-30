@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import "./DataPreviewPanel.css";
 
 export interface PreviewData {
@@ -13,7 +13,6 @@ interface DiffTab {
 }
 
 interface DataPreviewPanelProps {
-  tableName: string;
   loading: boolean;
   error: string | null;
   data: PreviewData | null;
@@ -105,7 +104,6 @@ function DiffView({ left, right }: { left: PreviewData; right: PreviewData }) {
 }
 
 export default function DataPreviewPanel({
-  tableName,
   loading,
   error,
   data,
@@ -119,6 +117,12 @@ export default function DataPreviewPanel({
   panelLeft,
   onClose,
 }: DataPreviewPanelProps) {
+  const dataTabs = useMemo(() => {
+    const list: string[] = ["Original"];
+    if (maskedData) list.push("Masked");
+    return list;
+  }, [maskedData]);
+
   const tabs = useMemo(() => {
     const list: string[] = ["Original"];
     if (maskedData) list.push("Masked");
@@ -126,22 +130,24 @@ export default function DataPreviewPanel({
     return list;
   }, [maskedData, diffTab]);
 
-  const diffPairs = useMemo(() => {
-    const dataTabs = ["Original"];
-    if (maskedData) dataTabs.push("Masked");
-    if (dataTabs.length < 2) return [];
-    const pairs: { label: string; left: string; right: string }[] = [];
-    for (let i = 0; i < dataTabs.length; i++) {
-      for (let j = i + 1; j < dataTabs.length; j++) {
-        pairs.push({
-          label: `${dataTabs[i]} vs ${dataTabs[j]}`,
-          left: dataTabs[i],
-          right: dataTabs[j],
-        });
-      }
+  const [leftDiffTab, setLeftDiffTab] = useState("Original");
+  const [rightDiffTab, setRightDiffTab] = useState("");
+
+  useEffect(() => {
+    if (
+      diffTab
+      && dataTabs.includes(diffTab.leftTab)
+      && dataTabs.includes(diffTab.rightTab)
+    ) {
+      setLeftDiffTab(diffTab.leftTab);
+      setRightDiffTab(diffTab.rightTab);
+      return;
     }
-    return pairs;
-  }, [maskedData]);
+    const defaultLeft = dataTabs[0] ?? "";
+    const defaultRight = dataTabs.find((tab) => tab !== defaultLeft) ?? "";
+    setLeftDiffTab(defaultLeft);
+    setRightDiffTab(defaultRight);
+  }, [dataTabs, diffTab]);
 
   const isDiffActive = diffTab != null && activeTab === diffTab.name;
 
@@ -159,7 +165,7 @@ export default function DataPreviewPanel({
   return (
     <div className="data-preview-panel" style={{ left: panelLeft + 16 }}>
       <div className="data-preview-header">
-        <div style={{ display: "flex", alignItems: "baseline", gap: 12, minWidth: 0, flex: 1 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 12, minWidth: 0, flex: 1 }}>
           <div className="data-preview-tabs">
             {tabs.map((tab) => (
               <button
@@ -182,24 +188,49 @@ export default function DataPreviewPanel({
               </button>
             ))}
           </div>
-          <span className="data-preview-table-name">{tableName}</span>
-          {diffPairs.length > 0 && (
-            <select
-              className="data-preview-diff-select"
-              value=""
-              onChange={(e) => {
-                const idx = parseInt(e.target.value, 10);
-                if (!isNaN(idx)) {
-                  const pair = diffPairs[idx];
-                  onDiffSelect(pair.left, pair.right);
-                }
-              }}
-            >
-              <option value="" disabled>Diff...</option>
-              {diffPairs.map((pair, i) => (
-                <option key={i} value={i}>{pair.label}</option>
-              ))}
-            </select>
+          {dataTabs.length > 1 && (
+            <div className="data-preview-diff-controls">
+              <label className="data-preview-diff-select-label">
+                Left
+                <select
+                  className="data-preview-diff-select"
+                  value={leftDiffTab}
+                  onChange={(e) => {
+                    const nextLeft = e.target.value;
+                    setLeftDiffTab(nextLeft);
+                    if (nextLeft && rightDiffTab && nextLeft !== rightDiffTab) {
+                      onDiffSelect(nextLeft, rightDiffTab);
+                    }
+                  }}
+                >
+                  {dataTabs.map((tab) => (
+                    <option key={tab} value={tab} disabled={tab === rightDiffTab}>
+                      {tab}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="data-preview-diff-select-label">
+                Right
+                <select
+                  className="data-preview-diff-select"
+                  value={rightDiffTab}
+                  onChange={(e) => {
+                    const nextRight = e.target.value;
+                    setRightDiffTab(nextRight);
+                    if (leftDiffTab && nextRight && leftDiffTab !== nextRight) {
+                      onDiffSelect(leftDiffTab, nextRight);
+                    }
+                  }}
+                >
+                  {dataTabs.map((tab) => (
+                    <option key={tab} value={tab} disabled={tab === leftDiffTab}>
+                      {tab}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </div>
           )}
         </div>
         <button

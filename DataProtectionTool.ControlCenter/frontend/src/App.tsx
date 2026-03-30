@@ -632,11 +632,6 @@ export default function App() {
         )}
         {(selectedTable || selectedQuery) && (
           <DataPreviewPanel
-            tableName={
-              selectedTable
-                ? `${selectedTable.schema}.${selectedTable.tableName}`
-                : `Query Preview`
-            }
             loading={previewLoading}
             error={previewError}
             data={previewData}

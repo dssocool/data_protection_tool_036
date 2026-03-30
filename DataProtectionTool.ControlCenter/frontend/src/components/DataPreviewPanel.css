@@ -128,15 +128,6 @@
   background: #f8fafe;
 }
 
-.data-preview-table-name {
-  font-size: 12px;
-  color: #777;
-  padding: 0 4px 6px 0;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
 .data-preview-tab-close {
   margin-left: 6px;
   font-size: 14px;
@@ -150,6 +141,20 @@
   color: #c44;
 }
 
+.data-preview-diff-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.data-preview-diff-select-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  color: #666;
+}
+
 .data-preview-diff-select {
   flex-shrink: 0;
   padding: 3px 8px;
@@ -160,7 +165,6 @@
   color: #555;
   cursor: pointer;
   outline: none;
-  margin-bottom: 4px;
 }
 
 .data-preview-diff-select:hover {
