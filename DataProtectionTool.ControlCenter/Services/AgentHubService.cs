@@ -223,7 +223,7 @@ public class AgentHubService : AgentHub.AgentHubBase
                 correlationId,
                 sasToken,
                 blobEndpoint,
-                container = BlobStorageConfig.PreviewContainer
+                container = _blobStorageConfig.PreviewContainer
             });
 
             await responseStream.WriteAsync(new ServerMessage

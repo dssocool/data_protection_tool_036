@@ -48,7 +48,8 @@ var blobStorageConfig = new BlobStorageConfig
 {
     StorageAccount = blobSection["StorageAccount"] ?? "",
     Container = blobSection["Container"] ?? "",
-    AccessKey = blobSection["AccessKey"] ?? ""
+    AccessKey = blobSection["AccessKey"] ?? "",
+    PreviewContainer = blobSection["PreviewContainer"] ?? ""
 };
 builder.Services.AddSingleton(blobStorageConfig);
 
@@ -73,10 +74,6 @@ var previewFilenameRegex = new Regex(
     var containerClient = app.Services.GetRequiredService<BlobServiceClient>()
         .GetBlobContainerClient(blobStorageConfig.Container);
     await containerClient.CreateIfNotExistsAsync();
-
-    var previewContainerClient = app.Services.GetRequiredService<BlobServiceClient>()
-        .GetBlobContainerClient(BlobStorageConfig.PreviewContainer);
-    await previewContainerClient.CreateIfNotExistsAsync();
 }
 
 {
@@ -463,7 +460,7 @@ app.MapPost("/api/agents/{path}/reload-preview-table", async (string path, HttpR
     if (dataItem != null && !string.IsNullOrEmpty(dataItem.PreviewFileList))
     {
         var oldFilenames = dataItem.PreviewFileList.Split(',', StringSplitOptions.RemoveEmptyEntries);
-        var containerClient = blobClient.GetBlobContainerClient(BlobStorageConfig.PreviewContainer);
+        var containerClient = blobClient.GetBlobContainerClient(blobStorageConfig.PreviewContainer);
         foreach (var filename in oldFilenames)
         {
             try { await containerClient.GetBlobClient(filename).DeleteIfExistsAsync(); } catch { }
@@ -525,7 +522,7 @@ app.MapGet("/api/blob/{filename}", async (string filename, BlobServiceClient blo
 
     try
     {
-        var containerClient = blobClient.GetBlobContainerClient(BlobStorageConfig.PreviewContainer);
+        var containerClient = blobClient.GetBlobContainerClient(blobStorageConfig.PreviewContainer);
         var blob = containerClient.GetBlobClient(filename);
 
         if (!await blob.ExistsAsync())
@@ -592,7 +589,7 @@ app.MapPost("/api/blob/preview-merge", async (HttpRequest request, BlobServiceCl
         if (filenames.Any(f => !IsValidPreviewFilename(f)))
             return Results.BadRequest(new { error = "Invalid filename in list." });
 
-        var containerClient = blobClient.GetBlobContainerClient(BlobStorageConfig.PreviewContainer);
+        var containerClient = blobClient.GetBlobContainerClient(blobStorageConfig.PreviewContainer);
         List<string>? headers = null;
         var rows = new List<List<string?>>();
 
@@ -671,7 +668,7 @@ app.MapPost("/api/blob/delete-preview", async (HttpRequest request, BlobServiceC
         if (filenames.Any(f => !IsValidPreviewFilename(f)))
             return Results.BadRequest(new { error = "Invalid filename in list." });
 
-        var containerClient = blobClient.GetBlobContainerClient(BlobStorageConfig.PreviewContainer);
+        var containerClient = blobClient.GetBlobContainerClient(blobStorageConfig.PreviewContainer);
         int deleted = 0;
         foreach (var filename in filenames)
         {
@@ -883,7 +880,7 @@ app.MapPost("/api/agents/{path}/dry-run", async (string path, HttpRequest reques
             return Results.Ok(new { success = false, message = "Data engine ProfileSetId is not configured. Set ProfileSetId in appsettings.json." });
 
         // Step 0: Copy preview files from data_preview container to configured (engine) container
-        var previewContainerClient = blobClient.GetBlobContainerClient(BlobStorageConfig.PreviewContainer);
+        var previewContainerClient = blobClient.GetBlobContainerClient(blobStorageConfig.PreviewContainer);
         var engineContainerClient = blobClient.GetBlobContainerClient(blobConfig.Container);
 
         foreach (var previewFile in previewFilenames)
