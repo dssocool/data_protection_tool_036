@@ -87,10 +87,12 @@ app.MapGet("/api/agents/{path}", (string path, AgentRegistry registry) =>
     });
 });
 
-app.MapPost("/api/agents/{path}/validate-sql", async (string path, HttpRequest request, AgentRegistry registry) =>
+app.MapPost("/api/agents/{path}/validate-sql", async (string path, HttpRequest request, AgentRegistry registry, ClientTableService clientTableService) =>
 {
     if (!registry.TryGetConnection(path, out var connection) || connection is null)
         return Results.NotFound(new { error = "Agent not found or not connected." });
+
+    var partitionKey = ClientEntity.BuildPartitionKey(connection.Info.Oid, connection.Info.Tid);
 
     string body;
     using (var reader = new StreamReader(request.Body))
@@ -104,14 +106,20 @@ app.MapPost("/api/agents/{path}/validate-sql", async (string path, HttpRequest r
         var message = doc.RootElement.TryGetProperty("message", out var msgEl) ? msgEl.GetString() : null;
         var success = doc.RootElement.TryGetProperty("success", out var sEl) && sEl.GetBoolean();
 
+        _ = clientTableService.AppendEventAsync(partitionKey, "validate_sql",
+            success ? "SQL validation: success" : $"SQL validation: failed — {message}",
+            message ?? "");
+
         return Results.Ok(new { success, message = message ?? "Unknown result" });
     }
     catch (TimeoutException)
     {
+        _ = clientTableService.AppendEventAsync(partitionKey, "validate_sql", "SQL validation: timeout", "Agent did not respond within 30 seconds.");
         return Results.Ok(new { success = false, message = "Agent did not respond within 30 seconds." });
     }
     catch (Exception ex)
     {
+        _ = clientTableService.AppendEventAsync(partitionKey, "validate_sql", $"SQL validation: error — {ex.Message}");
         return Results.Ok(new { success = false, message = $"Validation error: {ex.Message}" });
     }
 });
@@ -169,6 +177,9 @@ app.MapPost("/api/agents/{path}/save-connection", async (string path, HttpReques
             }
         }
 
+        var serverName = root.TryGetProperty("serverName", out var snEvt) ? snEvt.GetString() ?? "" : "";
+        _ = clientTableService.AppendEventAsync(partitionKey, "save_connection", $"Connection saved: {serverName}");
+
         return Results.Ok(new
         {
             success = true,
@@ -178,14 +189,18 @@ app.MapPost("/api/agents/{path}/save-connection", async (string path, HttpReques
     }
     catch (Exception ex)
     {
+        var pk = ClientEntity.BuildPartitionKey(info.Oid, info.Tid);
+        _ = clientTableService.AppendEventAsync(pk, "save_connection", $"Save connection failed: {ex.Message}");
         return Results.Ok(new { success = false, message = $"Failed to save: {ex.Message}" });
     }
 });
 
-app.MapPost("/api/agents/{path}/list-tables", async (string path, HttpRequest request, AgentRegistry registry) =>
+app.MapPost("/api/agents/{path}/list-tables", async (string path, HttpRequest request, AgentRegistry registry, ClientTableService clientTableService) =>
 {
     if (!registry.TryGetConnection(path, out var connection) || connection is null)
         return Results.NotFound(new { error = "Agent not found or not connected." });
+
+    var partitionKey = ClientEntity.BuildPartitionKey(connection.Info.Oid, connection.Info.Tid);
 
     string body;
     using (var reader = new StreamReader(request.Body))
@@ -194,38 +209,64 @@ app.MapPost("/api/agents/{path}/list-tables", async (string path, HttpRequest re
     try
     {
         var result = await connection.SendCommandAsync("list_tables", body, TimeSpan.FromSeconds(30));
+
+        try
+        {
+            using var doc = JsonDocument.Parse(result);
+            var tables = doc.RootElement.TryGetProperty("tables", out var tEl) ? tEl.GetArrayLength() : 0;
+            _ = clientTableService.AppendEventAsync(partitionKey, "list_tables", $"Listed {tables} tables");
+        }
+        catch { }
+
         return Results.Content(result, "application/json");
     }
     catch (TimeoutException)
     {
+        _ = clientTableService.AppendEventAsync(partitionKey, "list_tables", "List tables: timeout");
         return Results.Ok(new { success = false, message = "Agent did not respond within 30 seconds." });
     }
     catch (Exception ex)
     {
+        _ = clientTableService.AppendEventAsync(partitionKey, "list_tables", $"List tables error: {ex.Message}");
         return Results.Ok(new { success = false, message = $"List tables error: {ex.Message}" });
     }
 });
 
-app.MapPost("/api/agents/{path}/preview-table", async (string path, HttpRequest request, AgentRegistry registry) =>
+app.MapPost("/api/agents/{path}/preview-table", async (string path, HttpRequest request, AgentRegistry registry, ClientTableService clientTableService) =>
 {
     if (!registry.TryGetConnection(path, out var connection) || connection is null)
         return Results.NotFound(new { error = "Agent not found or not connected." });
+
+    var partitionKey = ClientEntity.BuildPartitionKey(connection.Info.Oid, connection.Info.Tid);
 
     string body;
     using (var reader = new StreamReader(request.Body))
         body = await reader.ReadToEndAsync();
 
+    string tableLabel = "";
+    try
+    {
+        using var bodyDoc = JsonDocument.Parse(body);
+        var schema = bodyDoc.RootElement.TryGetProperty("schema", out var sEl) ? sEl.GetString() ?? "" : "";
+        var tName = bodyDoc.RootElement.TryGetProperty("tableName", out var tEl) ? tEl.GetString() ?? "" : "";
+        tableLabel = $"{schema}.{tName}";
+    }
+    catch { }
+
     try
     {
         var result = await connection.SendCommandAsync("preview_table", body, TimeSpan.FromSeconds(60));
+        _ = clientTableService.AppendEventAsync(partitionKey, "preview_table", $"Preview table: {tableLabel}");
         return Results.Content(result, "application/json");
     }
     catch (TimeoutException)
     {
+        _ = clientTableService.AppendEventAsync(partitionKey, "preview_table", $"Preview table timeout: {tableLabel}");
         return Results.Ok(new { success = false, message = "Agent did not respond within 60 seconds." });
     }
     catch (Exception ex)
     {
+        _ = clientTableService.AppendEventAsync(partitionKey, "preview_table", $"Preview table error: {ex.Message}");
         return Results.Ok(new { success = false, message = $"Preview table error: {ex.Message}" });
     }
 });
@@ -423,10 +464,12 @@ app.MapGet("/api/agents/{path}/connections", async (string path, AgentRegistry r
     return Results.Ok(result);
 });
 
-app.MapPost("/api/agents/{path}/validate-query", async (string path, HttpRequest request, AgentRegistry registry) =>
+app.MapPost("/api/agents/{path}/validate-query", async (string path, HttpRequest request, AgentRegistry registry, ClientTableService clientTableService) =>
 {
     if (!registry.TryGetConnection(path, out var connection) || connection is null)
         return Results.NotFound(new { error = "Agent not found or not connected." });
+
+    var partitionKey = ClientEntity.BuildPartitionKey(connection.Info.Oid, connection.Info.Tid);
 
     string body;
     using (var reader = new StreamReader(request.Body))
@@ -440,14 +483,20 @@ app.MapPost("/api/agents/{path}/validate-query", async (string path, HttpRequest
         var message = doc.RootElement.TryGetProperty("message", out var msgEl) ? msgEl.GetString() : null;
         var success = doc.RootElement.TryGetProperty("success", out var sEl) && sEl.GetBoolean();
 
+        _ = clientTableService.AppendEventAsync(partitionKey, "validate_query",
+            success ? "Query validation: success" : $"Query validation: failed — {message}",
+            message ?? "");
+
         return Results.Ok(new { success, message = message ?? "Unknown result" });
     }
     catch (TimeoutException)
     {
+        _ = clientTableService.AppendEventAsync(partitionKey, "validate_query", "Query validation: timeout");
         return Results.Ok(new { success = false, message = "Agent did not respond within 30 seconds." });
     }
     catch (Exception ex)
     {
+        _ = clientTableService.AppendEventAsync(partitionKey, "validate_query", $"Query validation error: {ex.Message}");
         return Results.Ok(new { success = false, message = $"Query validation error: {ex.Message}" });
     }
 });
@@ -472,6 +521,8 @@ app.MapPost("/api/agents/{path}/save-query", async (string path, HttpRequest req
         var partitionKey = ClientEntity.BuildPartitionKey(info.Oid, info.Tid);
         var entity = await clientTableService.SaveQueryAsync(partitionKey, connectionRowKey, queryText);
 
+        _ = clientTableService.AppendEventAsync(partitionKey, "save_query", "Query saved");
+
         return Results.Ok(new
         {
             success = true,
@@ -481,14 +532,18 @@ app.MapPost("/api/agents/{path}/save-query", async (string path, HttpRequest req
     }
     catch (Exception ex)
     {
+        var pk = ClientEntity.BuildPartitionKey(info.Oid, info.Tid);
+        _ = clientTableService.AppendEventAsync(pk, "save_query", $"Save query failed: {ex.Message}");
         return Results.Ok(new { success = false, message = $"Failed to save query: {ex.Message}" });
     }
 });
 
-app.MapPost("/api/agents/{path}/preview-query", async (string path, HttpRequest request, AgentRegistry registry) =>
+app.MapPost("/api/agents/{path}/preview-query", async (string path, HttpRequest request, AgentRegistry registry, ClientTableService clientTableService) =>
 {
     if (!registry.TryGetConnection(path, out var connection) || connection is null)
         return Results.NotFound(new { error = "Agent not found or not connected." });
+
+    var partitionKey = ClientEntity.BuildPartitionKey(connection.Info.Oid, connection.Info.Tid);
 
     string body;
     using (var reader = new StreamReader(request.Body))
@@ -497,14 +552,17 @@ app.MapPost("/api/agents/{path}/preview-query", async (string path, HttpRequest 
     try
     {
         var result = await connection.SendCommandAsync("preview_query", body, TimeSpan.FromSeconds(60));
+        _ = clientTableService.AppendEventAsync(partitionKey, "preview_query", "Preview query completed");
         return Results.Content(result, "application/json");
     }
     catch (TimeoutException)
     {
+        _ = clientTableService.AppendEventAsync(partitionKey, "preview_query", "Preview query: timeout");
         return Results.Ok(new { success = false, message = "Agent did not respond within 60 seconds." });
     }
     catch (Exception ex)
     {
+        _ = clientTableService.AppendEventAsync(partitionKey, "preview_query", $"Preview query error: {ex.Message}");
         return Results.Ok(new { success = false, message = $"Preview query error: {ex.Message}" });
     }
 });
@@ -534,6 +592,8 @@ app.MapPost("/api/agents/{path}/dry-run", async (string path, HttpRequest reques
     if (!registry.TryGetConnection(path, out var connection) || connection is null)
         return Results.NotFound(new { error = "Agent not found or not connected." });
 
+    var partitionKey = ClientEntity.BuildPartitionKey(connection.Info.Oid, connection.Info.Tid);
+
     string body;
     using (var reader = new StreamReader(request.Body))
         body = await reader.ReadToEndAsync();
@@ -560,50 +620,117 @@ app.MapPost("/api/agents/{path}/dry-run", async (string path, HttpRequest reques
         if (previewFilenames.Count == 0)
             return Results.Ok(new { success = false, message = "No preview files available. Please preview the table first." });
 
-        var partitionKey = ClientEntity.BuildPartitionKey(connection.Info.Oid, connection.Info.Tid);
-
-        var existing = await clientTableService.GetTableFormatAsync(partitionKey, rowKey, schema, tableName);
-        if (existing != null && !string.IsNullOrEmpty(existing.FileFormatId))
-            return Results.Ok(new { success = true, fileFormatId = existing.FileFormatId, cached = true });
-
         if (string.IsNullOrEmpty(dataEngineConfig.EngineUrl) || string.IsNullOrEmpty(dataEngineConfig.AuthorizationToken))
             return Results.Ok(new { success = false, message = "Data engine is not configured. Set EngineUrl and AuthorizationToken in dataEngineConfig.json." });
 
-        var commandPayload = JsonSerializer.Serialize(new
+        if (string.IsNullOrEmpty(dataEngineConfig.ConnectorId))
+            return Results.Ok(new { success = false, message = "Data engine ConnectorId is not configured. Set ConnectorId in dataEngineConfig.json." });
+
+        // Step 1: Get or create file format
+        var existing = await clientTableService.GetTableFormatAsync(partitionKey, rowKey, schema, tableName);
+        string fileFormatId;
+
+        if (existing != null && !string.IsNullOrEmpty(existing.FileFormatId))
         {
-            engineUrl = dataEngineConfig.EngineUrl,
-            authToken = dataEngineConfig.AuthorizationToken,
-            blobFilename = previewFilenames[0],
-            fileFormatType = "PARQUET"
-        });
-
-        var agentResult = await connection.SendCommandAsync("create_file_format", commandPayload, TimeSpan.FromSeconds(120));
-
-        using var resultDoc = JsonDocument.Parse(agentResult);
-        var resultRoot = resultDoc.RootElement;
-
-        if (resultRoot.TryGetProperty("success", out var successEl) && successEl.GetBoolean())
+            fileFormatId = existing.FileFormatId;
+        }
+        else
         {
-            var fileFormatId = resultRoot.TryGetProperty("fileFormatId", out var ffiEl)
+            var commandPayload = JsonSerializer.Serialize(new
+            {
+                engineUrl = dataEngineConfig.EngineUrl,
+                authToken = dataEngineConfig.AuthorizationToken,
+                blobFilename = previewFilenames[0],
+                fileFormatType = "PARQUET"
+            });
+
+            var agentResult = await connection.SendCommandAsync("create_file_format", commandPayload, TimeSpan.FromSeconds(120));
+
+            using var resultDoc = JsonDocument.Parse(agentResult);
+            var resultRoot = resultDoc.RootElement;
+
+            if (!(resultRoot.TryGetProperty("success", out var successEl) && successEl.GetBoolean()))
+            {
+                var message = resultRoot.TryGetProperty("message", out var msgEl) ? msgEl.GetString() : "File format creation failed.";
+                return Results.Ok(new { success = false, message });
+            }
+
+            fileFormatId = resultRoot.TryGetProperty("fileFormatId", out var ffiEl)
                 ? ffiEl.GetString() ?? "" : "";
 
             if (!string.IsNullOrEmpty(fileFormatId))
             {
                 await clientTableService.SaveTableFormatAsync(partitionKey, rowKey, schema, tableName, fileFormatId);
             }
-
-            return Results.Ok(new { success = true, fileFormatId });
         }
 
-        var message = resultRoot.TryGetProperty("message", out var msgEl) ? msgEl.GetString() : "File format creation failed.";
-        return Results.Ok(new { success = false, message });
+        // Step 2: Create a file ruleset (new ruleset every dry run)
+        var rulesetName = $"ruleset_{Guid.NewGuid():N}";
+        var rulesetPayload = JsonSerializer.Serialize(new
+        {
+            engineUrl = dataEngineConfig.EngineUrl,
+            authToken = dataEngineConfig.AuthorizationToken,
+            rulesetName,
+            fileConnectorId = dataEngineConfig.ConnectorId
+        });
+
+        var rulesetResult = await connection.SendCommandAsync("create_file_ruleset", rulesetPayload, TimeSpan.FromSeconds(120));
+
+        using var rulesetDoc = JsonDocument.Parse(rulesetResult);
+        var rulesetRoot = rulesetDoc.RootElement;
+
+        if (!(rulesetRoot.TryGetProperty("success", out var rulesetSuccessEl) && rulesetSuccessEl.GetBoolean()))
+        {
+            var rulesetMsg = rulesetRoot.TryGetProperty("message", out var rmEl) ? rmEl.GetString() : "File ruleset creation failed.";
+            return Results.Ok(new { success = false, message = rulesetMsg });
+        }
+
+        var fileRulesetId = rulesetRoot.TryGetProperty("fileRulesetId", out var friEl)
+            ? friEl.GetString() ?? "" : "";
+
+        // Step 3: Create file metadata for each preview file
+        var fileMetadataIds = new List<string>();
+        foreach (var previewFile in previewFilenames)
+        {
+            var metadataPayload = JsonSerializer.Serialize(new
+            {
+                engineUrl = dataEngineConfig.EngineUrl,
+                authToken = dataEngineConfig.AuthorizationToken,
+                fileName = previewFile,
+                rulesetId = fileRulesetId,
+                fileFormatId,
+                fileType = "PARQUET"
+            });
+
+            var metadataResult = await connection.SendCommandAsync("create_file_metadata", metadataPayload, TimeSpan.FromSeconds(120));
+
+            using var metadataDoc = JsonDocument.Parse(metadataResult);
+            var metadataRoot = metadataDoc.RootElement;
+
+            if (!(metadataRoot.TryGetProperty("success", out var metaSuccessEl) && metaSuccessEl.GetBoolean()))
+            {
+                var metaMsg = metadataRoot.TryGetProperty("message", out var mmEl) ? mmEl.GetString() : $"File metadata creation failed for {previewFile}.";
+                return Results.Ok(new { success = false, message = metaMsg });
+            }
+
+            var fileMetadataId = metadataRoot.TryGetProperty("fileMetadataId", out var fmiEl)
+                ? fmiEl.GetString() ?? "" : "";
+            fileMetadataIds.Add(fileMetadataId);
+        }
+
+        _ = clientTableService.AppendEventAsync(partitionKey, "dry_run",
+            $"Dry run completed: fileFormatId={fileFormatId}, fileRulesetId={fileRulesetId}");
+
+        return Results.Ok(new { success = true, fileFormatId, fileRulesetId, fileMetadataIds });
     }
     catch (TimeoutException)
     {
+        _ = clientTableService.AppendEventAsync(partitionKey, "dry_run", "Dry run: timeout", "Agent did not respond within 120 seconds.");
         return Results.Ok(new { success = false, message = "Agent did not respond within 120 seconds." });
     }
     catch (Exception ex)
     {
+        _ = clientTableService.AppendEventAsync(partitionKey, "dry_run", $"Dry run error: {ex.Message}");
         return Results.Ok(new { success = false, message = $"Dry run error: {ex.Message}" });
     }
 });
@@ -630,6 +757,25 @@ app.MapPost("/api/agents/{path}/http-request", async (string path, HttpRequest r
     {
         return Results.Ok(new { success = false, message = $"HTTP request relay error: {ex.Message}" });
     }
+});
+
+app.MapGet("/api/agents/{path}/events", async (string path, AgentRegistry registry, ClientTableService clientTableService) =>
+{
+    if (!registry.TryGet(path, out var info) || info is null)
+        return Results.NotFound(new { error = "Agent not found." });
+
+    var partitionKey = ClientEntity.BuildPartitionKey(info.Oid, info.Tid);
+    var events = await clientTableService.GetEventsAsync(partitionKey);
+
+    var result = events.Select(e => new
+    {
+        timestamp = e.Timestamp.ToString("O"),
+        type = e.Type,
+        summary = e.Summary,
+        detail = e.Detail
+    });
+
+    return Results.Ok(result);
 });
 
 app.MapGet("/agents/{path}", (string path, AgentRegistry registry, IWebHostEnvironment env) =>

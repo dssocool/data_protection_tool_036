@@ -173,9 +173,6 @@ export default function ConnectionsPanel({
         <div className="connections-list">
           {Object.entries(grouped).map(([type, conns]) => (
             <div key={type} className="conn-group">
-              <div className="conn-group-header">
-                <span className="conn-type-badge">{type}</span>
-              </div>
               <ul className="conn-group-list">
                 {conns.map((conn) => (
                   <li key={conn.rowKey} className="connections-list-entry">

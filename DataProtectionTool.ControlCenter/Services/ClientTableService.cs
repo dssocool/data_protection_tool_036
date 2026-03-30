@@ -1,3 +1,4 @@
+using System.Text.Json;
 using Azure.Data.Tables;
 using DataProtectionTool.ControlCenter.Models;
 
@@ -232,5 +233,57 @@ public class ClientTableService
             "Saved table format — partitionKey={PK}, rowKey={RK}, fileFormatId={FId}",
             partitionKey, entity.RowKey, fileFormatId);
         return entity;
+    }
+
+    public async Task AppendEventAsync(string partitionKey, string type, string summary, string detail = "")
+    {
+        EnsureTableExists();
+        var cutoff = DateTime.UtcNow.AddDays(-30);
+
+        List<EventRecord> events;
+        EventEntity entity;
+
+        try
+        {
+            var response = await _tableClient.GetEntityAsync<EventEntity>(partitionKey, "all_events");
+            entity = response.Value;
+            events = JsonSerializer.Deserialize<List<EventRecord>>(entity.EventsJson) ?? new List<EventRecord>();
+        }
+        catch (Azure.RequestFailedException ex) when (ex.Status == 404)
+        {
+            entity = new EventEntity
+            {
+                PartitionKey = partitionKey,
+                RowKey = "all_events"
+            };
+            events = new List<EventRecord>();
+        }
+
+        events.RemoveAll(e => e.Timestamp < cutoff);
+
+        events.Add(new EventRecord
+        {
+            Timestamp = DateTime.UtcNow,
+            Type = type,
+            Summary = summary,
+            Detail = detail
+        });
+
+        entity.EventsJson = JsonSerializer.Serialize(events);
+        await _tableClient.UpsertEntityAsync(entity);
+    }
+
+    public async Task<List<EventRecord>> GetEventsAsync(string partitionKey)
+    {
+        EnsureTableExists();
+        try
+        {
+            var response = await _tableClient.GetEntityAsync<EventEntity>(partitionKey, "all_events");
+            return JsonSerializer.Deserialize<List<EventRecord>>(response.Value.EventsJson) ?? new List<EventRecord>();
+        }
+        catch (Azure.RequestFailedException ex) when (ex.Status == 404)
+        {
+            return new List<EventRecord>();
+        }
     }
 }

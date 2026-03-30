@@ -62,6 +62,10 @@ public class AgentHubService : AgentHub.AgentHubBase
 
             await _clientTableService.CreateOrUpdateClientAsync(oid, tid, firstMessage.AgentId);
 
+            var partitionKeyForEvents = Models.ClientEntity.BuildPartitionKey(oid, tid);
+            _ = _clientTableService.AppendEventAsync(partitionKeyForEvents, "agent_connected",
+                $"Agent {firstMessage.AgentId} connected from {peer}");
+
             var url = $"http://localhost:8190/agents/{registeredPath}";
             _logger.LogInformation(
                 "Agent {AgentId} registered — oid={Oid}, tid={Tid}, url={Url}",
@@ -152,7 +156,14 @@ public class AgentHubService : AgentHub.AgentHubBase
         finally
         {
             if (registeredPath != null)
+            {
+                if (_registry.TryGetConnection(registeredPath, out var disc) && disc != null)
+                {
+                    var pk = Models.ClientEntity.BuildPartitionKey(disc.Info.Oid, disc.Info.Tid);
+                    _ = _clientTableService.AppendEventAsync(pk, "agent_disconnected", "Agent disconnected");
+                }
                 _registry.Remove(registeredPath);
+            }
         }
 
         _logger.LogInformation("Agent disconnected from {Peer}", peer);

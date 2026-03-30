@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import MenuBar from "./components/MenuBar";
 import SqlServerConnectionModal from "./components/SqlServerConnectionModal";
 import type { SqlServerConnectionData, ValidateResult } from "./components/SqlServerConnectionModal";
@@ -8,6 +8,9 @@ import ConnectionsPanel from "./components/ConnectionsPanel";
 import type { SavedConnection, TableInfo, QueryInfo } from "./components/ConnectionsPanel";
 import DataPreviewPanel from "./components/DataPreviewPanel";
 import type { PreviewData } from "./components/DataPreviewPanel";
+import StatusBar from "./components/StatusBar";
+import type { StatusEvent } from "./components/StatusBar";
+import EventDialog from "./components/EventDialog";
 import "./App.css";
 
 function getAgentPath(): string | null {
@@ -32,6 +35,31 @@ export default function App() {
   const [previewError, setPreviewError] = useState<string | null>(null);
   const [previewBlobFilenames, setPreviewBlobFilenames] = useState<string[]>([]);
   const [connectionsPanelWidth, setConnectionsPanelWidth] = useState(260);
+  const [statusEvents, setStatusEvents] = useState<StatusEvent[]>([]);
+  const [showEventDialog, setShowEventDialog] = useState(false);
+  const eventsTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  const fetchEvents = useCallback(async () => {
+    const agentPath = getAgentPath();
+    if (!agentPath) return;
+    try {
+      const res = await fetch(`/api/agents/${agentPath}/events`);
+      if (res.ok) {
+        const data = await res.json();
+        setStatusEvents(data);
+      }
+    } catch {
+      // silently ignore
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchEvents();
+    eventsTimerRef.current = setInterval(fetchEvents, 10000);
+    return () => {
+      if (eventsTimerRef.current) clearInterval(eventsTimerRef.current);
+    };
+  }, [fetchEvents]);
 
   const fetchConnections = useCallback(async () => {
     const agentPath = getAgentPath();
@@ -327,7 +355,7 @@ export default function App() {
 
       const result = await res.json();
       if (result.success) {
-        console.log(`Dry run succeeded — fileFormatId: ${result.fileFormatId}${result.cached ? " (cached)" : ""}`);
+        console.log(`Dry run succeeded — fileFormatId: ${result.fileFormatId}, fileRulesetId: ${result.fileRulesetId}, fileMetadataIds: ${JSON.stringify(result.fileMetadataIds)}`);
       } else {
         console.error("Dry run failed:", result.message);
       }
@@ -383,6 +411,16 @@ export default function App() {
           />
         )}
       </main>
+      <StatusBar
+        events={statusEvents}
+        onIconClick={() => setShowEventDialog((v) => !v)}
+      />
+      {showEventDialog && (
+        <EventDialog
+          events={statusEvents}
+          onClose={() => setShowEventDialog(false)}
+        />
+      )}
       {showSqlModal && (
         <SqlServerConnectionModal
           onClose={() => setShowSqlModal(false)}

@@ -145,6 +145,14 @@ while (!cts.Token.IsCancellationRequested)
                 {
                     _ = HandleCreateFileFormatAsync(call, agentId, oid, tid, response.Payload, sasTokenManager);
                 }
+                else if (response.Type == "create_file_ruleset")
+                {
+                    _ = HandleCreateFileRulesetAsync(call, agentId, oid, tid, response.Payload);
+                }
+                else if (response.Type == "create_file_metadata")
+                {
+                    _ = HandleCreateFileMetadataAsync(call, agentId, oid, tid, response.Payload);
+                }
                 else if (response.Type == "connection_details_result")
                 {
                     connectionManager.HandleConnectionDetailsResponse(response.Payload);
@@ -836,6 +844,204 @@ static async Task HandleCreateFileFormatAsync(
             {
                 AgentId = agentId,
                 Type = "create_file_format_result",
+                Payload = resultPayload,
+                Oid = oid,
+                Tid = tid
+            });
+        }
+        catch (Exception writeEx)
+        {
+            Console.Error.WriteLine($"[Agent] Failed to send error result: {writeEx.Message}");
+        }
+    }
+}
+
+static async Task HandleCreateFileRulesetAsync(
+    AsyncDuplexStreamingCall<AgentMessage, ServerMessage> call,
+    string agentId, string oid, string tid, string payload)
+{
+    string correlationId = "";
+    try
+    {
+        using var envelope = JsonDocument.Parse(payload);
+        correlationId = envelope.RootElement.GetProperty("correlationId").GetString() ?? "";
+        var dataJson = envelope.RootElement.GetProperty("data").GetString() ?? "{}";
+
+        using var paramsDoc = JsonDocument.Parse(dataJson);
+        var root = paramsDoc.RootElement;
+
+        var engineUrl = root.GetProperty("engineUrl").GetString() ?? "";
+        var authToken = root.GetProperty("authToken").GetString() ?? "";
+        var rulesetName = root.GetProperty("rulesetName").GetString() ?? "";
+        var fileConnectorId = root.GetProperty("fileConnectorId").GetString() ?? "";
+
+        Console.WriteLine($"[Agent] Creating file ruleset '{rulesetName}' with connectorId={fileConnectorId}...");
+
+        using var httpClient = new HttpClient { Timeout = TimeSpan.FromSeconds(100) };
+        var requestUrl = $"{engineUrl.TrimEnd('/')}/masking/api/v5.1.44/file-rulesets";
+        var jsonBody = JsonSerializer.Serialize(new
+        {
+            rulesetName,
+            fileConnectorId = int.Parse(fileConnectorId)
+        });
+
+        using var requestMessage = new HttpRequestMessage(HttpMethod.Post, requestUrl);
+        requestMessage.Headers.Accept.Add(new System.Net.Http.Headers.MediaTypeWithQualityHeaderValue("application/json"));
+        requestMessage.Headers.TryAddWithoutValidation("Authorization", authToken);
+        requestMessage.Content = new StringContent(jsonBody, System.Text.Encoding.UTF8, "application/json");
+
+        using var response = await httpClient.SendAsync(requestMessage);
+        var responseBody = await response.Content.ReadAsStringAsync();
+
+        Console.WriteLine($"[Agent] Engine responded: {(int)response.StatusCode} {response.StatusCode}");
+
+        string fileRulesetId = "";
+        try
+        {
+            using var respDoc = JsonDocument.Parse(responseBody);
+            if (respDoc.RootElement.TryGetProperty("fileRulesetId", out var friEl))
+                fileRulesetId = friEl.ToString();
+        }
+        catch { }
+
+        var resultPayload = JsonSerializer.Serialize(new
+        {
+            correlationId,
+            success = response.IsSuccessStatusCode,
+            fileRulesetId,
+            statusCode = (int)response.StatusCode,
+            body = responseBody
+        });
+
+        await call.RequestStream.WriteAsync(new AgentMessage
+        {
+            AgentId = agentId,
+            Type = "create_file_ruleset_result",
+            Payload = resultPayload,
+            Oid = oid,
+            Tid = tid
+        });
+
+        Console.WriteLine($"[Agent] File ruleset creation completed — fileRulesetId={fileRulesetId}");
+    }
+    catch (Exception ex)
+    {
+        Console.Error.WriteLine($"[Agent] File ruleset creation failed: {ex.Message}");
+
+        var resultPayload = JsonSerializer.Serialize(new
+        {
+            correlationId,
+            success = false,
+            message = $"File ruleset creation failed: {ex.Message}"
+        });
+
+        try
+        {
+            await call.RequestStream.WriteAsync(new AgentMessage
+            {
+                AgentId = agentId,
+                Type = "create_file_ruleset_result",
+                Payload = resultPayload,
+                Oid = oid,
+                Tid = tid
+            });
+        }
+        catch (Exception writeEx)
+        {
+            Console.Error.WriteLine($"[Agent] Failed to send error result: {writeEx.Message}");
+        }
+    }
+}
+
+static async Task HandleCreateFileMetadataAsync(
+    AsyncDuplexStreamingCall<AgentMessage, ServerMessage> call,
+    string agentId, string oid, string tid, string payload)
+{
+    string correlationId = "";
+    try
+    {
+        using var envelope = JsonDocument.Parse(payload);
+        correlationId = envelope.RootElement.GetProperty("correlationId").GetString() ?? "";
+        var dataJson = envelope.RootElement.GetProperty("data").GetString() ?? "{}";
+
+        using var paramsDoc = JsonDocument.Parse(dataJson);
+        var root = paramsDoc.RootElement;
+
+        var engineUrl = root.GetProperty("engineUrl").GetString() ?? "";
+        var authToken = root.GetProperty("authToken").GetString() ?? "";
+        var fileName = root.GetProperty("fileName").GetString() ?? "";
+        var rulesetId = root.GetProperty("rulesetId").GetString() ?? "";
+        var fileFormatId = root.GetProperty("fileFormatId").GetString() ?? "";
+        var fileType = root.GetProperty("fileType").GetString() ?? "PARQUET";
+
+        Console.WriteLine($"[Agent] Creating file metadata for '{fileName}' (rulesetId={rulesetId}, fileFormatId={fileFormatId})...");
+
+        using var httpClient = new HttpClient { Timeout = TimeSpan.FromSeconds(100) };
+        var requestUrl = $"{engineUrl.TrimEnd('/')}/masking/api/v5.1.44/file-metadata";
+        var jsonBody = JsonSerializer.Serialize(new
+        {
+            fileName,
+            rulesetId = int.Parse(rulesetId),
+            fileFormatId = int.Parse(fileFormatId),
+            fileType
+        });
+
+        using var requestMessage = new HttpRequestMessage(HttpMethod.Post, requestUrl);
+        requestMessage.Headers.Accept.Add(new System.Net.Http.Headers.MediaTypeWithQualityHeaderValue("application/json"));
+        requestMessage.Headers.TryAddWithoutValidation("Authorization", authToken);
+        requestMessage.Content = new StringContent(jsonBody, System.Text.Encoding.UTF8, "application/json");
+
+        using var response = await httpClient.SendAsync(requestMessage);
+        var responseBody = await response.Content.ReadAsStringAsync();
+
+        Console.WriteLine($"[Agent] Engine responded: {(int)response.StatusCode} {response.StatusCode}");
+
+        string fileMetadataId = "";
+        try
+        {
+            using var respDoc = JsonDocument.Parse(responseBody);
+            if (respDoc.RootElement.TryGetProperty("fileMetadataId", out var fmiEl))
+                fileMetadataId = fmiEl.ToString();
+        }
+        catch { }
+
+        var resultPayload = JsonSerializer.Serialize(new
+        {
+            correlationId,
+            success = response.IsSuccessStatusCode,
+            fileMetadataId,
+            statusCode = (int)response.StatusCode,
+            body = responseBody
+        });
+
+        await call.RequestStream.WriteAsync(new AgentMessage
+        {
+            AgentId = agentId,
+            Type = "create_file_metadata_result",
+            Payload = resultPayload,
+            Oid = oid,
+            Tid = tid
+        });
+
+        Console.WriteLine($"[Agent] File metadata creation completed — fileMetadataId={fileMetadataId}");
+    }
+    catch (Exception ex)
+    {
+        Console.Error.WriteLine($"[Agent] File metadata creation failed: {ex.Message}");
+
+        var resultPayload = JsonSerializer.Serialize(new
+        {
+            correlationId,
+            success = false,
+            message = $"File metadata creation failed: {ex.Message}"
+        });
+
+        try
+        {
+            await call.RequestStream.WriteAsync(new AgentMessage
+            {
+                AgentId = agentId,
+                Type = "create_file_metadata_result",
                 Payload = resultPayload,
                 Oid = oid,
                 Tid = tid
