@@ -73,6 +73,10 @@ var previewFilenameRegex = new Regex(
     var containerClient = app.Services.GetRequiredService<BlobServiceClient>()
         .GetBlobContainerClient(blobStorageConfig.Container);
     await containerClient.CreateIfNotExistsAsync();
+
+    var previewContainerClient = app.Services.GetRequiredService<BlobServiceClient>()
+        .GetBlobContainerClient(BlobStorageConfig.PreviewContainer);
+    await previewContainerClient.CreateIfNotExistsAsync();
 }
 
 {
@@ -424,7 +428,7 @@ app.MapPost("/api/agents/{path}/preview-table", async (string path, HttpRequest 
     }
 });
 
-app.MapPost("/api/agents/{path}/reload-preview-table", async (string path, HttpRequest request, AgentRegistry registry, ClientTableService clientTableService, BlobServiceClient blobClient, BlobStorageConfig blobConfig) =>
+app.MapPost("/api/agents/{path}/reload-preview-table", async (string path, HttpRequest request, AgentRegistry registry, ClientTableService clientTableService, BlobServiceClient blobClient) =>
 {
     if (!registry.TryGetConnection(path, out var connection) || connection is null)
         return Results.NotFound(new { error = "Agent not found or not connected." });
@@ -459,7 +463,7 @@ app.MapPost("/api/agents/{path}/reload-preview-table", async (string path, HttpR
     if (dataItem != null && !string.IsNullOrEmpty(dataItem.PreviewFileList))
     {
         var oldFilenames = dataItem.PreviewFileList.Split(',', StringSplitOptions.RemoveEmptyEntries);
-        var containerClient = blobClient.GetBlobContainerClient(blobConfig.Container);
+        var containerClient = blobClient.GetBlobContainerClient(BlobStorageConfig.PreviewContainer);
         foreach (var filename in oldFilenames)
         {
             try { await containerClient.GetBlobClient(filename).DeleteIfExistsAsync(); } catch { }
@@ -514,14 +518,14 @@ app.MapPost("/api/agents/{path}/reload-preview-table", async (string path, HttpR
     }
 });
 
-app.MapGet("/api/blob/{filename}", async (string filename, BlobServiceClient blobClient, BlobStorageConfig blobConfig) =>
+app.MapGet("/api/blob/{filename}", async (string filename, BlobServiceClient blobClient) =>
 {
     if (!IsValidPreviewFilename(filename))
         return Results.BadRequest(new { error = "Invalid filename." });
 
     try
     {
-        var containerClient = blobClient.GetBlobContainerClient(blobConfig.Container);
+        var containerClient = blobClient.GetBlobContainerClient(BlobStorageConfig.PreviewContainer);
         var blob = containerClient.GetBlobClient(filename);
 
         if (!await blob.ExistsAsync())
@@ -568,7 +572,7 @@ app.MapGet("/api/blob/{filename}", async (string filename, BlobServiceClient blo
     }
 });
 
-app.MapPost("/api/blob/preview-merge", async (HttpRequest request, BlobServiceClient blobClient, BlobStorageConfig blobConfig) =>
+app.MapPost("/api/blob/preview-merge", async (HttpRequest request, BlobServiceClient blobClient) =>
 {
     string body;
     using (var sr = new StreamReader(request.Body))
@@ -588,7 +592,7 @@ app.MapPost("/api/blob/preview-merge", async (HttpRequest request, BlobServiceCl
         if (filenames.Any(f => !IsValidPreviewFilename(f)))
             return Results.BadRequest(new { error = "Invalid filename in list." });
 
-        var containerClient = blobClient.GetBlobContainerClient(blobConfig.Container);
+        var containerClient = blobClient.GetBlobContainerClient(BlobStorageConfig.PreviewContainer);
         List<string>? headers = null;
         var rows = new List<List<string?>>();
 
@@ -648,7 +652,7 @@ app.MapPost("/api/blob/preview-merge", async (HttpRequest request, BlobServiceCl
     }
 });
 
-app.MapPost("/api/blob/delete-preview", async (HttpRequest request, BlobServiceClient blobClient, BlobStorageConfig blobConfig) =>
+app.MapPost("/api/blob/delete-preview", async (HttpRequest request, BlobServiceClient blobClient) =>
 {
     string body;
     using (var sr = new StreamReader(request.Body))
@@ -667,7 +671,7 @@ app.MapPost("/api/blob/delete-preview", async (HttpRequest request, BlobServiceC
         if (filenames.Any(f => !IsValidPreviewFilename(f)))
             return Results.BadRequest(new { error = "Invalid filename in list." });
 
-        var containerClient = blobClient.GetBlobContainerClient(blobConfig.Container);
+        var containerClient = blobClient.GetBlobContainerClient(BlobStorageConfig.PreviewContainer);
         int deleted = 0;
         foreach (var filename in filenames)
         {
@@ -835,7 +839,8 @@ app.MapGet("/api/agents/{path}/queries", async (string path, string connectionRo
 });
 
 app.MapPost("/api/agents/{path}/dry-run", async (string path, HttpRequest request, AgentRegistry registry,
-    ClientTableService clientTableService, DataEngineConfig dataEngineConfig) =>
+    ClientTableService clientTableService, DataEngineConfig dataEngineConfig,
+    BlobServiceClient blobClient, BlobStorageConfig blobConfig) =>
 {
     if (!registry.TryGetConnection(path, out var connection) || connection is null)
         return Results.NotFound(new { error = "Agent not found or not connected." });
@@ -876,6 +881,20 @@ app.MapPost("/api/agents/{path}/dry-run", async (string path, HttpRequest reques
 
         if (string.IsNullOrEmpty(dataEngineConfig.ProfileSetId))
             return Results.Ok(new { success = false, message = "Data engine ProfileSetId is not configured. Set ProfileSetId in appsettings.json." });
+
+        // Step 0: Copy preview files from data_preview container to configured (engine) container
+        var previewContainerClient = blobClient.GetBlobContainerClient(BlobStorageConfig.PreviewContainer);
+        var engineContainerClient = blobClient.GetBlobContainerClient(blobConfig.Container);
+
+        foreach (var previewFile in previewFilenames)
+        {
+            var sourceBlob = previewContainerClient.GetBlobClient(previewFile);
+            var destBlob = engineContainerClient.GetBlobClient(previewFile);
+            using var stream = new MemoryStream();
+            await sourceBlob.DownloadToAsync(stream);
+            stream.Position = 0;
+            await destBlob.UploadAsync(stream, overwrite: true);
+        }
 
         // Step 1: Get or create file format
         var connEntityForFormat = await clientTableService.GetConnectionByRowKeyAsync(partitionKey, rowKey);
