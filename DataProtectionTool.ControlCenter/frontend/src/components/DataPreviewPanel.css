@@ -34,12 +34,18 @@
   background: none;
   border: none;
   border-bottom: 2px solid transparent;
+  border-radius: 6px 6px 0 0;
   cursor: pointer;
-  transition: color 0.12s, border-color 0.12s;
+  transition: color 0.15s, border-color 0.15s, background-color 0.15s;
 }
 
 .data-preview-tab:hover {
   color: #333;
+  background-color: #e8edf3;
+}
+
+.data-preview-tab-active:hover {
+  background-color: #e0ecf7;
 }
 
 .data-preview-tab-active {
