@@ -204,44 +204,6 @@ public class ClientTableService
         }
     }
 
-    public async Task<TableFormatEntity?> GetTableFormatAsync(
-        string partitionKey, string connectionRowKey, string schema, string tableName)
-    {
-        EnsureTableExists();
-        var rowKey = TableFormatEntity.BuildRowKey(connectionRowKey, schema, tableName);
-        try
-        {
-            var response = await _tableClient.GetEntityAsync<TableFormatEntity>(partitionKey, rowKey);
-            return response.Value;
-        }
-        catch (Azure.RequestFailedException ex) when (ex.Status == 404)
-        {
-            return null;
-        }
-    }
-
-    public async Task<TableFormatEntity> SaveTableFormatAsync(
-        string partitionKey, string connectionRowKey, string schema, string tableName, string fileFormatId)
-    {
-        EnsureTableExists();
-        var entity = new TableFormatEntity
-        {
-            PartitionKey = partitionKey,
-            RowKey = TableFormatEntity.BuildRowKey(connectionRowKey, schema, tableName),
-            ConnectionRowKey = connectionRowKey,
-            Schema = schema,
-            TableName = tableName,
-            FileFormatId = fileFormatId,
-            CreatedAt = DateTime.UtcNow
-        };
-
-        await _tableClient.UpsertEntityAsync(entity);
-        _logger.LogInformation(
-            "Saved table format — partitionKey={PK}, rowKey={RK}, fileFormatId={FId}",
-            partitionKey, entity.RowKey, fileFormatId);
-        return entity;
-    }
-
     public async Task AppendEventAsync(string partitionKey, string type, string summary, string detail = "")
     {
         EnsureTableExists();
@@ -431,5 +393,14 @@ public class ClientTableService
         _logger.LogInformation(
             "Updated PreviewFileList for DataItem {RowKey} — {FileCount} file(s)",
             entity.RowKey, string.IsNullOrEmpty(previewFileList) ? 0 : previewFileList.Split(',').Length);
+    }
+
+    public async Task UpdateFileFormatIdAsync(DataItemEntity entity, string fileFormatId)
+    {
+        entity.FileFormatId = fileFormatId;
+        await _dataItemTableClient.UpdateEntityAsync(entity, entity.ETag);
+        _logger.LogInformation(
+            "Updated FileFormatId for DataItem {RowKey} — fileFormatId={FileFormatId}",
+            entity.RowKey, fileFormatId);
     }
 }

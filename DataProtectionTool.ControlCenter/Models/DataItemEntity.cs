@@ -16,6 +16,7 @@ public class DataItemEntity : ITableEntity
     public string TableName { get; set; } = "";
     public string ConnectionRowKey { get; set; } = "";
     public string PreviewFileList { get; set; } = "";
+    public string FileFormatId { get; set; } = "";
 
     public static string BuildRowKeyPrefix(string serverName, string dbName) =>
         $"sqlserver_{TableKeyHelper.EscapeKeySegment(serverName)}_{TableKeyHelper.EscapeKeySegment(dbName)}_";

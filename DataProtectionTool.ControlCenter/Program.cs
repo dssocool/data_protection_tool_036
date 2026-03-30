@@ -854,14 +854,21 @@ app.MapPost("/api/agents/{path}/dry-run", async (string path, HttpRequest reques
             return Results.Ok(new { success = false, message = "Data engine ProfileSetId is not configured. Set ProfileSetId in appsettings.json." });
 
         // Step 1: Get or create file format
-        var existing = await clientTableService.GetTableFormatAsync(partitionKey, rowKey, schema, tableName);
-        string fileFormatId;
+        var connEntityForFormat = await clientTableService.GetConnectionByRowKeyAsync(partitionKey, rowKey);
+        DataItemEntity? dataItemForFormat = null;
+        string fileFormatId = "";
 
-        if (existing != null && !string.IsNullOrEmpty(existing.FileFormatId))
+        if (connEntityForFormat != null)
         {
-            fileFormatId = existing.FileFormatId;
+            dataItemForFormat = await clientTableService.GetDataItemByTableAsync(
+                partitionKey, connEntityForFormat.ServerName, connEntityForFormat.DatabaseName, schema, tableName);
+            if (dataItemForFormat != null && !string.IsNullOrEmpty(dataItemForFormat.FileFormatId))
+            {
+                fileFormatId = dataItemForFormat.FileFormatId;
+            }
         }
-        else
+
+        if (string.IsNullOrEmpty(fileFormatId))
         {
             var commandPayload = JsonSerializer.Serialize(new
             {
@@ -885,9 +892,9 @@ app.MapPost("/api/agents/{path}/dry-run", async (string path, HttpRequest reques
             fileFormatId = resultRoot.TryGetProperty("fileFormatId", out var ffiEl)
                 ? ffiEl.GetString() ?? "" : "";
 
-            if (!string.IsNullOrEmpty(fileFormatId))
+            if (!string.IsNullOrEmpty(fileFormatId) && dataItemForFormat != null)
             {
-                await clientTableService.SaveTableFormatAsync(partitionKey, rowKey, schema, tableName, fileFormatId);
+                await clientTableService.UpdateFileFormatIdAsync(dataItemForFormat, fileFormatId);
             }
         }
 
