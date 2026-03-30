@@ -309,6 +309,33 @@ export default function App() {
     }
   }
 
+  async function handleDryRun(rowKey: string, schema: string, tableName: string) {
+    const agentPath = getAgentPath();
+    if (!agentPath) return;
+
+    try {
+      const res = await fetch(`/api/agents/${agentPath}/dry-run`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ rowKey, schema, tableName, previewBlobFilenames }),
+      });
+
+      if (!res.ok) {
+        console.error("Dry run request failed:", res.status);
+        return;
+      }
+
+      const result = await res.json();
+      if (result.success) {
+        console.log(`Dry run succeeded — fileFormatId: ${result.fileFormatId}${result.cached ? " (cached)" : ""}`);
+      } else {
+        console.error("Dry run failed:", result.message);
+      }
+    } catch (e) {
+      console.error("Dry run error:", e instanceof Error ? e.message : String(e));
+    }
+  }
+
   return (
     <div className="app">
       <MenuBar
@@ -330,6 +357,7 @@ export default function App() {
             onTableClick={handleTableClick}
             onQueryClick={handleQueryClick}
             onReloadPreview={handleReloadPreview}
+            onDryRun={handleDryRun}
             onClose={() => setShowConnections(false)}
             onWidthChange={setConnectionsPanelWidth}
           />

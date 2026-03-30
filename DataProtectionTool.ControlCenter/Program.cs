@@ -499,6 +499,86 @@ app.MapGet("/api/agents/{path}/queries", async (string path, string connectionRo
     return Results.Ok(result);
 });
 
+app.MapPost("/api/agents/{path}/dry-run", async (string path, HttpRequest request, AgentRegistry registry,
+    ClientTableService clientTableService, DataEngineConfig dataEngineConfig) =>
+{
+    if (!registry.TryGetConnection(path, out var connection) || connection is null)
+        return Results.NotFound(new { error = "Agent not found or not connected." });
+
+    string body;
+    using (var reader = new StreamReader(request.Body))
+        body = await reader.ReadToEndAsync();
+
+    try
+    {
+        using var bodyDoc = JsonDocument.Parse(body);
+        var root = bodyDoc.RootElement;
+        var rowKey = root.GetProperty("rowKey").GetString() ?? "";
+        var schema = root.GetProperty("schema").GetString() ?? "";
+        var tableName = root.GetProperty("tableName").GetString() ?? "";
+
+        var previewFilenames = new List<string>();
+        if (root.TryGetProperty("previewBlobFilenames", out var fnamesEl) && fnamesEl.ValueKind == JsonValueKind.Array)
+        {
+            foreach (var el in fnamesEl.EnumerateArray())
+            {
+                var fname = el.GetString();
+                if (!string.IsNullOrEmpty(fname))
+                    previewFilenames.Add(fname);
+            }
+        }
+
+        if (previewFilenames.Count == 0)
+            return Results.Ok(new { success = false, message = "No preview files available. Please preview the table first." });
+
+        var partitionKey = ClientEntity.BuildPartitionKey(connection.Info.Oid, connection.Info.Tid);
+
+        var existing = await clientTableService.GetTableFormatAsync(partitionKey, rowKey, schema, tableName);
+        if (existing != null && !string.IsNullOrEmpty(existing.FileFormatId))
+            return Results.Ok(new { success = true, fileFormatId = existing.FileFormatId, cached = true });
+
+        if (string.IsNullOrEmpty(dataEngineConfig.EngineUrl) || string.IsNullOrEmpty(dataEngineConfig.AuthorizationToken))
+            return Results.Ok(new { success = false, message = "Data engine is not configured. Set EngineUrl and AuthorizationToken in dataEngineConfig.json." });
+
+        var commandPayload = JsonSerializer.Serialize(new
+        {
+            engineUrl = dataEngineConfig.EngineUrl,
+            authToken = dataEngineConfig.AuthorizationToken,
+            blobFilename = previewFilenames[0],
+            fileFormatType = "PARQUET"
+        });
+
+        var agentResult = await connection.SendCommandAsync("create_file_format", commandPayload, TimeSpan.FromSeconds(120));
+
+        using var resultDoc = JsonDocument.Parse(agentResult);
+        var resultRoot = resultDoc.RootElement;
+
+        if (resultRoot.TryGetProperty("success", out var successEl) && successEl.GetBoolean())
+        {
+            var fileFormatId = resultRoot.TryGetProperty("fileFormatId", out var ffiEl)
+                ? ffiEl.GetString() ?? "" : "";
+
+            if (!string.IsNullOrEmpty(fileFormatId))
+            {
+                await clientTableService.SaveTableFormatAsync(partitionKey, rowKey, schema, tableName, fileFormatId);
+            }
+
+            return Results.Ok(new { success = true, fileFormatId });
+        }
+
+        var message = resultRoot.TryGetProperty("message", out var msgEl) ? msgEl.GetString() : "File format creation failed.";
+        return Results.Ok(new { success = false, message });
+    }
+    catch (TimeoutException)
+    {
+        return Results.Ok(new { success = false, message = "Agent did not respond within 120 seconds." });
+    }
+    catch (Exception ex)
+    {
+        return Results.Ok(new { success = false, message = $"Dry run error: {ex.Message}" });
+    }
+});
+
 app.MapPost("/api/agents/{path}/http-request", async (string path, HttpRequest request, AgentRegistry registry) =>
 {
     if (!registry.TryGetConnection(path, out var connection) || connection is null)

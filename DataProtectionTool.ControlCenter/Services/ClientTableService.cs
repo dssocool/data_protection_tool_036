@@ -195,4 +195,42 @@ public class ClientTableService
             return null;
         }
     }
+
+    public async Task<TableFormatEntity?> GetTableFormatAsync(
+        string partitionKey, string connectionRowKey, string schema, string tableName)
+    {
+        EnsureTableExists();
+        var rowKey = TableFormatEntity.BuildRowKey(connectionRowKey, schema, tableName);
+        try
+        {
+            var response = await _tableClient.GetEntityAsync<TableFormatEntity>(partitionKey, rowKey);
+            return response.Value;
+        }
+        catch (Azure.RequestFailedException ex) when (ex.Status == 404)
+        {
+            return null;
+        }
+    }
+
+    public async Task<TableFormatEntity> SaveTableFormatAsync(
+        string partitionKey, string connectionRowKey, string schema, string tableName, string fileFormatId)
+    {
+        EnsureTableExists();
+        var entity = new TableFormatEntity
+        {
+            PartitionKey = partitionKey,
+            RowKey = TableFormatEntity.BuildRowKey(connectionRowKey, schema, tableName),
+            ConnectionRowKey = connectionRowKey,
+            Schema = schema,
+            TableName = tableName,
+            FileFormatId = fileFormatId,
+            CreatedAt = DateTime.UtcNow
+        };
+
+        await _tableClient.UpsertEntityAsync(entity);
+        _logger.LogInformation(
+            "Saved table format — partitionKey={PK}, rowKey={RK}, fileFormatId={FId}",
+            partitionKey, entity.RowKey, fileFormatId);
+        return entity;
+    }
 }

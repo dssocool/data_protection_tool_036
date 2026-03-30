@@ -44,6 +44,7 @@ interface ConnectionsPanelProps {
   onTableClick: (rowKey: string, schema: string, tableName: string) => void;
   onQueryClick: (connectionRowKey: string, queryRowKey: string, queryText: string) => void;
   onReloadPreview: () => void;
+  onDryRun: (rowKey: string, schema: string, tableName: string) => void;
   onClose: () => void;
   onWidthChange?: (width: number) => void;
 }
@@ -63,6 +64,7 @@ export default function ConnectionsPanel({
   onTableClick,
   onQueryClick,
   onReloadPreview,
+  onDryRun,
   onClose,
   onWidthChange,
 }: ConnectionsPanelProps) {
@@ -284,12 +286,18 @@ export default function ConnectionsPanel({
           >
             Reload Data Preview
           </div>
-          <div
-            className="conn-context-menu-item"
-            onClick={() => setContextMenu(null)}
-          >
-            Data Protection: Dry Run
-          </div>
+          {!contextMenu.isQuery && (
+            <div
+              className="conn-context-menu-item"
+              onClick={() => {
+                const { rowKey, schema, tableName } = contextMenu;
+                setContextMenu(null);
+                onDryRun(rowKey, schema, tableName);
+              }}
+            >
+              Data Protection: Dry Run
+            </div>
+          )}
         </div>
       )}
       <div

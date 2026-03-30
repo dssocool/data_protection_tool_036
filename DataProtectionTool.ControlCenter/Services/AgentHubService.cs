@@ -199,7 +199,7 @@ public class AgentHubService : AgentHub.AgentHubBase
                 ExpiresOn = DateTimeOffset.UtcNow.AddMinutes(15),
                 Protocol = SasProtocol.HttpsAndHttp
             };
-            sasBuilder.SetPermissions(AccountSasPermissions.Write | AccountSasPermissions.Create);
+            sasBuilder.SetPermissions(AccountSasPermissions.Read | AccountSasPermissions.Write | AccountSasPermissions.Create);
 
             var sasToken = sasBuilder.ToSasQueryParameters(_blobCredential).ToString();
 

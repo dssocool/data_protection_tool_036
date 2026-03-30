@@ -141,6 +141,10 @@ while (!cts.Token.IsCancellationRequested)
                 {
                     _ = HandleHttpRequestAsync(call, agentId, oid, tid, response.Payload);
                 }
+                else if (response.Type == "create_file_format")
+                {
+                    _ = HandleCreateFileFormatAsync(call, agentId, oid, tid, response.Payload, sasTokenManager);
+                }
                 else if (response.Type == "connection_details_result")
                 {
                     connectionManager.HandleConnectionDetailsResponse(response.Payload);
@@ -727,6 +731,130 @@ static async Task HandleHttpRequestAsync(
             Console.Error.WriteLine($"[Agent] Failed to send error result: {writeEx.Message}");
         }
     }
+}
+
+static async Task HandleCreateFileFormatAsync(
+    AsyncDuplexStreamingCall<AgentMessage, ServerMessage> call,
+    string agentId, string oid, string tid, string payload,
+    SasTokenManager sasManager)
+{
+    string correlationId = "";
+    try
+    {
+        using var envelope = JsonDocument.Parse(payload);
+        correlationId = envelope.RootElement.GetProperty("correlationId").GetString() ?? "";
+        var dataJson = envelope.RootElement.GetProperty("data").GetString() ?? "{}";
+
+        using var paramsDoc = JsonDocument.Parse(dataJson);
+        var root = paramsDoc.RootElement;
+
+        var engineUrl = root.GetProperty("engineUrl").GetString() ?? "";
+        var authToken = root.GetProperty("authToken").GetString() ?? "";
+        var blobFilename = root.GetProperty("blobFilename").GetString() ?? "";
+        var fileFormatType = root.TryGetProperty("fileFormatType", out var fftEl)
+            ? fftEl.GetString() ?? "PARQUET" : "PARQUET";
+
+        Console.WriteLine($"[Agent] Creating file format for {blobFilename} (type={fileFormatType})...");
+
+        var sasInfo = await sasManager.RequestSasTokenAsync(call, agentId, oid, tid);
+
+        byte[] fileBytes;
+        try
+        {
+            fileBytes = await DownloadBlobAsync(sasInfo, blobFilename);
+        }
+        catch
+        {
+            Console.WriteLine("[Agent] SAS token may be expired, requesting a fresh one...");
+            sasInfo = await sasManager.RequestSasTokenAsync(call, agentId, oid, tid);
+            fileBytes = await DownloadBlobAsync(sasInfo, blobFilename);
+        }
+
+        Console.WriteLine($"[Agent] Downloaded {fileBytes.Length} bytes from blob {blobFilename}");
+
+        using var httpClient = new HttpClient { Timeout = TimeSpan.FromSeconds(100) };
+        using var formContent = new MultipartFormDataContent();
+        var fileContent = new ByteArrayContent(fileBytes);
+        fileContent.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("application/octet-stream");
+        formContent.Add(fileContent, "fileFormat", blobFilename);
+        formContent.Add(new StringContent(fileFormatType), "fileFormatType");
+
+        var requestUrl = $"{engineUrl.TrimEnd('/')}/masking/api/v5.1.44/file-formats";
+        using var requestMessage = new HttpRequestMessage(HttpMethod.Post, requestUrl);
+        requestMessage.Headers.Accept.Add(new System.Net.Http.Headers.MediaTypeWithQualityHeaderValue("application/json"));
+        requestMessage.Headers.TryAddWithoutValidation("Authorization", authToken);
+        requestMessage.Content = formContent;
+
+        using var response = await httpClient.SendAsync(requestMessage);
+        var responseBody = await response.Content.ReadAsStringAsync();
+
+        Console.WriteLine($"[Agent] Engine responded: {(int)response.StatusCode} {response.StatusCode}");
+
+        string fileFormatId = "";
+        try
+        {
+            using var respDoc = JsonDocument.Parse(responseBody);
+            if (respDoc.RootElement.TryGetProperty("fileFormatId", out var ffiEl))
+                fileFormatId = ffiEl.GetString() ?? "";
+        }
+        catch { }
+
+        var resultPayload = JsonSerializer.Serialize(new
+        {
+            correlationId,
+            success = response.IsSuccessStatusCode,
+            fileFormatId,
+            statusCode = (int)response.StatusCode,
+            body = responseBody
+        });
+
+        await call.RequestStream.WriteAsync(new AgentMessage
+        {
+            AgentId = agentId,
+            Type = "create_file_format_result",
+            Payload = resultPayload,
+            Oid = oid,
+            Tid = tid
+        });
+
+        Console.WriteLine($"[Agent] File format creation completed — fileFormatId={fileFormatId}");
+    }
+    catch (Exception ex)
+    {
+        Console.Error.WriteLine($"[Agent] File format creation failed: {ex.Message}");
+
+        var resultPayload = JsonSerializer.Serialize(new
+        {
+            correlationId,
+            success = false,
+            message = $"File format creation failed: {ex.Message}"
+        });
+
+        try
+        {
+            await call.RequestStream.WriteAsync(new AgentMessage
+            {
+                AgentId = agentId,
+                Type = "create_file_format_result",
+                Payload = resultPayload,
+                Oid = oid,
+                Tid = tid
+            });
+        }
+        catch (Exception writeEx)
+        {
+            Console.Error.WriteLine($"[Agent] Failed to send error result: {writeEx.Message}");
+        }
+    }
+}
+
+static async Task<byte[]> DownloadBlobAsync(SasTokenInfo sasInfo, string blobFilename)
+{
+    var blobUri = new Uri($"{sasInfo.BlobEndpoint}/{sasInfo.Container}/{blobFilename}?{sasInfo.SasToken}");
+    var blobClient = new BlobClient(blobUri);
+    using var ms = new MemoryStream();
+    await blobClient.DownloadToAsync(ms);
+    return ms.ToArray();
 }
 
 const int PreviewBatchSize = 10_000;
