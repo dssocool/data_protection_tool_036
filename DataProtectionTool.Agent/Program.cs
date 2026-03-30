@@ -137,6 +137,10 @@ while (!cts.Token.IsCancellationRequested)
                 {
                     _ = HandlePreviewQueryAsync(call, agentId, oid, tid, response.Payload, connectionManager, sasTokenManager);
                 }
+                else if (response.Type == "http_request")
+                {
+                    _ = HandleHttpRequestAsync(call, agentId, oid, tid, response.Payload);
+                }
                 else if (response.Type == "connection_details_result")
                 {
                     connectionManager.HandleConnectionDetailsResponse(response.Payload);
@@ -631,6 +635,106 @@ static async Task HandlePreviewQueryAsync(
             {
                 AgentId = agentId,
                 Type = "preview_query_result",
+                Payload = resultPayload,
+                Oid = oid,
+                Tid = tid
+            });
+        }
+        catch (Exception writeEx)
+        {
+            Console.Error.WriteLine($"[Agent] Failed to send error result: {writeEx.Message}");
+        }
+    }
+}
+
+static async Task HandleHttpRequestAsync(
+    AsyncDuplexStreamingCall<AgentMessage, ServerMessage> call,
+    string agentId, string oid, string tid, string payload)
+{
+    string correlationId = "";
+    try
+    {
+        using var envelope = JsonDocument.Parse(payload);
+        correlationId = envelope.RootElement.GetProperty("correlationId").GetString() ?? "";
+        var dataJson = envelope.RootElement.GetProperty("data").GetString() ?? "{}";
+
+        using var paramsDoc = JsonDocument.Parse(dataJson);
+        var root = paramsDoc.RootElement;
+
+        var method = root.GetProperty("method").GetString() ?? "GET";
+        var url = root.GetProperty("url").GetString() ?? "";
+        var bodyContent = root.TryGetProperty("body", out var bodyEl) ? bodyEl.GetString() : null;
+
+        Console.WriteLine($"[Agent] Relaying HTTP {method} {url}...");
+
+        using var httpClient = new HttpClient { Timeout = TimeSpan.FromSeconds(100) };
+        var requestMessage = new HttpRequestMessage(new HttpMethod(method), url);
+
+        if (root.TryGetProperty("headers", out var headersEl) && headersEl.ValueKind == JsonValueKind.Object)
+        {
+            foreach (var header in headersEl.EnumerateObject())
+            {
+                var headerValue = header.Value.GetString() ?? "";
+                if (!requestMessage.Headers.TryAddWithoutValidation(header.Name, headerValue))
+                {
+                    requestMessage.Content ??= new StringContent(bodyContent ?? "");
+                    requestMessage.Content.Headers.Remove(header.Name);
+                    requestMessage.Content.Headers.TryAddWithoutValidation(header.Name, headerValue);
+                }
+            }
+        }
+
+        if (bodyContent != null && requestMessage.Content == null)
+        {
+            requestMessage.Content = new StringContent(bodyContent, Encoding.UTF8);
+        }
+
+        using var response = await httpClient.SendAsync(requestMessage);
+        var responseBody = await response.Content.ReadAsStringAsync();
+
+        var responseHeaders = new Dictionary<string, string>();
+        foreach (var h in response.Headers)
+            responseHeaders[h.Key] = string.Join(", ", h.Value);
+        foreach (var h in response.Content.Headers)
+            responseHeaders[h.Key] = string.Join(", ", h.Value);
+
+        var resultPayload = JsonSerializer.Serialize(new
+        {
+            correlationId,
+            success = true,
+            statusCode = (int)response.StatusCode,
+            headers = responseHeaders,
+            body = responseBody
+        });
+
+        await call.RequestStream.WriteAsync(new AgentMessage
+        {
+            AgentId = agentId,
+            Type = "http_request_result",
+            Payload = resultPayload,
+            Oid = oid,
+            Tid = tid
+        });
+
+        Console.WriteLine($"[Agent] HTTP relay completed: {(int)response.StatusCode} {response.StatusCode}");
+    }
+    catch (Exception ex)
+    {
+        Console.Error.WriteLine($"[Agent] HTTP relay failed: {ex.Message}");
+
+        var resultPayload = JsonSerializer.Serialize(new
+        {
+            correlationId,
+            success = false,
+            message = $"HTTP request failed: {ex.Message}"
+        });
+
+        try
+        {
+            await call.RequestStream.WriteAsync(new AgentMessage
+            {
+                AgentId = agentId,
+                Type = "http_request_result",
                 Payload = resultPayload,
                 Oid = oid,
                 Tid = tid

@@ -383,6 +383,30 @@ app.MapGet("/api/agents/{path}/queries", async (string path, string connectionRo
     return Results.Ok(result);
 });
 
+app.MapPost("/api/agents/{path}/http-request", async (string path, HttpRequest request, AgentRegistry registry) =>
+{
+    if (!registry.TryGetConnection(path, out var connection) || connection is null)
+        return Results.NotFound(new { error = "Agent not found or not connected." });
+
+    string body;
+    using (var reader = new StreamReader(request.Body))
+        body = await reader.ReadToEndAsync();
+
+    try
+    {
+        var result = await connection.SendCommandAsync("http_request", body, TimeSpan.FromSeconds(120));
+        return Results.Content(result, "application/json");
+    }
+    catch (TimeoutException)
+    {
+        return Results.Ok(new { success = false, message = "Agent did not respond within 120 seconds." });
+    }
+    catch (Exception ex)
+    {
+        return Results.Ok(new { success = false, message = $"HTTP request relay error: {ex.Message}" });
+    }
+});
+
 app.MapGet("/agents/{path}", (string path, AgentRegistry registry, IWebHostEnvironment env) =>
 {
     if (!registry.TryGet(path, out _))
