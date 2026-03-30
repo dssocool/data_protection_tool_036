@@ -142,9 +142,7 @@ export default function ConnectionsPanel({
         next.delete(rowKey);
       } else {
         next.add(rowKey);
-        if (!connectionTables[rowKey]) {
-          onExpandConnection(rowKey);
-        }
+        onExpandConnection(rowKey);
       }
       return next;
     });
