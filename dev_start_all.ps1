@@ -7,6 +7,7 @@ $ccProj      = Join-Path $scriptDir "DataProtectionTool.ControlCenter\DataProtec
 $agentProj   = Join-Path $scriptDir "DataProtectionTool.Agent\DataProtectionTool.Agent.csproj"
 
 $noAzurite = $args -contains "--no-azurite"
+$noTest    = $args -contains "--no-test"
 $processes = @()
 
 function Kill-ProcessTree($pid) {
@@ -100,10 +101,19 @@ Write-Host "      Waiting 5 seconds for ControlCenter to initialize..."
 Start-Sleep -Seconds 5
 
 # --- [4/4] Agent ---
-Write-Host "[4/4] Starting Agent (gRPC client) in test mode..."
+if ($noTest) {
+    Write-Host "[4/4] Starting Agent (gRPC client) without test mode..."
+} else {
+    Write-Host "[4/4] Starting Agent (gRPC client) in test mode..."
+}
+
+$agentArgs = @("run","--project",$agentProj)
+if (-not $noTest) {
+    $agentArgs += @("--","test")
+}
 
 $agent = Start-Process -FilePath "dotnet" `
-    -ArgumentList "run","--project",$agentProj,"--","test" `
+    -ArgumentList $agentArgs `
     -NoNewWindow -PassThru
 $processes += $agent
 Write-Host "      Agent PID: $($agent.Id)"
