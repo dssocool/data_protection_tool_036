@@ -1,4 +1,6 @@
 using System.Text.Json;
+using System.Text.Json.Nodes;
+using System.Text.RegularExpressions;
 using Azure.Data.Tables;
 using Azure.Storage;
 using Azure.Storage.Blobs;
@@ -63,6 +65,9 @@ var dataEngineConfig = builder.Configuration.GetSection("DataEngine").Get<DataEn
 builder.Services.AddSingleton(dataEngineConfig);
 
 var app = builder.Build();
+var previewFilenameRegex = new Regex(
+    "^preview_(\\d+)_([0-9a-fA-F]{32})(?:_([2-9]\\d*))?\\.parquet$",
+    RegexOptions.Compiled | RegexOptions.CultureInvariant);
 
 {
     var containerClient = app.Services.GetRequiredService<BlobServiceClient>()
@@ -351,7 +356,12 @@ app.MapPost("/api/agents/{path}/preview-table", async (string path, HttpRequest 
 
     try
     {
-        var result = await connection.SendCommandAsync("preview_table", body, TimeSpan.FromSeconds(60));
+        var uniqueId = await clientTableService.GetUserIdAsync(partitionKey);
+        if (string.IsNullOrWhiteSpace(uniqueId) || !IsDigitsOnly(uniqueId))
+            return Results.BadRequest(new { success = false, message = "User unique ID is missing." });
+
+        var requestBody = AddUniqueIdToPayload(body, uniqueId);
+        var result = await connection.SendCommandAsync("preview_table", requestBody, TimeSpan.FromSeconds(60));
 
         if (dataItem != null)
         {
@@ -436,7 +446,12 @@ app.MapPost("/api/agents/{path}/reload-preview-table", async (string path, HttpR
 
     try
     {
-        var result = await connection.SendCommandAsync("preview_table", body, TimeSpan.FromSeconds(60));
+        var uniqueId = await clientTableService.GetUserIdAsync(partitionKey);
+        if (string.IsNullOrWhiteSpace(uniqueId) || !IsDigitsOnly(uniqueId))
+            return Results.BadRequest(new { success = false, message = "User unique ID is missing." });
+
+        var requestBody = AddUniqueIdToPayload(body, uniqueId);
+        var result = await connection.SendCommandAsync("preview_table", requestBody, TimeSpan.FromSeconds(60));
 
         if (dataItem != null)
         {
@@ -477,7 +492,7 @@ app.MapPost("/api/agents/{path}/reload-preview-table", async (string path, HttpR
 
 app.MapGet("/api/blob/{filename}", async (string filename, BlobServiceClient blobClient, BlobStorageConfig blobConfig) =>
 {
-    if (!filename.EndsWith("_preview.parquet"))
+    if (!IsValidPreviewFilename(filename))
         return Results.BadRequest(new { error = "Invalid filename." });
 
     try
@@ -546,7 +561,7 @@ app.MapPost("/api/blob/preview-merge", async (HttpRequest request, BlobServiceCl
         }
 
         var filenames = filenamesEl.EnumerateArray().Select(e => e.GetString() ?? "").ToList();
-        if (filenames.Any(f => !f.EndsWith("_preview.parquet")))
+        if (filenames.Any(f => !IsValidPreviewFilename(f)))
             return Results.BadRequest(new { error = "Invalid filename in list." });
 
         var containerClient = blobClient.GetBlobContainerClient(blobConfig.Container);
@@ -625,7 +640,7 @@ app.MapPost("/api/blob/delete-preview", async (HttpRequest request, BlobServiceC
         }
 
         var filenames = filenamesEl.EnumerateArray().Select(e => e.GetString() ?? "").ToList();
-        if (filenames.Any(f => !f.EndsWith("_preview.parquet")))
+        if (filenames.Any(f => !IsValidPreviewFilename(f)))
             return Results.BadRequest(new { error = "Invalid filename in list." });
 
         var containerClient = blobClient.GetBlobContainerClient(blobConfig.Container);
@@ -755,7 +770,12 @@ app.MapPost("/api/agents/{path}/preview-query", async (string path, HttpRequest 
 
     try
     {
-        var result = await connection.SendCommandAsync("preview_query", body, TimeSpan.FromSeconds(60));
+        var uniqueId = await clientTableService.GetUserIdAsync(partitionKey);
+        if (string.IsNullOrWhiteSpace(uniqueId) || !IsDigitsOnly(uniqueId))
+            return Results.BadRequest(new { success = false, message = "User unique ID is missing." });
+
+        var requestBody = AddUniqueIdToPayload(body, uniqueId);
+        var result = await connection.SendCommandAsync("preview_query", requestBody, TimeSpan.FromSeconds(60));
         _ = clientTableService.AppendEventAsync(partitionKey, "preview_query", "Preview query completed");
         return Results.Content(result, "application/json");
     }
@@ -1147,5 +1167,28 @@ app.MapGet("/agents/{path}", (string path, AgentRegistry registry, IWebHostEnvir
 
     return Results.Content(File.ReadAllText(indexPath), "text/html");
 });
+
+bool IsDigitsOnly(string value) => value.All(char.IsDigit);
+
+string AddUniqueIdToPayload(string body, string uniqueId)
+{
+    JsonNode? payloadNode;
+    try
+    {
+        payloadNode = JsonNode.Parse(body);
+    }
+    catch (JsonException ex)
+    {
+        throw new InvalidOperationException($"Invalid preview request payload: {ex.Message}", ex);
+    }
+
+    if (payloadNode is not JsonObject payloadObject)
+        throw new InvalidOperationException("Invalid preview request payload.");
+
+    payloadObject["uniqueId"] = uniqueId;
+    return payloadObject.ToJsonString();
+}
+
+bool IsValidPreviewFilename(string filename) => previewFilenameRegex.IsMatch(filename);
 
 await app.RunAsync();

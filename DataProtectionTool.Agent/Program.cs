@@ -419,6 +419,10 @@ static async Task HandlePreviewTableAsync(
         var rowKey = paramsDoc.RootElement.GetProperty("rowKey").GetString() ?? "";
         var schema = paramsDoc.RootElement.GetProperty("schema").GetString() ?? "";
         var tableName = paramsDoc.RootElement.GetProperty("tableName").GetString() ?? "";
+        var uniqueId = paramsDoc.RootElement.GetProperty("uniqueId").GetString() ?? "";
+
+        if (string.IsNullOrWhiteSpace(uniqueId))
+            throw new InvalidOperationException("Missing uniqueId in preview request.");
 
         Console.WriteLine($"[Agent] Previewing table [{schema}].[{tableName}] for connection {rowKey}...");
 
@@ -429,7 +433,7 @@ static async Task HandlePreviewTableAsync(
                 cmd.CommandText = $"SELECT * FROM [{schema}].[{tableName}] TABLESAMPLE (200 ROWS)";
 
                 await using var reader = await cmd.ExecuteReaderAsync();
-                return await StreamReaderToParquetBlobs(reader, call, agentId, oid, tid, sasManager);
+                return await StreamReaderToParquetBlobs(reader, call, agentId, oid, tid, uniqueId, sasManager);
             });
 
         Console.WriteLine($"[Agent] Uploaded {filenames.Count} preview Parquet file(s) for [{schema}].[{tableName}]");
@@ -581,6 +585,10 @@ static async Task HandlePreviewQueryAsync(
         using var paramsDoc = JsonDocument.Parse(dataJson);
         var connectionRowKey = paramsDoc.RootElement.GetProperty("connectionRowKey").GetString() ?? "";
         var queryText = paramsDoc.RootElement.GetProperty("queryText").GetString() ?? "";
+        var uniqueId = paramsDoc.RootElement.GetProperty("uniqueId").GetString() ?? "";
+
+        if (string.IsNullOrWhiteSpace(uniqueId))
+            throw new InvalidOperationException("Missing uniqueId in preview request.");
 
         Console.WriteLine($"[Agent] Previewing query for connection {connectionRowKey}...");
 
@@ -591,7 +599,7 @@ static async Task HandlePreviewQueryAsync(
                 cmd.CommandText = $"SELECT TOP 200 * FROM ({queryText}) AS _q";
 
                 await using var reader = await cmd.ExecuteReaderAsync();
-                return await StreamReaderToParquetBlobs(reader, call, agentId, oid, tid, sasManager);
+                return await StreamReaderToParquetBlobs(reader, call, agentId, oid, tid, uniqueId, sasManager);
             });
 
         Console.WriteLine($"[Agent] Uploaded {filenames.Count} query preview Parquet file(s)");
@@ -1073,7 +1081,7 @@ const int PreviewBatchSize = 10_000;
 static async Task<List<string>> StreamReaderToParquetBlobs(
     SqlDataReader reader,
     AsyncDuplexStreamingCall<AgentMessage, ServerMessage> call,
-    string agentId, string oid, string tid,
+    string agentId, string oid, string tid, string uniqueId,
     SasTokenManager sasManager)
 {
     var columnCount = reader.FieldCount;
@@ -1091,6 +1099,8 @@ static async Task<List<string>> StreamReaderToParquetBlobs(
     var parquetSchema = new ParquetSchema(dataFields);
     var sasInfo = await sasManager.RequestSasTokenAsync(call, agentId, oid, tid);
     var filenames = new List<string>();
+    var previewRequestUuid = Guid.NewGuid().ToString("N");
+    var fileSequence = 1;
     bool hasMoreRows = true;
 
     while (hasMoreRows)
@@ -1145,12 +1155,13 @@ static async Task<List<string>> StreamReaderToParquetBlobs(
             }
         }
 
-        var filename = $"{Guid.NewGuid():N}_preview.parquet";
+        var filename = BuildPreviewFilename(uniqueId, previewRequestUuid, fileSequence);
         var blobUri = new Uri($"{sasInfo.BlobEndpoint}/{sasInfo.Container}/{filename}?{sasInfo.SasToken}");
         var blobClient = new BlobClient(blobUri);
         ms.Position = 0;
         await blobClient.UploadAsync(ms, overwrite: true);
         filenames.Add(filename);
+        fileSequence++;
 
         Console.WriteLine($"[Agent] Uploaded batch Parquet ({rowsInBatch} rows): {filename}");
     }
@@ -1168,7 +1179,7 @@ static async Task<List<string>> StreamReaderToParquetBlobs(
             }
         }
 
-        var filename = $"{Guid.NewGuid():N}_preview.parquet";
+        var filename = BuildPreviewFilename(uniqueId, previewRequestUuid, fileSequence);
         var blobUri = new Uri($"{sasInfo.BlobEndpoint}/{sasInfo.Container}/{filename}?{sasInfo.SasToken}");
         var blobClient = new BlobClient(blobUri);
         ms.Position = 0;
@@ -1179,6 +1190,14 @@ static async Task<List<string>> StreamReaderToParquetBlobs(
     }
 
     return filenames;
+}
+
+static string BuildPreviewFilename(string uniqueId, string previewUuid, int fileSequence)
+{
+    if (fileSequence <= 1)
+        return $"preview_{uniqueId}_{previewUuid}.parquet";
+
+    return $"preview_{uniqueId}_{previewUuid}_{fileSequence}.parquet";
 }
 
 static Type MapToParquetType(Type clrType)
