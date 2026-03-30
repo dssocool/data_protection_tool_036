@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type UIEvent } from "react";
 import "./DataPreviewPanel.css";
 
 export interface PreviewData {
@@ -139,6 +139,27 @@ export default function DataPreviewPanel({
 
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; tab: string } | null>(null);
   const contextMenuRef = useRef<HTMLDivElement>(null);
+  const bodyRef = useRef<HTMLDivElement>(null);
+  const columnRulesRef = useRef<HTMLDivElement>(null);
+  const isSyncing = useRef(false);
+
+  const handleBodyScroll = useCallback((e: UIEvent<HTMLDivElement>) => {
+    if (isSyncing.current) return;
+    isSyncing.current = true;
+    if (columnRulesRef.current) {
+      columnRulesRef.current.scrollLeft = (e.target as HTMLDivElement).scrollLeft;
+    }
+    isSyncing.current = false;
+  }, []);
+
+  const handleColumnRulesScroll = useCallback((e: UIEvent<HTMLDivElement>) => {
+    if (isSyncing.current) return;
+    isSyncing.current = true;
+    if (bodyRef.current) {
+      bodyRef.current.scrollLeft = (e.target as HTMLDivElement).scrollLeft;
+    }
+    isSyncing.current = false;
+  }, []);
 
   const closeContextMenu = useCallback(() => setContextMenu(null), []);
 
@@ -264,7 +285,7 @@ export default function DataPreviewPanel({
           </div>
         )}
       </div>
-      <div className="data-preview-body">
+      <div className="data-preview-body" ref={bodyRef} onScroll={handleBodyScroll}>
         <div className="data-preview-scroll-content">
           <div className="data-preview-data-area">
             {loading ? (
@@ -277,24 +298,26 @@ export default function DataPreviewPanel({
               <DataTable data={activeData} />
             ) : null}
           </div>
-          {currentHeaders.length > 0 && (
-            <div className="data-preview-column-rules">
-              <div className="data-preview-column-rules-header">
-                <span className="data-preview-column-rules-tab">Column Rules</span>
-              </div>
-              <table className="data-preview-table data-preview-column-rules-table">
-                <tbody>
-                  <tr>
-                    {currentHeaders.map((_, i) => (
-                      <td key={i}></td>
-                    ))}
-                  </tr>
-                </tbody>
-              </table>
-            </div>
-          )}
         </div>
       </div>
+      {currentHeaders.length > 0 && (
+        <div className="data-preview-column-rules">
+          <div className="data-preview-column-rules-header">
+            <span className="data-preview-column-rules-tab">Column Rules</span>
+          </div>
+          <div className="data-preview-column-rules-scroll" ref={columnRulesRef} onScroll={handleColumnRulesScroll}>
+            <table className="data-preview-table data-preview-column-rules-table">
+              <tbody>
+                <tr>
+                  {currentHeaders.map((_, i) => (
+                    <td key={i}></td>
+                  ))}
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -75,9 +75,16 @@
   padding: 0 14px;
   border-bottom: 1px solid #e8e8e8;
   background: #fff;
-  position: sticky;
-  left: 0;
-  width: fit-content;
+}
+
+.data-preview-column-rules-scroll {
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
+}
+
+.data-preview-column-rules-scroll::-webkit-scrollbar {
+  display: none;
 }
 
 .data-preview-column-rules-tab {
