@@ -6,6 +6,9 @@ interface MenuBarProps {
   onNewQuery: () => void;
   onViewConnections: () => void;
   onViewFlows: () => void;
+  oid: string;
+  tid: string;
+  uniqueId: string | null;
 }
 
 export default function MenuBar({
@@ -13,14 +16,22 @@ export default function MenuBar({
   onNewQuery,
   onViewConnections,
   onViewFlows,
+  oid,
+  tid,
+  uniqueId,
 }: MenuBarProps) {
   const [openMenu, setOpenMenu] = useState<string | null>(null);
+  const [showProfile, setShowProfile] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
+  const profileRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     function handleClickOutside(e: MouseEvent) {
       if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
         setOpenMenu(null);
+      }
+      if (profileRef.current && !profileRef.current.contains(e.target as Node)) {
+        setShowProfile(false);
       }
     }
     document.addEventListener("mousedown", handleClickOutside);
@@ -95,6 +106,38 @@ export default function MenuBar({
           </ul>
         )}
       </div>
+
+      {oid && (
+        <div className="menu-user-profile" ref={profileRef}>
+          <button
+            className={`menu-user-button ${showProfile ? "active" : ""}`}
+            onClick={() => setShowProfile((v) => !v)}
+            title={`${oid} | ${tid}`}
+          >
+            {oid.length > 8 ? oid.slice(0, 8) + "…" : oid}
+            {tid ? ` | ${tid.length > 8 ? tid.slice(0, 8) + "…" : tid}` : ""}
+          </button>
+          {showProfile && (
+            <div className="user-profile-popout">
+              <div className="user-profile-row">
+                <span className="user-profile-label">OID</span>
+                <span className="user-profile-value">{oid}</span>
+              </div>
+              <div className="user-profile-row">
+                <span className="user-profile-label">TID</span>
+                <span className="user-profile-value">{tid}</span>
+              </div>
+              <div className="user-profile-divider" />
+              <div className="user-profile-row">
+                <span className="user-profile-label">Unique ID</span>
+                <span className="user-profile-value user-profile-uid">
+                  {uniqueId ?? "—"}
+                </span>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }

@@ -41,6 +41,9 @@ export default function App() {
   const [connectionsPanelWidth, setConnectionsPanelWidth] = useState(260);
   const [statusEvents, setStatusEvents] = useState<StatusEvent[]>([]);
   const [showEventDialog, setShowEventDialog] = useState(false);
+  const [agentOid, setAgentOid] = useState("");
+  const [agentTid, setAgentTid] = useState("");
+  const [userUniqueId, setUserUniqueId] = useState<string | null>(null);
   const eventsTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const fetchEvents = useCallback(async () => {
@@ -82,6 +85,28 @@ export default function App() {
   useEffect(() => {
     fetchConnections();
   }, [fetchConnections]);
+
+  useEffect(() => {
+    const agentPath = getAgentPath();
+    if (!agentPath) return;
+
+    fetch(`/api/agents/${agentPath}`)
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (data) {
+          setAgentOid(data.oid ?? "");
+          setAgentTid(data.tid ?? "");
+        }
+      })
+      .catch(() => {});
+
+    fetch(`/api/agents/${agentPath}/user-id`)
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (data) setUserUniqueId(data.uniqueId ?? null);
+      })
+      .catch(() => {});
+  }, []);
 
   function handleSqlServerConnection() {
     setShowSqlModal(true);
@@ -396,6 +421,9 @@ export default function App() {
         onNewQuery={handleNewQuery}
         onViewConnections={handleViewConnections}
         onViewFlows={handleViewFlows}
+        oid={agentOid}
+        tid={agentTid}
+        uniqueId={userUniqueId}
       />
       <main className="app-content">
         {showConnections && (

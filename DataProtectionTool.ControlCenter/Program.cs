@@ -95,6 +95,16 @@ app.MapGet("/api/agents/{path}", (string path, AgentRegistry registry) =>
     });
 });
 
+app.MapGet("/api/agents/{path}/user-id", async (string path, AgentRegistry registry, ClientTableService clientTableService) =>
+{
+    if (!registry.TryGet(path, out var info) || info is null)
+        return Results.NotFound(new { error = "Agent not found." });
+
+    var partitionKey = ClientEntity.BuildPartitionKey(info.Oid, info.Tid);
+    var uniqueId = await clientTableService.GetUserIdAsync(partitionKey);
+    return Results.Ok(new { uniqueId });
+});
+
 app.MapPost("/api/agents/{path}/validate-sql", async (string path, HttpRequest request, AgentRegistry registry, ClientTableService clientTableService) =>
 {
     if (!registry.TryGetConnection(path, out var connection) || connection is null)
