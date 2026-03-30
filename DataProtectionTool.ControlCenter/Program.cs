@@ -271,11 +271,17 @@ app.MapPost("/api/agents/{path}/list-tables", async (string path, HttpRequest re
                     var name = item.TryGetProperty("name", out var nEl) ? nEl.GetString() ?? "" : "";
                     tableList.Add((schema, name));
                 }
-                _ = clientTableService.SaveDataItemsAsync(partitionKey, connEntity.ServerName, connEntity.DatabaseName, rowKey, tableList);
-                _ = clientTableService.AppendEventAsync(partitionKey, "list_tables", $"Listed {tableList.Count} tables");
+                await clientTableService.SaveDataItemsAsync(partitionKey, connEntity.ServerName, connEntity.DatabaseName, rowKey, tableList);
+                await clientTableService.AppendEventAsync(partitionKey, "list_tables", $"Listed {tableList.Count} tables");
+
+                var tables = tableList.Select(t => new { schema = t.schema, name = t.name }).ToList();
+                return Results.Ok(new { success = true, tables });
             }
         }
-        catch { }
+        catch (Exception ex)
+        {
+            app.Logger.LogWarning(ex, "Failed to parse/save tables from agent response");
+        }
 
         return Results.Content(result, "application/json");
     }

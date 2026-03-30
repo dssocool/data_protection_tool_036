@@ -139,6 +139,23 @@ export default function App() {
     const agentPath = getAgentPath();
     if (!agentPath) return;
 
+    const alreadyCached = connectionTables[rowKey]?.length > 0;
+
+    if (alreadyCached) {
+      try {
+        const queriesRes = await fetch(
+          `/api/agents/${agentPath}/queries?connectionRowKey=${encodeURIComponent(rowKey)}`
+        );
+        if (queriesRes.ok) {
+          const queries = await queriesRes.json();
+          setConnectionQueries((prev) => ({ ...prev, [rowKey]: queries }));
+        }
+      } catch {
+        // queries fetch is best-effort when tables are cached
+      }
+      return;
+    }
+
     setLoadingTables((prev) => new Set(prev).add(rowKey));
 
     try {
