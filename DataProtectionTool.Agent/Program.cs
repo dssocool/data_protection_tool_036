@@ -803,9 +803,14 @@ static async Task HandleCreateFileFormatAsync(
         {
             using var respDoc = JsonDocument.Parse(responseBody);
             if (respDoc.RootElement.TryGetProperty("fileFormatId", out var ffiEl))
-                fileFormatId = ffiEl.GetString() ?? "";
+                fileFormatId = ffiEl.ValueKind == JsonValueKind.Number
+                    ? ffiEl.GetRawText()
+                    : ffiEl.GetString() ?? "";
         }
-        catch { }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[Agent] Failed to parse fileFormatId from engine response: {ex.Message}");
+        }
 
         var resultPayload = JsonSerializer.Serialize(new
         {
