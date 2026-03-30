@@ -17,8 +17,8 @@ public class DataItemEntity : ITableEntity
     public string ConnectionRowKey { get; set; } = "";
 
     public static string BuildRowKeyPrefix(string serverName, string dbName) =>
-        $"sqlserver_{serverName}_{dbName}_";
+        $"sqlserver_{TableKeyHelper.EscapeKeySegment(serverName)}_{TableKeyHelper.EscapeKeySegment(dbName)}_";
 
     public static string BuildRowKey(string serverName, string dbName, string tableName, string uuid) =>
-        $"sqlserver_{serverName}_{dbName}_{tableName}_{uuid}";
+        $"sqlserver_{TableKeyHelper.EscapeKeySegment(serverName)}_{TableKeyHelper.EscapeKeySegment(dbName)}_{tableName}_{uuid}";
 }

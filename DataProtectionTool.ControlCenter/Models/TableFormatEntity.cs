@@ -17,5 +17,5 @@ public class TableFormatEntity : ITableEntity
     public DateTime CreatedAt { get; set; }
 
     public static string BuildRowKey(string connectionRowKey, string schema, string tableName)
-        => $"tableformat_{connectionRowKey}_{schema}_{tableName}";
+        => $"tableformat_{connectionRowKey}_{TableKeyHelper.EscapeKeySegment(schema)}_{TableKeyHelper.EscapeKeySegment(tableName)}";
 }
