@@ -4,6 +4,7 @@ import "./DataPreviewPanel.css";
 export interface PreviewData {
   headers: string[];
   rows: string[][];
+  columnTypes?: string[];
 }
 
 export interface DryRunResult {
@@ -54,7 +55,7 @@ const DataTable = forwardRef<HTMLTableElement, { data: PreviewData }>(
         <thead>
           <tr>
             {data.headers.map((h, i) => (
-              <th key={i}>{h}</th>
+              <th key={i} title={data.columnTypes?.[i] ?? undefined}>{h}</th>
             ))}
           </tr>
         </thead>
@@ -82,7 +83,7 @@ const DiffView = forwardRef<HTMLTableElement, { left: PreviewData; right: Previe
         <thead>
           <tr>
             {headers.map((h, i) => (
-              <th key={i}>{h}</th>
+              <th key={i} title={left.columnTypes?.[i] ?? undefined}>{h}</th>
             ))}
           </tr>
         </thead>

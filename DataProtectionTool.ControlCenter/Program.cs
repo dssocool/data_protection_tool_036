@@ -534,6 +534,12 @@ app.MapGet("/api/blob/{filename}", async (string filename, BlobServiceClient blo
 
         var dataFields = reader.Schema.GetDataFields();
         var headers = dataFields.Select(f => f.Name).ToList();
+        string[]? columnTypes = null;
+        if (reader.CustomMetadata != null
+            && reader.CustomMetadata.TryGetValue("sql_types", out var sqlTypesJson))
+        {
+            columnTypes = JsonSerializer.Deserialize<string[]>(sqlTypesJson);
+        }
         var rows = new List<List<string?>>();
 
         for (int g = 0; g < reader.RowGroupCount; g++)
@@ -561,7 +567,7 @@ app.MapGet("/api/blob/{filename}", async (string filename, BlobServiceClient blo
             }
         }
 
-        return Results.Json(new { headers, rows });
+        return Results.Json(new { headers, rows, columnTypes });
     }
     catch (Exception ex)
     {
@@ -591,6 +597,7 @@ app.MapPost("/api/blob/preview-merge", async (HttpRequest request, BlobServiceCl
 
         var containerClient = blobClient.GetBlobContainerClient(blobStorageConfig.PreviewContainer);
         List<string>? headers = null;
+        string[]? columnTypes = null;
         var rows = new List<List<string?>>();
 
         foreach (var filename in filenames)
@@ -609,6 +616,11 @@ app.MapPost("/api/blob/preview-merge", async (HttpRequest request, BlobServiceCl
             if (headers == null)
             {
                 headers = fileHeaders;
+                if (reader.CustomMetadata != null
+                    && reader.CustomMetadata.TryGetValue("sql_types", out var sqlTypesJson))
+                {
+                    columnTypes = JsonSerializer.Deserialize<string[]>(sqlTypesJson);
+                }
             }
             else if (!headers.SequenceEqual(fileHeaders))
             {
@@ -641,7 +653,7 @@ app.MapPost("/api/blob/preview-merge", async (HttpRequest request, BlobServiceCl
             }
         }
 
-        return Results.Json(new { headers = headers ?? new List<string>(), rows });
+        return Results.Json(new { headers = headers ?? new List<string>(), rows, columnTypes });
     }
     catch (Exception ex)
     {

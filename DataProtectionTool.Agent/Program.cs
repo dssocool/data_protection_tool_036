@@ -1257,13 +1257,20 @@ static async Task<List<string>> StreamReaderToParquetBlobs(
 {
     var columnCount = reader.FieldCount;
     var columnNames = new string[columnCount];
+    var sqlTypes = new string[columnCount];
     var dataFields = new DataField[columnCount];
 
     for (int i = 0; i < columnCount; i++)
     {
         columnNames[i] = reader.GetName(i);
+        sqlTypes[i] = reader.GetDataTypeName(i);
         dataFields[i] = new DataField(columnNames[i], typeof(string), isNullable: true);
     }
+
+    var sqlTypesMetadata = new Dictionary<string, string>
+    {
+        ["sql_types"] = JsonSerializer.Serialize(sqlTypes)
+    };
 
     var parquetSchema = new ParquetSchema(dataFields);
     var sasInfo = await sasManager.RequestSasTokenAsync(call, agentId, oid, tid);
@@ -1297,6 +1304,7 @@ static async Task<List<string>> StreamReaderToParquetBlobs(
         using var ms = new MemoryStream();
         using (var writer = await ParquetWriter.CreateAsync(parquetSchema, ms))
         {
+            writer.CustomMetadata = sqlTypesMetadata;
             using var rowGroup = writer.CreateRowGroup();
             for (int i = 0; i < columnCount; i++)
             {
