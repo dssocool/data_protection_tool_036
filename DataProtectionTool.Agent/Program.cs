@@ -91,30 +91,30 @@ while (!cts.Token.IsCancellationRequested)
         await call.RequestStream.WriteAsync(registerMessage, cts.Token);
         Console.WriteLine("Sent registration message with oid/tid.");
 
-        while (await call.ResponseStream.MoveNext(cts.Token))
-        {
-            var response = call.ResponseStream.Current;
-            if (response.Type == "registration_url")
-            {
-                Console.WriteLine($"Agent registered. URL: {response.Payload}");
-            }
-            else if (response.Type == "connections_list")
-            {
-                connectionManager.LoadConnectionDetails(response.Payload);
-                Console.WriteLine("[Agent] Loaded connection details from ControlCenter.");
-            }
-            else
-            {
-                Console.WriteLine($"[Server] type={response.Type}, payload={response.Payload}");
-                break;
-            }
-        }
-
         var receiveTask = Task.Run(async () =>
         {
             while (await call.ResponseStream.MoveNext(cts.Token))
             {
                 var response = call.ResponseStream.Current;
+
+                if (response.Type == "registration_url")
+                {
+                    Console.WriteLine($"Agent registered. URL: {response.Payload}");
+                    continue;
+                }
+
+                if (response.Type == "connections_list")
+                {
+                    connectionManager.LoadConnectionDetails(response.Payload);
+                    Console.WriteLine("[Agent] Loaded connection details from ControlCenter.");
+                    continue;
+                }
+
+                if (response.Type == "ack")
+                {
+                    continue;
+                }
+
                 Console.WriteLine($"[Server] type={response.Type}, payload={response.Payload}");
 
                 if (response.Type == "validate_sql")
@@ -1124,9 +1124,9 @@ class SqlConnectionManager : IDisposable
             var conn = await GetOrCreateConnectionAsync(rowKey);
             return await operation(conn);
         }
-        catch (SqlException ex)
+        catch (Exception ex) when (ex is SqlException || ex is InvalidOperationException)
         {
-            Console.WriteLine($"[ConnMgr] SQL error for {rowKey}, attempting reconnect: {ex.Message}");
+            Console.WriteLine($"[ConnMgr] Error for {rowKey}, attempting reconnect: {ex.Message}");
 
             EvictConnection(rowKey);
 

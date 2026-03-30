@@ -4,6 +4,7 @@ using Azure.Storage;
 using Azure.Storage.Blobs;
 using Microsoft.AspNetCore.Server.Kestrel.Core;
 using Parquet;
+using DataProtectionTool.Contracts;
 using DataProtectionTool.ControlCenter.Interceptors;
 using DataProtectionTool.ControlCenter.Models;
 using DataProtectionTool.ControlCenter.Services;
@@ -139,6 +140,34 @@ app.MapPost("/api/agents/{path}/save-connection", async (string path, HttpReques
             root.TryGetProperty("databaseName", out var db) ? db.GetString() ?? "" : "",
             root.TryGetProperty("encrypt", out var en) ? en.GetString() ?? "" : "",
             root.TryGetProperty("trustServerCertificate", out var tsc) && tsc.GetBoolean());
+
+        if (registry.TryGetConnection(path, out var connection) && connection is not null)
+        {
+            try
+            {
+                var connections = await clientTableService.GetConnectionsAsync(partitionKey);
+                var connectionsJson = JsonSerializer.Serialize(connections.Select(c => new
+                {
+                    rowKey = c.RowKey,
+                    connectionType = c.ConnectionType,
+                    serverName = c.ServerName,
+                    authentication = c.Authentication,
+                    userName = c.UserName,
+                    password = c.Password,
+                    databaseName = c.DatabaseName,
+                    encrypt = c.Encrypt,
+                    trustServerCertificate = c.TrustServerCertificate,
+                }));
+                await connection.ResponseStream.WriteAsync(new ServerMessage
+                {
+                    Type = "connections_list",
+                    Payload = connectionsJson
+                });
+            }
+            catch
+            {
+            }
+        }
 
         return Results.Ok(new
         {
