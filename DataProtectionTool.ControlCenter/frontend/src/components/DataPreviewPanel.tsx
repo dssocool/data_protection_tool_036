@@ -8,7 +8,9 @@ export interface PreviewData {
 
 export interface DryRunResult {
   label: string;
-  data: PreviewData;
+  data: PreviewData | null;
+  status?: string;
+  inProgress?: boolean;
 }
 
 interface DiffTab {
@@ -312,15 +314,30 @@ export default function DataPreviewPanel({
         )}
       </div>
       <div className="data-preview-body" onScroll={handleDataScroll}>
-        {loading ? (
-          <div className="data-preview-loading">Loading preview...</div>
-        ) : error ? (
-          <div className="data-preview-error">{error}</div>
-        ) : isDiffActive && leftData && rightData ? (
-          <DiffView left={leftData} right={rightData} ref={tableRef} />
-        ) : activeData ? (
-          <DataTable data={activeData} ref={tableRef} />
-        ) : null}
+        {(() => {
+          const activeDryRun = dryRuns.find((dr) => dr.label === activeTab);
+          if (activeDryRun?.inProgress && !activeData) {
+            return (
+              <div className="dry-run-status-view">
+                <div className="dry-run-status-spinner" />
+                <div className="dry-run-status-text">{activeDryRun.status ?? "Starting dry run..."}</div>
+              </div>
+            );
+          }
+          if (loading) {
+            return <div className="data-preview-loading">Loading preview...</div>;
+          }
+          if (error) {
+            return <div className="data-preview-error">{error}</div>;
+          }
+          if (isDiffActive && leftData && rightData) {
+            return <DiffView left={leftData} right={rightData} ref={tableRef} />;
+          }
+          if (activeData) {
+            return <DataTable data={activeData} ref={tableRef} />;
+          }
+          return null;
+        })()}
       </div>
       {currentHeaders.length > 0 && (
         <div className="data-preview-column-rules">

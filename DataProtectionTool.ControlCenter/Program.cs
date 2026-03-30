@@ -835,18 +835,41 @@ app.MapGet("/api/agents/{path}/queries", async (string path, string connectionRo
     return Results.Ok(result);
 });
 
-app.MapPost("/api/agents/{path}/dry-run", async (string path, HttpRequest request, AgentRegistry registry,
+app.MapPost("/api/agents/{path}/dry-run", async (string path, HttpContext httpContext, AgentRegistry registry,
     ClientTableService clientTableService, DataEngineConfig dataEngineConfig,
     BlobServiceClient blobClient, BlobStorageConfig blobConfig) =>
 {
+    var response = httpContext.Response;
+    var request = httpContext.Request;
+
+    async Task WriteSseEvent(string eventType, string data)
+    {
+        await response.WriteAsync($"event: {eventType}\ndata: {data}\n\n");
+        await response.Body.FlushAsync();
+    }
+
+    async Task WriteSseError(string message)
+    {
+        var json = JsonSerializer.Serialize(new { success = false, message });
+        await WriteSseEvent("error", json);
+    }
+
     if (!registry.TryGetConnection(path, out var connection) || connection is null)
-        return Results.NotFound(new { error = "Agent not found or not connected." });
+    {
+        response.StatusCode = 404;
+        await response.WriteAsJsonAsync(new { error = "Agent not found or not connected." });
+        return;
+    }
 
     var partitionKey = ClientEntity.BuildPartitionKey(connection.Info.Oid, connection.Info.Tid);
 
     string body;
     using (var reader = new StreamReader(request.Body))
         body = await reader.ReadToEndAsync();
+
+    response.ContentType = "text/event-stream";
+    response.Headers["Cache-Control"] = "no-cache";
+    response.Headers["Connection"] = "keep-alive";
 
     try
     {
@@ -868,18 +891,31 @@ app.MapPost("/api/agents/{path}/dry-run", async (string path, HttpRequest reques
         }
 
         if (previewFilenames.Count == 0)
-            return Results.Ok(new { success = false, message = "No preview files available. Please preview the table first." });
+        {
+            await WriteSseError("No preview files available. Please preview the table first.");
+            return;
+        }
 
         if (string.IsNullOrEmpty(dataEngineConfig.EngineUrl) || string.IsNullOrEmpty(dataEngineConfig.AuthorizationToken))
-            return Results.Ok(new { success = false, message = "Data engine is not configured. Set EngineUrl and AuthorizationToken in appsettings.json." });
+        {
+            await WriteSseError("Data engine is not configured. Set EngineUrl and AuthorizationToken in appsettings.json.");
+            return;
+        }
 
         if (string.IsNullOrEmpty(dataEngineConfig.ConnectorId))
-            return Results.Ok(new { success = false, message = "Data engine ConnectorId is not configured. Set ConnectorId in appsettings.json." });
+        {
+            await WriteSseError("Data engine ConnectorId is not configured. Set ConnectorId in appsettings.json.");
+            return;
+        }
 
         if (string.IsNullOrEmpty(dataEngineConfig.ProfileSetId))
-            return Results.Ok(new { success = false, message = "Data engine ProfileSetId is not configured. Set ProfileSetId in appsettings.json." });
+        {
+            await WriteSseError("Data engine ProfileSetId is not configured. Set ProfileSetId in appsettings.json.");
+            return;
+        }
 
         // Step 0: Copy preview files from data_preview container to configured (engine) container
+        await WriteSseEvent("status", "Copying preview files...");
         var previewContainerClient = blobClient.GetBlobContainerClient(blobStorageConfig.PreviewContainer);
         var engineContainerClient = blobClient.GetBlobContainerClient(blobConfig.Container);
 
@@ -894,6 +930,7 @@ app.MapPost("/api/agents/{path}/dry-run", async (string path, HttpRequest reques
         }
 
         // Step 1: Get or create file format
+        await WriteSseEvent("status", "Creating file format...");
         var connEntityForFormat = await clientTableService.GetConnectionByRowKeyAsync(partitionKey, rowKey);
         DataItemEntity? dataItemForFormat = null;
         string fileFormatId = "";
@@ -926,7 +963,8 @@ app.MapPost("/api/agents/{path}/dry-run", async (string path, HttpRequest reques
             if (!(resultRoot.TryGetProperty("success", out var successEl) && successEl.GetBoolean()))
             {
                 var message = resultRoot.TryGetProperty("message", out var msgEl) ? msgEl.GetString() : "File format creation failed.";
-                return Results.Ok(new { success = false, message });
+                await WriteSseError(message ?? "File format creation failed.");
+                return;
             }
 
             fileFormatId = resultRoot.TryGetProperty("fileFormatId", out var ffiEl)
@@ -939,6 +977,7 @@ app.MapPost("/api/agents/{path}/dry-run", async (string path, HttpRequest reques
         }
 
         // Step 2: Create a file ruleset (new ruleset every dry run)
+        await WriteSseEvent("status", "Creating file ruleset...");
         var dryRunUuid = Guid.NewGuid().ToString("N");
         var rulesetName = $"ruleset_{dryRunUuid}";
         var rulesetPayload = JsonSerializer.Serialize(new
@@ -957,7 +996,8 @@ app.MapPost("/api/agents/{path}/dry-run", async (string path, HttpRequest reques
         if (!(rulesetRoot.TryGetProperty("success", out var rulesetSuccessEl) && rulesetSuccessEl.GetBoolean()))
         {
             var rulesetMsg = rulesetRoot.TryGetProperty("message", out var rmEl) ? rmEl.GetString() : "File ruleset creation failed.";
-            return Results.Ok(new { success = false, message = rulesetMsg });
+            await WriteSseError(rulesetMsg ?? "File ruleset creation failed.");
+            return;
         }
 
         var fileRulesetId = rulesetRoot.TryGetProperty("fileRulesetId", out var friEl)
@@ -965,8 +1005,11 @@ app.MapPost("/api/agents/{path}/dry-run", async (string path, HttpRequest reques
 
         // Step 3: Create file metadata for each preview file
         var fileMetadataIds = new List<string>();
-        foreach (var previewFile in previewFilenames)
+        for (var fi = 0; fi < previewFilenames.Count; fi++)
         {
+            var previewFile = previewFilenames[fi];
+            await WriteSseEvent("status", $"Creating file metadata... ({fi + 1} of {previewFilenames.Count})");
+
             var metadataPayload = JsonSerializer.Serialize(new
             {
                 engineUrl = dataEngineConfig.EngineUrl,
@@ -985,7 +1028,8 @@ app.MapPost("/api/agents/{path}/dry-run", async (string path, HttpRequest reques
             if (!(metadataRoot.TryGetProperty("success", out var metaSuccessEl) && metaSuccessEl.GetBoolean()))
             {
                 var metaMsg = metadataRoot.TryGetProperty("message", out var mmEl) ? mmEl.GetString() : $"File metadata creation failed for {previewFile}.";
-                return Results.Ok(new { success = false, message = metaMsg });
+                await WriteSseError(metaMsg ?? $"File metadata creation failed for {previewFile}.");
+                return;
             }
 
             var fileMetadataId = metadataRoot.TryGetProperty("fileMetadataId", out var fmiEl)
@@ -1022,6 +1066,7 @@ app.MapPost("/api/agents/{path}/dry-run", async (string path, HttpRequest reques
         }
 
         // Step 4: Create profile job
+        await WriteSseEvent("status", "Creating profile job...");
         using var profileJobResp = await RelayEngineHttpAsync("POST", "profile-jobs", new
         {
             jobName = $"profile_{dryRunUuid}",
@@ -1032,14 +1077,19 @@ app.MapPost("/api/agents/{path}/dry-run", async (string path, HttpRequest reques
         if (!(profileJobResp.RootElement.TryGetProperty("success", out var pjSuccessEl) && pjSuccessEl.GetBoolean()))
         {
             var msg = profileJobResp.RootElement.TryGetProperty("message", out var m) ? m.GetString() : "Profile job creation failed.";
-            return Results.Ok(new { success = false, message = msg });
+            await WriteSseError(msg ?? "Profile job creation failed.");
+            return;
         }
 
         var profileJobId = ExtractBodyField(profileJobResp, "profileJobId");
         if (string.IsNullOrEmpty(profileJobId))
-            return Results.Ok(new { success = false, message = "Profile job creation returned no profileJobId." });
+        {
+            await WriteSseError("Profile job creation returned no profileJobId.");
+            return;
+        }
 
         // Step 5: Create masking job
+        await WriteSseEvent("status", "Creating masking job...");
         using var maskingJobResp = await RelayEngineHttpAsync("POST", "masking-jobs", new
         {
             jobName = $"masking_{dryRunUuid}",
@@ -1050,14 +1100,19 @@ app.MapPost("/api/agents/{path}/dry-run", async (string path, HttpRequest reques
         if (!(maskingJobResp.RootElement.TryGetProperty("success", out var mjSuccessEl) && mjSuccessEl.GetBoolean()))
         {
             var msg = maskingJobResp.RootElement.TryGetProperty("message", out var m) ? m.GetString() : "Masking job creation failed.";
-            return Results.Ok(new { success = false, message = msg });
+            await WriteSseError(msg ?? "Masking job creation failed.");
+            return;
         }
 
         var maskingJobId = ExtractBodyField(maskingJobResp, "maskingJobId");
         if (string.IsNullOrEmpty(maskingJobId))
-            return Results.Ok(new { success = false, message = "Masking job creation returned no maskingJobId." });
+        {
+            await WriteSseError("Masking job creation returned no maskingJobId.");
+            return;
+        }
 
         // Step 6: Run the profile job
+        await WriteSseEvent("status", "Running profile job...");
         using var profileExecResp = await RelayEngineHttpAsync("POST", "executions", new
         {
             jobId = int.Parse(profileJobId)
@@ -1066,12 +1121,16 @@ app.MapPost("/api/agents/{path}/dry-run", async (string path, HttpRequest reques
         if (!(profileExecResp.RootElement.TryGetProperty("success", out var peSuccessEl) && peSuccessEl.GetBoolean()))
         {
             var msg = profileExecResp.RootElement.TryGetProperty("message", out var m) ? m.GetString() : "Profile job execution failed to start.";
-            return Results.Ok(new { success = false, message = msg });
+            await WriteSseError(msg ?? "Profile job execution failed to start.");
+            return;
         }
 
         var profileExecId = ExtractBodyField(profileExecResp, "executionId");
         if (string.IsNullOrEmpty(profileExecId))
-            return Results.Ok(new { success = false, message = "Profile job execution returned no executionId." });
+        {
+            await WriteSseError("Profile job execution returned no executionId.");
+            return;
+        }
 
         // Step 7: Poll profile job status every 2 seconds
         var profileStatus = "";
@@ -1084,16 +1143,19 @@ app.MapPost("/api/agents/{path}/dry-run", async (string path, HttpRequest reques
                 continue;
 
             profileStatus = ExtractBodyField(statusResp, "status");
+            await WriteSseEvent("status", $"Polling profile job: {profileStatus}...");
             if (profileStatus is "SUCCEEDED" or "WARNING" or "FAILED" or "CANCELLED")
                 break;
         }
 
         if (profileStatus is not ("SUCCEEDED" or "WARNING"))
         {
-            return Results.Ok(new { success = false, message = $"Profile job did not succeed. Final status: {profileStatus}" });
+            await WriteSseError($"Profile job did not succeed. Final status: {profileStatus}");
+            return;
         }
 
         // Step 8: Run the masking job
+        await WriteSseEvent("status", "Running masking job...");
         using var maskingExecResp = await RelayEngineHttpAsync("POST", "executions", new
         {
             jobId = int.Parse(maskingJobId)
@@ -1102,12 +1164,16 @@ app.MapPost("/api/agents/{path}/dry-run", async (string path, HttpRequest reques
         if (!(maskingExecResp.RootElement.TryGetProperty("success", out var meSuccessEl) && meSuccessEl.GetBoolean()))
         {
             var msg = maskingExecResp.RootElement.TryGetProperty("message", out var m) ? m.GetString() : "Masking job execution failed to start.";
-            return Results.Ok(new { success = false, message = msg });
+            await WriteSseError(msg ?? "Masking job execution failed to start.");
+            return;
         }
 
         var maskingExecId = ExtractBodyField(maskingExecResp, "executionId");
         if (string.IsNullOrEmpty(maskingExecId))
-            return Results.Ok(new { success = false, message = "Masking job execution returned no executionId." });
+        {
+            await WriteSseError("Masking job execution returned no executionId.");
+            return;
+        }
 
         // Step 9: Poll masking job status every 2 seconds
         var maskingStatus = "";
@@ -1120,20 +1186,22 @@ app.MapPost("/api/agents/{path}/dry-run", async (string path, HttpRequest reques
                 continue;
 
             maskingStatus = ExtractBodyField(statusResp, "status");
+            await WriteSseEvent("status", $"Polling masking job: {maskingStatus}...");
             if (maskingStatus is "SUCCEEDED" or "WARNING" or "FAILED" or "CANCELLED")
                 break;
         }
 
         if (maskingStatus is not ("SUCCEEDED" or "WARNING"))
         {
-            return Results.Ok(new { success = false, message = $"Masking job did not succeed. Final status: {maskingStatus}" });
+            await WriteSseError($"Masking job did not succeed. Final status: {maskingStatus}");
+            return;
         }
 
         _ = clientTableService.AppendEventAsync(partitionKey, "dry_run",
             $"Dry run completed: fileFormatId={fileFormatId}, fileRulesetId={fileRulesetId}, " +
             $"profileJobId={profileJobId} ({profileStatus}), maskingJobId={maskingJobId} ({maskingStatus})");
 
-        return Results.Ok(new
+        var completeJson = JsonSerializer.Serialize(new
         {
             success = true,
             fileFormatId,
@@ -1144,16 +1212,17 @@ app.MapPost("/api/agents/{path}/dry-run", async (string path, HttpRequest reques
             maskingJobId,
             maskingStatus
         });
+        await WriteSseEvent("complete", completeJson);
     }
     catch (TimeoutException)
     {
         _ = clientTableService.AppendEventAsync(partitionKey, "dry_run", "Dry run: timeout", "Agent did not respond within 120 seconds.");
-        return Results.Ok(new { success = false, message = "Agent did not respond within 120 seconds." });
+        await WriteSseError("Agent did not respond within 120 seconds.");
     }
     catch (Exception ex)
     {
         _ = clientTableService.AppendEventAsync(partitionKey, "dry_run", $"Dry run error: {ex.Message}");
-        return Results.Ok(new { success = false, message = $"Dry run error: {ex.Message}" });
+        await WriteSseError($"Dry run error: {ex.Message}");
     }
 });
 

@@ -645,101 +645,192 @@ export default function App() {
         setOriginalData({ ...previewData });
       }
 
+      const currentCached = tableCacheRef.current.get(key);
+      const prevDryRuns = currentCached?.dryRuns ?? dryRuns;
+      const newLabel = `Dry Run ${prevDryRuns.length + 1}`;
+      const pendingDryRun: DryRunResult = { label: newLabel, data: null, status: "Starting dry run...", inProgress: true };
+      const updatedDryRunsWithPending = [...prevDryRuns, pendingDryRun];
+
+      setDryRuns(updatedDryRunsWithPending);
+      setActivePreviewTab(newLabel);
+      setPreviewLoading(false);
+
       tableCacheRef.current.set(key, {
-        ...(tableCacheRef.current.get(key) ?? {
-          previewData, originalData, dryRuns, activePreviewTab,
+        ...(currentCached ?? {
+          previewData, originalData, dryRuns: prevDryRuns, activePreviewTab,
           diffTab, previewBlobFilenames: filenames, previewError: null,
           columnRules,
         }),
         previewBlobFilenames: filenames,
+        dryRuns: updatedDryRunsWithPending,
+        activePreviewTab: newLabel,
         dryRunInProgress: true,
       } as TablePreviewCache);
 
-      const dryRunFetch = fetch(`/api/agents/${agentPath}/dry-run`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ rowKey, schema, tableName, previewBlobFilenames: filenames }),
-      });
-
-      dryRunFetch.then(async (res) => {
+      const updateDryRunStatus = (status: string) => {
+        setDryRuns((prev) =>
+          prev.map((dr) => dr.label === newLabel ? { ...dr, status } : dr),
+        );
         const cached = tableCacheRef.current.get(key);
+        if (cached) {
+          tableCacheRef.current.set(key, {
+            ...cached,
+            dryRuns: cached.dryRuns.map((dr) => dr.label === newLabel ? { ...dr, status } : dr),
+          });
+        }
+      };
 
-        if (!res.ok) {
-          const errMsg = `Dry run request failed: server error ${res.status}`;
-          if (cached) {
-            tableCacheRef.current.set(key, { ...cached, dryRunInProgress: false, previewError: errMsg });
-          }
-          if (isViewingTable(rowKey, schema, tableName)) {
-            setPreviewError(errMsg);
-            setPreviewLoading(false);
-          }
+      const finalizeDryRunError = (errMsg: string) => {
+        setDryRuns((prev) => prev.filter((dr) => dr.label !== newLabel));
+        setActivePreviewTab("Original");
+        setPreviewError(errMsg);
+        const cached = tableCacheRef.current.get(key);
+        if (cached) {
+          tableCacheRef.current.set(key, {
+            ...cached,
+            dryRuns: cached.dryRuns.filter((dr) => dr.label !== newLabel),
+            activePreviewTab: "Original",
+            dryRunInProgress: false,
+            previewError: errMsg,
+          });
+        }
+      };
+
+      try {
+        const response = await fetch(`/api/agents/${agentPath}/dry-run`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ rowKey, schema, tableName, previewBlobFilenames: filenames }),
+        });
+
+        if (!response.ok) {
+          finalizeDryRunError(`Dry run request failed: server error ${response.status}`);
           return;
         }
 
-        const result = await res.json();
-        if (result.success) {
-          const mergeRes = await fetch("/api/blob/preview-merge", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ filenames }),
-          });
-          if (mergeRes.ok) {
-            const masked = await mergeRes.json();
-            const maskedPreview = masked as PreviewData;
+        const sseReader = response.body!.getReader();
+        const decoder = new TextDecoder();
+        let buffer = "";
+        let completed = false;
 
-            const latestCached = tableCacheRef.current.get(key);
-            const prevDryRuns = latestCached?.dryRuns ?? [];
-            const newLabel = `Dry Run ${prevDryRuns.length + 1}`;
-            const updatedDryRuns = [...prevDryRuns, { label: newLabel, data: maskedPreview }];
+        while (true) {
+          const { done, value } = await sseReader.read();
+          if (done) break;
 
-            if (latestCached) {
-              tableCacheRef.current.set(key, {
-                ...latestCached,
-                dryRuns: updatedDryRuns,
-                activePreviewTab: newLabel,
-                originalData: latestCached.originalData ?? latestCached.previewData,
-                dryRunInProgress: false,
-              });
+          buffer += decoder.decode(value, { stream: true });
+          const parts = buffer.split("\n\n");
+          buffer = parts.pop() ?? "";
+
+          for (const part of parts) {
+            const lines = part.split("\n");
+            let eventType = "";
+            let eventData = "";
+            for (const line of lines) {
+              if (line.startsWith("event: ")) eventType = line.slice(7);
+              else if (line.startsWith("data: ")) eventData = line.slice(6);
             }
 
-            if (isViewingTable(rowKey, schema, tableName)) {
-              const finalCached = tableCacheRef.current.get(key);
-              setDryRuns(updatedDryRuns);
-              setActivePreviewTab(newLabel);
-              if (finalCached?.originalData) {
-                setOriginalData(finalCached.originalData);
+            if (eventType === "status") {
+              if (isViewingTable(rowKey, schema, tableName)) {
+                updateDryRunStatus(eventData);
+              } else {
+                const cached = tableCacheRef.current.get(key);
+                if (cached) {
+                  tableCacheRef.current.set(key, {
+                    ...cached,
+                    dryRuns: cached.dryRuns.map((dr) => dr.label === newLabel ? { ...dr, status: eventData } : dr),
+                  });
+                }
               }
-              setPreviewLoading(false);
+            } else if (eventType === "complete") {
+              completed = true;
+              const mergeRes = await fetch("/api/blob/preview-merge", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ filenames }),
+              });
+              if (mergeRes.ok) {
+                const masked = await mergeRes.json();
+                const maskedPreview = masked as PreviewData;
+
+                const finishDryRun = (prev: DryRunResult[]) =>
+                  prev.map((dr) =>
+                    dr.label === newLabel
+                      ? { label: newLabel, data: maskedPreview, inProgress: false }
+                      : dr,
+                  );
+
+                const latestCached = tableCacheRef.current.get(key);
+                if (latestCached) {
+                  tableCacheRef.current.set(key, {
+                    ...latestCached,
+                    dryRuns: finishDryRun(latestCached.dryRuns),
+                    activePreviewTab: newLabel,
+                    originalData: latestCached.originalData ?? latestCached.previewData,
+                    dryRunInProgress: false,
+                  });
+                }
+
+                if (isViewingTable(rowKey, schema, tableName)) {
+                  setDryRuns(finishDryRun);
+                  setActivePreviewTab(newLabel);
+                  const finalCached = tableCacheRef.current.get(key);
+                  if (finalCached?.originalData) {
+                    setOriginalData(finalCached.originalData);
+                  }
+                }
+              } else {
+                const latestCached = tableCacheRef.current.get(key);
+                if (latestCached) {
+                  tableCacheRef.current.set(key, { ...latestCached, dryRunInProgress: false });
+                }
+              }
+            } else if (eventType === "error") {
+              let errMsg = "Dry run failed.";
+              try {
+                const parsed = JSON.parse(eventData);
+                errMsg = parsed.message ?? errMsg;
+              } catch { /* use default */ }
+              if (isViewingTable(rowKey, schema, tableName)) {
+                finalizeDryRunError(errMsg);
+              } else {
+                const cached = tableCacheRef.current.get(key);
+                if (cached) {
+                  const wasActive = cached.activePreviewTab === newLabel;
+                  tableCacheRef.current.set(key, {
+                    ...cached,
+                    dryRuns: cached.dryRuns.filter((dr) => dr.label !== newLabel),
+                    activePreviewTab: wasActive ? "Original" : cached.activePreviewTab,
+                    dryRunInProgress: false,
+                    previewError: errMsg,
+                  });
+                }
+              }
             }
-          } else {
-            if (cached) {
-              tableCacheRef.current.set(key, { ...cached, dryRunInProgress: false });
-            }
-            if (isViewingTable(rowKey, schema, tableName)) {
-              setPreviewLoading(false);
-            }
-          }
-        } else {
-          const errMsg = result.message ?? "Dry run failed.";
-          if (cached) {
-            tableCacheRef.current.set(key, { ...cached, dryRunInProgress: false, previewError: errMsg });
-          }
-          if (isViewingTable(rowKey, schema, tableName)) {
-            setPreviewError(errMsg);
-            setPreviewLoading(false);
           }
         }
-      }).catch((e) => {
+
+        if (!completed) {
+          finalizeDryRunError("Dry run stream ended unexpectedly.");
+        }
+      } catch (e) {
         const errMsg = `Dry run failed: ${e instanceof Error ? e.message : String(e)}`;
-        const cached = tableCacheRef.current.get(key);
-        if (cached) {
-          tableCacheRef.current.set(key, { ...cached, dryRunInProgress: false, previewError: errMsg });
-        }
         if (isViewingTable(rowKey, schema, tableName)) {
-          setPreviewError(errMsg);
-          setPreviewLoading(false);
+          finalizeDryRunError(errMsg);
+        } else {
+          const cached = tableCacheRef.current.get(key);
+          if (cached) {
+            const wasActive = cached.activePreviewTab === newLabel;
+            tableCacheRef.current.set(key, {
+              ...cached,
+              dryRuns: cached.dryRuns.filter((dr) => dr.label !== newLabel),
+              activePreviewTab: wasActive ? "Original" : cached.activePreviewTab,
+              dryRunInProgress: false,
+              previewError: errMsg,
+            });
+          }
         }
-      });
+      }
     } catch (e) {
       setPreviewError(`Dry run failed: ${e instanceof Error ? e.message : String(e)}`);
       setPreviewLoading(false);
