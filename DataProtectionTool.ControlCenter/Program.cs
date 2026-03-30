@@ -322,19 +322,59 @@ app.MapPost("/api/agents/{path}/preview-table", async (string path, HttpRequest 
     using (var reader = new StreamReader(request.Body))
         body = await reader.ReadToEndAsync();
 
-    string tableLabel = "";
+    string connRowKey = "", schema = "", tName = "";
     try
     {
         using var bodyDoc = JsonDocument.Parse(body);
-        var schema = bodyDoc.RootElement.TryGetProperty("schema", out var sEl) ? sEl.GetString() ?? "" : "";
-        var tName = bodyDoc.RootElement.TryGetProperty("tableName", out var tEl) ? tEl.GetString() ?? "" : "";
-        tableLabel = $"{schema}.{tName}";
+        connRowKey = bodyDoc.RootElement.TryGetProperty("rowKey", out var rkEl) ? rkEl.GetString() ?? "" : "";
+        schema = bodyDoc.RootElement.TryGetProperty("schema", out var sEl) ? sEl.GetString() ?? "" : "";
+        tName = bodyDoc.RootElement.TryGetProperty("tableName", out var tEl) ? tEl.GetString() ?? "" : "";
     }
     catch { }
+
+    var tableLabel = $"{schema}.{tName}";
+
+    var connEntity = await clientTableService.GetConnectionByRowKeyAsync(partitionKey, connRowKey);
+    DataItemEntity? dataItem = null;
+    if (connEntity != null)
+    {
+        dataItem = await clientTableService.GetDataItemByTableAsync(
+            partitionKey, connEntity.ServerName, connEntity.DatabaseName, schema, tName);
+
+        if (dataItem != null && !string.IsNullOrEmpty(dataItem.PreviewFileList))
+        {
+            var cachedFilenames = dataItem.PreviewFileList.Split(',', StringSplitOptions.RemoveEmptyEntries).ToList();
+            _ = clientTableService.AppendEventAsync(partitionKey, "preview_table", $"Preview table (cached): {tableLabel}");
+            return Results.Ok(new { success = true, filenames = cachedFilenames, cached = true });
+        }
+    }
 
     try
     {
         var result = await connection.SendCommandAsync("preview_table", body, TimeSpan.FromSeconds(60));
+
+        if (dataItem != null)
+        {
+            try
+            {
+                using var resultDoc = JsonDocument.Parse(result);
+                if (resultDoc.RootElement.TryGetProperty("success", out var successEl) && successEl.GetBoolean())
+                {
+                    var filenames = new List<string>();
+                    if (resultDoc.RootElement.TryGetProperty("filenames", out var fnEl) && fnEl.ValueKind == JsonValueKind.Array)
+                        filenames = fnEl.EnumerateArray().Select(e => e.GetString() ?? "").Where(f => f != "").ToList();
+                    else if (resultDoc.RootElement.TryGetProperty("filename", out var fEl))
+                        filenames = new List<string> { fEl.GetString() ?? "" };
+
+                    if (filenames.Count > 0)
+                    {
+                        _ = clientTableService.UpdatePreviewFileListAsync(dataItem, string.Join(",", filenames));
+                    }
+                }
+            }
+            catch { }
+        }
+
         _ = clientTableService.AppendEventAsync(partitionKey, "preview_table", $"Preview table: {tableLabel}");
         return Results.Content(result, "application/json");
     }
@@ -347,6 +387,91 @@ app.MapPost("/api/agents/{path}/preview-table", async (string path, HttpRequest 
     {
         _ = clientTableService.AppendEventAsync(partitionKey, "preview_table", $"Preview table error: {ex.Message}");
         return Results.Ok(new { success = false, message = $"Preview table error: {ex.Message}" });
+    }
+});
+
+app.MapPost("/api/agents/{path}/reload-preview-table", async (string path, HttpRequest request, AgentRegistry registry, ClientTableService clientTableService, BlobServiceClient blobClient, BlobStorageConfig blobConfig) =>
+{
+    if (!registry.TryGetConnection(path, out var connection) || connection is null)
+        return Results.NotFound(new { error = "Agent not found or not connected." });
+
+    var partitionKey = ClientEntity.BuildPartitionKey(connection.Info.Oid, connection.Info.Tid);
+
+    string body;
+    using (var reader = new StreamReader(request.Body))
+        body = await reader.ReadToEndAsync();
+
+    string connRowKey = "", schema = "", tName = "";
+    try
+    {
+        using var bodyDoc = JsonDocument.Parse(body);
+        connRowKey = bodyDoc.RootElement.TryGetProperty("rowKey", out var rkEl) ? rkEl.GetString() ?? "" : "";
+        schema = bodyDoc.RootElement.TryGetProperty("schema", out var sEl) ? sEl.GetString() ?? "" : "";
+        tName = bodyDoc.RootElement.TryGetProperty("tableName", out var tEl) ? tEl.GetString() ?? "" : "";
+    }
+    catch
+    {
+        return Results.BadRequest(new { error = "Invalid request body." });
+    }
+
+    var tableLabel = $"{schema}.{tName}";
+    var connEntity = await clientTableService.GetConnectionByRowKeyAsync(partitionKey, connRowKey);
+    if (connEntity == null)
+        return Results.NotFound(new { error = "Connection not found." });
+
+    var dataItem = await clientTableService.GetDataItemByTableAsync(
+        partitionKey, connEntity.ServerName, connEntity.DatabaseName, schema, tName);
+
+    if (dataItem != null && !string.IsNullOrEmpty(dataItem.PreviewFileList))
+    {
+        var oldFilenames = dataItem.PreviewFileList.Split(',', StringSplitOptions.RemoveEmptyEntries);
+        var containerClient = blobClient.GetBlobContainerClient(blobConfig.Container);
+        foreach (var filename in oldFilenames)
+        {
+            try { await containerClient.GetBlobClient(filename).DeleteIfExistsAsync(); } catch { }
+        }
+
+        await clientTableService.UpdatePreviewFileListAsync(dataItem, "");
+    }
+
+    try
+    {
+        var result = await connection.SendCommandAsync("preview_table", body, TimeSpan.FromSeconds(60));
+
+        if (dataItem != null)
+        {
+            try
+            {
+                using var resultDoc = JsonDocument.Parse(result);
+                if (resultDoc.RootElement.TryGetProperty("success", out var successEl) && successEl.GetBoolean())
+                {
+                    var filenames = new List<string>();
+                    if (resultDoc.RootElement.TryGetProperty("filenames", out var fnEl) && fnEl.ValueKind == JsonValueKind.Array)
+                        filenames = fnEl.EnumerateArray().Select(e => e.GetString() ?? "").Where(f => f != "").ToList();
+                    else if (resultDoc.RootElement.TryGetProperty("filename", out var fEl))
+                        filenames = new List<string> { fEl.GetString() ?? "" };
+
+                    if (filenames.Count > 0)
+                    {
+                        _ = clientTableService.UpdatePreviewFileListAsync(dataItem, string.Join(",", filenames));
+                    }
+                }
+            }
+            catch { }
+        }
+
+        _ = clientTableService.AppendEventAsync(partitionKey, "preview_table", $"Reload preview table: {tableLabel}");
+        return Results.Content(result, "application/json");
+    }
+    catch (TimeoutException)
+    {
+        _ = clientTableService.AppendEventAsync(partitionKey, "preview_table", $"Reload preview table timeout: {tableLabel}");
+        return Results.Ok(new { success = false, message = "Agent did not respond within 60 seconds." });
+    }
+    catch (Exception ex)
+    {
+        _ = clientTableService.AppendEventAsync(partitionKey, "preview_table", $"Reload preview table error: {ex.Message}");
+        return Results.Ok(new { success = false, message = $"Reload preview table error: {ex.Message}" });
     }
 });
 

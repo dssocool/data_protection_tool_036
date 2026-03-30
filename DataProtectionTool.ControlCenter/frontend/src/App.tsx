@@ -268,34 +268,26 @@ export default function App() {
     setActivePreviewTab("Original");
     setDiffTab(null);
 
-    const cacheKey = `table:${rowKey}:${schema}:${tableName}`;
-    const cached = previewCacheRef.current.get(cacheKey);
-
     try {
-      if (cached) {
-        await fetchPreviewFromFilenames(cached);
-      } else {
-        const res = await fetch(`/api/agents/${agentPath}/preview-table`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ rowKey, schema, tableName }),
-        });
+      const res = await fetch(`/api/agents/${agentPath}/preview-table`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ rowKey, schema, tableName }),
+      });
 
-        if (!res.ok) {
-          setPreviewError(`Server error: ${res.status}`);
-          return;
-        }
-
-        const result = await res.json();
-        if (!result.success) {
-          setPreviewError(result.message ?? "Preview failed.");
-          return;
-        }
-
-        const filenames: string[] = result.filenames ?? (result.filename ? [result.filename] : []);
-        previewCacheRef.current.set(cacheKey, filenames);
-        await fetchPreviewFromFilenames(filenames);
+      if (!res.ok) {
+        setPreviewError(`Server error: ${res.status}`);
+        return;
       }
+
+      const result = await res.json();
+      if (!result.success) {
+        setPreviewError(result.message ?? "Preview failed.");
+        return;
+      }
+
+      const filenames: string[] = result.filenames ?? (result.filename ? [result.filename] : []);
+      await fetchPreviewFromFilenames(filenames);
     } catch (e) {
       setPreviewError(`Preview failed: ${e instanceof Error ? e.message : String(e)}`);
     } finally {
@@ -430,20 +422,54 @@ export default function App() {
   }
 
   async function handleReloadPreview() {
+    const agentPath = getAgentPath();
+    if (!agentPath) return;
+
     if (selectedTable) {
-      const cacheKey = `table:${selectedTable.rowKey}:${selectedTable.schema}:${selectedTable.tableName}`;
-      previewCacheRef.current.delete(cacheKey);
+      setPreviewLoading(true);
+      setPreviewError(null);
+      setPreviewData(null);
+      setOriginalData(null);
+      setMaskedData(null);
+      setActivePreviewTab("Original");
+      setDiffTab(null);
+
+      try {
+        const res = await fetch(`/api/agents/${agentPath}/reload-preview-table`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            rowKey: selectedTable.rowKey,
+            schema: selectedTable.schema,
+            tableName: selectedTable.tableName,
+          }),
+        });
+
+        if (!res.ok) {
+          setPreviewError(`Server error: ${res.status}`);
+          return;
+        }
+
+        const result = await res.json();
+        if (!result.success) {
+          setPreviewError(result.message ?? "Reload preview failed.");
+          return;
+        }
+
+        const filenames: string[] = result.filenames ?? (result.filename ? [result.filename] : []);
+        await fetchPreviewFromFilenames(filenames);
+      } catch (e) {
+        setPreviewError(`Reload preview failed: ${e instanceof Error ? e.message : String(e)}`);
+      } finally {
+        setPreviewLoading(false);
+      }
     } else if (selectedQuery) {
       const cacheKey = `query:${selectedQuery.connectionRowKey}:${selectedQuery.queryRowKey}`;
       previewCacheRef.current.delete(cacheKey);
-    }
 
-    await deletePreviewBlobs(previewBlobFilenames);
-    setPreviewBlobFilenames([]);
+      await deletePreviewBlobs(previewBlobFilenames);
+      setPreviewBlobFilenames([]);
 
-    if (selectedTable) {
-      handleTableClick(selectedTable.rowKey, selectedTable.schema, selectedTable.tableName);
-    } else if (selectedQuery) {
       handleQueryClick(selectedQuery.connectionRowKey, selectedQuery.queryRowKey, selectedQuery.queryText);
     }
   }

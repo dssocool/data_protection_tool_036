@@ -405,4 +405,31 @@ public class ClientTableService
             "Saved {Count} data items — partitionKey={PK}, server={Server}, db={Db}",
             tables.Count, partitionKey, serverName, dbName);
     }
+
+    public async Task<DataItemEntity?> GetDataItemByTableAsync(
+        string partitionKey, string serverName, string dbName, string schema, string tableName)
+    {
+        var prefix = DataItemEntity.BuildRowKeyPrefix(serverName, dbName);
+        var fullTableName = $"{schema}.{tableName}";
+
+        await foreach (var entity in _dataItemTableClient.QueryAsync<DataItemEntity>(
+            e => e.PartitionKey == partitionKey
+                 && e.RowKey.CompareTo(prefix) >= 0
+                 && e.RowKey.CompareTo(prefix + "~") < 0))
+        {
+            if (entity.Schema == schema && entity.TableName == tableName)
+                return entity;
+        }
+
+        return null;
+    }
+
+    public async Task UpdatePreviewFileListAsync(DataItemEntity entity, string previewFileList)
+    {
+        entity.PreviewFileList = previewFileList;
+        await _dataItemTableClient.UpdateEntityAsync(entity, entity.ETag);
+        _logger.LogInformation(
+            "Updated PreviewFileList for DataItem {RowKey} — {FileCount} file(s)",
+            entity.RowKey, string.IsNullOrEmpty(previewFileList) ? 0 : previewFileList.Split(',').Length);
+    }
 }
