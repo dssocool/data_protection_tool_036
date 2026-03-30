@@ -1,9 +1,14 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import "./DataPreviewPanel.css";
 
 export interface PreviewData {
   headers: string[];
   rows: string[][];
+}
+
+export interface DryRunResult {
+  label: string;
+  data: PreviewData;
 }
 
 interface DiffTab {
@@ -17,10 +22,11 @@ interface DataPreviewPanelProps {
   error: string | null;
   data: PreviewData | null;
   originalData: PreviewData | null;
-  maskedData: PreviewData | null;
+  dryRuns: DryRunResult[];
   activeTab: string;
   diffTab: DiffTab | null;
   onTabChange: (tab: string) => void;
+  onTabClose: (tab: string) => void;
   onDiffSelect: (leftTab: string, rightTab: string) => void;
   panelLeft: number;
 }
@@ -29,10 +35,11 @@ function resolveTabData(
   tab: string,
   data: PreviewData | null,
   originalData: PreviewData | null,
-  maskedData: PreviewData | null,
+  dryRuns: DryRunResult[],
 ): PreviewData | null {
-  if (tab === "Masked") return maskedData;
   if (tab === "Original") return originalData ?? data;
+  const dryRun = dryRuns.find((dr) => dr.label === tab);
+  if (dryRun) return dryRun.data;
   return null;
 }
 
@@ -106,28 +113,52 @@ export default function DataPreviewPanel({
   error,
   data,
   originalData,
-  maskedData,
+  dryRuns,
   activeTab,
   diffTab,
   onTabChange,
+  onTabClose,
   onDiffSelect,
   panelLeft,
 }: DataPreviewPanelProps) {
   const dataTabs = useMemo(() => {
     const list: string[] = ["Original"];
-    if (maskedData) list.push("Masked");
+    for (const dr of dryRuns) list.push(dr.label);
     return list;
-  }, [maskedData]);
+  }, [dryRuns]);
 
   const tabs = useMemo(() => {
     const list: string[] = ["Original"];
-    if (maskedData) list.push("Masked");
+    for (const dr of dryRuns) list.push(dr.label);
     if (diffTab) list.push(diffTab.name);
     return list;
-  }, [maskedData, diffTab]);
+  }, [dryRuns, diffTab]);
 
   const [leftDiffTab, setLeftDiffTab] = useState("Original");
   const [rightDiffTab, setRightDiffTab] = useState("");
+
+  const [contextMenu, setContextMenu] = useState<{ x: number; y: number; tab: string } | null>(null);
+  const contextMenuRef = useRef<HTMLDivElement>(null);
+
+  const closeContextMenu = useCallback(() => setContextMenu(null), []);
+
+  useEffect(() => {
+    if (!contextMenu) return;
+    const handleClick = (e: MouseEvent) => {
+      if (contextMenuRef.current && !contextMenuRef.current.contains(e.target as Node)) {
+        closeContextMenu();
+      }
+    };
+    const handleKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") closeContextMenu();
+    };
+    document.addEventListener("mousedown", handleClick);
+    document.addEventListener("keydown", handleKey);
+    return () => {
+      document.removeEventListener("mousedown", handleClick);
+      document.removeEventListener("keydown", handleKey);
+    };
+  }, [contextMenu, closeContextMenu]);
 
   useEffect(() => {
     if (
@@ -149,14 +180,18 @@ export default function DataPreviewPanel({
 
   const activeData = isDiffActive
     ? null
-    : resolveTabData(activeTab, data, originalData, maskedData);
+    : resolveTabData(activeTab, data, originalData, dryRuns);
 
   const leftData = isDiffActive
-    ? resolveTabData(diffTab!.leftTab, data, originalData, maskedData)
+    ? resolveTabData(diffTab!.leftTab, data, originalData, dryRuns)
     : null;
   const rightData = isDiffActive
-    ? resolveTabData(diffTab!.rightTab, data, originalData, maskedData)
+    ? resolveTabData(diffTab!.rightTab, data, originalData, dryRuns)
     : null;
+
+  const currentHeaders = isDiffActive
+    ? (leftData?.headers ?? [])
+    : (activeData?.headers ?? []);
 
   return (
     <div className="data-preview-panel" style={{ left: panelLeft + 16 }}>
@@ -167,10 +202,31 @@ export default function DataPreviewPanel({
               key={tab}
               className={`data-preview-tab${activeTab === tab ? " data-preview-tab-active" : ""}`}
               onClick={() => onTabChange(tab)}
+              onContextMenu={(e) => {
+                e.preventDefault();
+                setContextMenu({ x: e.clientX, y: e.clientY, tab });
+              }}
             >
               {tab}
             </button>
           ))}
+          {contextMenu && (
+            <div
+              ref={contextMenuRef}
+              className="data-preview-tab-context-menu"
+              style={{ left: contextMenu.x, top: contextMenu.y }}
+            >
+              <button
+                className="data-preview-tab-context-menu-item"
+                onClick={() => {
+                  onTabClose(contextMenu.tab);
+                  closeContextMenu();
+                }}
+              >
+                Close
+              </button>
+            </div>
+          )}
         </div>
         {dataTabs.length > 1 && (
           <div className="data-preview-diff-controls">
@@ -209,15 +265,35 @@ export default function DataPreviewPanel({
         )}
       </div>
       <div className="data-preview-body">
-        {loading ? (
-          <div className="data-preview-loading">Loading preview...</div>
-        ) : error ? (
-          <div className="data-preview-error">{error}</div>
-        ) : isDiffActive && leftData && rightData ? (
-          <DiffView left={leftData} right={rightData} />
-        ) : activeData ? (
-          <DataTable data={activeData} />
-        ) : null}
+        <div className="data-preview-scroll-content">
+          <div className="data-preview-data-area">
+            {loading ? (
+              <div className="data-preview-loading">Loading preview...</div>
+            ) : error ? (
+              <div className="data-preview-error">{error}</div>
+            ) : isDiffActive && leftData && rightData ? (
+              <DiffView left={leftData} right={rightData} />
+            ) : activeData ? (
+              <DataTable data={activeData} />
+            ) : null}
+          </div>
+          {currentHeaders.length > 0 && (
+            <div className="data-preview-column-rules">
+              <div className="data-preview-column-rules-header">
+                <span className="data-preview-column-rules-tab">Column Rules</span>
+              </div>
+              <table className="data-preview-table data-preview-column-rules-table">
+                <tbody>
+                  <tr>
+                    {currentHeaders.map((_, i) => (
+                      <td key={i}></td>
+                    ))}
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
       </div>
     </div>
   );

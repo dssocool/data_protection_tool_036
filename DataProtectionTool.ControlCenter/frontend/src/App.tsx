@@ -7,7 +7,7 @@ import type { QuerySaveData, QueryValidateResult } from "./components/QueryModal
 import ConnectionsPanel from "./components/ConnectionsPanel";
 import type { SavedConnection, TableInfo, QueryInfo } from "./components/ConnectionsPanel";
 import DataPreviewPanel from "./components/DataPreviewPanel";
-import type { PreviewData } from "./components/DataPreviewPanel";
+import type { PreviewData, DryRunResult } from "./components/DataPreviewPanel";
 import StatusBar from "./components/StatusBar";
 import type { StatusEvent } from "./components/StatusBar";
 import EventDialog from "./components/EventDialog";
@@ -36,7 +36,7 @@ export default function App() {
   const [previewError, setPreviewError] = useState<string | null>(null);
   const [previewBlobFilenames, setPreviewBlobFilenames] = useState<string[]>([]);
   const [originalData, setOriginalData] = useState<PreviewData | null>(null);
-  const [maskedData, setMaskedData] = useState<PreviewData | null>(null);
+  const [dryRuns, setDryRuns] = useState<DryRunResult[]>([]);
   const [activePreviewTab, setActivePreviewTab] = useState("Original");
   const [diffTab, setDiffTab] = useState<{ name: string; leftTab: string; rightTab: string } | null>(null);
   const [connectionsPanelWidth, setConnectionsPanelWidth] = useState(260);
@@ -266,7 +266,7 @@ export default function App() {
     setPreviewError(null);
     setPreviewData(null);
     setOriginalData(null);
-    setMaskedData(null);
+    setDryRuns([]);
     setActivePreviewTab("Original");
     setDiffTab(null);
 
@@ -384,7 +384,7 @@ export default function App() {
     setPreviewError(null);
     setPreviewData(null);
     setOriginalData(null);
-    setMaskedData(null);
+    setDryRuns([]);
     setActivePreviewTab("Original");
     setDiffTab(null);
 
@@ -432,7 +432,7 @@ export default function App() {
       setPreviewError(null);
       setPreviewData(null);
       setOriginalData(null);
-      setMaskedData(null);
+      setDryRuns([]);
       setActivePreviewTab("Original");
       setDiffTab(null);
 
@@ -495,7 +495,7 @@ export default function App() {
       if (!isSameTable || filenames.length === 0) {
         setPreviewData(null);
         setOriginalData(null);
-        setMaskedData(null);
+        setDryRuns([]);
         setActivePreviewTab("Original");
         setDiffTab(null);
 
@@ -544,8 +544,13 @@ export default function App() {
         });
         if (mergeRes.ok) {
           const masked = await mergeRes.json();
-          setMaskedData(masked as PreviewData);
-          setActivePreviewTab("Masked");
+          const maskedPreview = masked as PreviewData;
+          let newLabel = "";
+          setDryRuns((prev) => {
+            newLabel = `Dry Run ${prev.length + 1}`;
+            return [...prev, { label: newLabel, data: maskedPreview }];
+          });
+          setActivePreviewTab(newLabel);
         }
       } else {
         setPreviewError(result.message ?? "Dry run failed.");
@@ -636,10 +641,24 @@ export default function App() {
             error={previewError}
             data={previewData}
             originalData={originalData}
-            maskedData={maskedData}
+            dryRuns={dryRuns}
             activeTab={activePreviewTab}
             diffTab={diffTab}
             onTabChange={setActivePreviewTab}
+            onTabClose={(tab) => {
+              if (diffTab && tab === diffTab.name) {
+                setDiffTab(null);
+                setActivePreviewTab("Original");
+              } else if (tab !== "Original") {
+                setDryRuns((prev) => prev.filter((dr) => dr.label !== tab));
+                if (diffTab && (diffTab.leftTab === tab || diffTab.rightTab === tab)) {
+                  setDiffTab(null);
+                }
+                if (activePreviewTab === tab) {
+                  setActivePreviewTab("Original");
+                }
+              }
+            }}
             onDiffSelect={(leftTab, rightTab) => {
               const name = `${leftTab} vs ${rightTab}`;
               setDiffTab({ name, leftTab, rightTab });
