@@ -146,7 +146,7 @@ export default function EventDialog({ events, onClose }: EventDialogProps) {
               {searchQuery.trim() ? "No matching events." : "No events recorded yet."}
             </div>
           ) : (
-            filtered.map((evt, idx) => {
+            filtered.map((evt, _idx) => {
               const originalIdx = events.indexOf(evt);
               const isExpanded = expandedIdx === originalIdx || autoExpandedIndices.has(originalIdx);
               const stepsPresent = hasSteps(evt);
