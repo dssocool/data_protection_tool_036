@@ -149,11 +149,19 @@ export default function FlowsPanel({
             const dest = parseJson<FlowDest>(flow.destJson);
             return (
               <div key={flow.rowKey} className="flow-item">
-                <div className="flow-item-line flow-item-source" title={formatSource(src)}>
-                  {formatSource(src)}
+                <div className="flow-item-arrow">
+                  <svg width="14" height="100%" viewBox="0 0 14 40" preserveAspectRatio="xMidYMid meet" fill="none">
+                    <line x1="7" y1="4" x2="7" y2="32" stroke="currentColor" strokeWidth="1.4" />
+                    <path d="M3.5 28L7 34L10.5 28" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
+                  </svg>
                 </div>
-                <div className="flow-item-line flow-item-dest" title={formatDest(dest)}>
-                  {formatDest(dest)}
+                <div className="flow-item-text">
+                  <div className="flow-item-line" title={formatSource(src)}>
+                    {formatSource(src)}
+                  </div>
+                  <div className="flow-item-line" title={formatDest(dest)}>
+                    {formatDest(dest)}
+                  </div>
                 </div>
               </div>
             );

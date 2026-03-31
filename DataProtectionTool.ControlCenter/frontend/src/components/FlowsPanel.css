@@ -107,6 +107,9 @@
 }
 
 .flow-item {
+  display: flex;
+  align-items: stretch;
+  gap: 8px;
   padding: 8px 18px;
   cursor: default;
   transition: background 0.12s;
@@ -116,17 +119,25 @@
   background: #f5f7fa;
 }
 
+.flow-item-arrow {
+  flex-shrink: 0;
+  width: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #aaa;
+}
+
+.flow-item-text {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+}
+
 .flow-item-line {
-  white-space: nowrap;
-}
-
-.flow-item-source {
   font-size: 13px;
-  font-weight: 500;
   color: #333;
-}
-
-.flow-item-dest {
-  font-size: 12px;
-  color: #777;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
