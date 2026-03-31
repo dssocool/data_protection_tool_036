@@ -55,7 +55,7 @@ function resolveTabData(
   originalData: PreviewData | null,
   dryRuns: DryRunResult[],
 ): PreviewData | null {
-  if (tab === "Original") return originalData ?? data;
+  if (tab === "Source") return originalData ?? data;
   const dryRun = dryRuns.find((dr) => dr.label === tab);
   if (dryRun) return dryRun.data;
   return null;
@@ -165,23 +165,21 @@ export default function DataPreviewPanel({
   panelLeft,
 }: DataPreviewPanelProps) {
   const dataTabs = useMemo(() => {
-    const list: string[] = ["Original"];
+    const list: string[] = ["Source"];
     for (const dr of dryRuns) list.push(dr.label);
     return list;
   }, [dryRuns]);
 
   const tabs = useMemo(() => {
-    const list: string[] = ["Original"];
+    const list: string[] = ["Source"];
     for (const dr of dryRuns) list.push(dr.label);
     if (diffTab) list.push(diffTab.name);
     return list;
   }, [dryRuns, diffTab]);
 
-  const [leftDiffTab, setLeftDiffTab] = useState("Original");
+  const [leftDiffTab, setLeftDiffTab] = useState("Source");
   const [rightDiffTab, setRightDiffTab] = useState("");
 
-  const [contextMenu, setContextMenu] = useState<{ x: number; y: number; tab: string } | null>(null);
-  const contextMenuRef = useRef<HTMLDivElement>(null);
   const tabsContainerRef = useRef<HTMLDivElement>(null);
   const tableRef = useRef<HTMLTableElement>(null);
   const columnRulesScrollRef = useRef<HTMLDivElement>(null);
@@ -224,26 +222,6 @@ export default function DataPreviewPanel({
     }
     return map;
   }, [columnRules]);
-
-  const closeContextMenu = useCallback(() => setContextMenu(null), []);
-
-  useEffect(() => {
-    if (!contextMenu) return;
-    const handleClick = (e: MouseEvent) => {
-      if (contextMenuRef.current && !contextMenuRef.current.contains(e.target as Node)) {
-        closeContextMenu();
-      }
-    };
-    const handleKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") closeContextMenu();
-    };
-    document.addEventListener("mousedown", handleClick);
-    document.addEventListener("keydown", handleKey);
-    return () => {
-      document.removeEventListener("mousedown", handleClick);
-      document.removeEventListener("keydown", handleKey);
-    };
-  }, [contextMenu, closeContextMenu]);
 
   useEffect(() => {
     if (
@@ -346,42 +324,19 @@ export default function DataPreviewPanel({
               key={tab}
               className={`data-preview-tab${activeTab === tab ? " data-preview-tab-active" : ""}`}
               onClick={() => onTabChange(tab)}
-              onContextMenu={(e) => {
-                e.preventDefault();
-                setContextMenu({ x: e.clientX, y: e.clientY, tab });
-              }}
             >
               <span className="data-preview-tab-label">{tab}</span>
-              {tab !== "Original" && (
-                <span
-                  className="data-preview-tab-close"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    onTabClose(tab);
-                  }}
-                >
-                  {"\u00d7"}
-                </span>
-              )}
-            </button>
-          ))}
-          {contextMenu && (
-            <div
-              ref={contextMenuRef}
-              className="data-preview-tab-context-menu"
-              style={{ left: contextMenu.x, top: contextMenu.y }}
-            >
-              <button
-                className="data-preview-tab-context-menu-item"
-                onClick={() => {
-                  onTabClose(contextMenu.tab);
-                  closeContextMenu();
+              <span
+                className="data-preview-tab-close"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onTabClose(tab);
                 }}
               >
-                Close
-              </button>
-            </div>
-          )}
+                {"\u00d7"}
+              </span>
+            </button>
+          ))}
         </div>
         {dataTabs.length > 1 && (
           <div className="data-preview-diff-controls">

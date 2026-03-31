@@ -58,7 +58,7 @@ export default function App() {
   const [previewBlobFilenames, setPreviewBlobFilenames] = useState<string[]>([]);
   const [originalData, setOriginalData] = useState<PreviewData | null>(null);
   const [dryRuns, setDryRuns] = useState<DryRunResult[]>([]);
-  const [activePreviewTab, setActivePreviewTab] = useState("Original");
+  const [activePreviewTab, setActivePreviewTab] = useState("Source");
   const [diffTab, setDiffTab] = useState<{ name: string; leftTab: string; rightTab: string } | null>(null);
   const [connectionsPanelWidth, setConnectionsPanelWidth] = useState(260);
   const [statusEvents, setStatusEvents] = useState<StatusEvent[]>([]);
@@ -544,7 +544,7 @@ export default function App() {
     setPreviewData(null);
     setOriginalData(null);
     setDryRuns([]);
-    setActivePreviewTab("Original");
+    setActivePreviewTab("Source");
     setDiffTab(null);
     setColumnRules([]);
     setColumnRuleAlgorithms([]);
@@ -684,7 +684,7 @@ export default function App() {
     setPreviewData(null);
     setOriginalData(null);
     setDryRuns([]);
-    setActivePreviewTab("Original");
+    setActivePreviewTab("Source");
     setDiffTab(null);
     setColumnRules([]);
     setColumnRuleAlgorithms([]);
@@ -740,7 +740,7 @@ export default function App() {
       setPreviewData(null);
       setOriginalData(null);
       setDryRuns([]);
-      setActivePreviewTab("Original");
+      setActivePreviewTab("Source");
       setDiffTab(null);
 
       try {
@@ -820,7 +820,7 @@ export default function App() {
         setPreviewData(null);
         setOriginalData(null);
         setDryRuns([]);
-        setActivePreviewTab("Original");
+        setActivePreviewTab("Source");
         setDiffTab(null);
 
         const previewRes = await fetch(`/api/agents/${agentPath}/preview-table`, {
@@ -889,14 +889,14 @@ export default function App() {
 
       const finalizeDryRunError = (errMsg: string) => {
         setDryRuns((prev) => prev.filter((dr) => dr.label !== newLabel));
-        setActivePreviewTab("Original");
+        setActivePreviewTab("Source");
         setPreviewError(errMsg);
         const cached = tableCacheRef.current.get(key);
         if (cached) {
           tableCacheRef.current.set(key, {
             ...cached,
             dryRuns: cached.dryRuns.filter((dr) => dr.label !== newLabel),
-            activePreviewTab: "Original",
+            activePreviewTab: "Source",
             dryRunInProgress: false,
             previewError: errMsg,
           });
@@ -1098,7 +1098,7 @@ export default function App() {
                   tableCacheRef.current.set(key, {
                     ...cached,
                     dryRuns: cached.dryRuns.filter((dr) => dr.label !== newLabel),
-                    activePreviewTab: wasActive ? "Original" : cached.activePreviewTab,
+                    activePreviewTab: wasActive ? "Source" : cached.activePreviewTab,
                     dryRunInProgress: false,
                     previewError: errMsg,
                   });
@@ -1125,7 +1125,7 @@ export default function App() {
             tableCacheRef.current.set(key, {
               ...cached,
               dryRuns: cached.dryRuns.filter((dr) => dr.label !== newLabel),
-              activePreviewTab: wasActive ? "Original" : cached.activePreviewTab,
+              activePreviewTab: wasActive ? "Source" : cached.activePreviewTab,
               dryRunInProgress: false,
               previewError: errMsg,
             });
@@ -1336,14 +1336,18 @@ export default function App() {
             onTabClose={(tab) => {
               if (diffTab && tab === diffTab.name) {
                 setDiffTab(null);
-                setActivePreviewTab("Original");
-              } else if (tab !== "Original") {
+                setActivePreviewTab("Source");
+              } else if (tab !== "Source") {
                 setDryRuns((prev) => prev.filter((dr) => dr.label !== tab));
                 if (diffTab && (diffTab.leftTab === tab || diffTab.rightTab === tab)) {
                   setDiffTab(null);
                 }
                 if (activePreviewTab === tab) {
-                  setActivePreviewTab("Original");
+                  setActivePreviewTab("Source");
+                }
+              } else {
+                if (dryRuns.length > 0) {
+                  setActivePreviewTab(dryRuns[0].label);
                 }
               }
               if (selectedTable) {
@@ -1353,7 +1357,7 @@ export default function App() {
                   const updatedDryRuns = cached.dryRuns.filter((dr) => dr.label !== tab);
                   const updatedDiffTab = (cached.diffTab && (tab === cached.diffTab.name || tab === cached.diffTab.leftTab || tab === cached.diffTab.rightTab))
                     ? null : cached.diffTab;
-                  const updatedActiveTab = cached.activePreviewTab === tab ? "Original" : cached.activePreviewTab;
+                  const updatedActiveTab = cached.activePreviewTab === tab ? "Source" : cached.activePreviewTab;
                   tableCacheRef.current.set(key, {
                     ...cached,
                     dryRuns: updatedDryRuns,
