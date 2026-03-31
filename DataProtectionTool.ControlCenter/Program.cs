@@ -1219,16 +1219,10 @@ app.MapPost("/api/agents/{path}/dry-run", async (string path, HttpContext httpCo
             return;
         }
 
-        // Step 7.5: Check column rules for type mismatches (numeric SQL types mapped to STRING algorithms)
+        // Step 7.5: Apply mapping rules to fix column rules with incompatible algorithm types
         if (previewHeaders.Count > 0 && previewColumnTypes.Count == previewHeaders.Count)
         {
-            await WriteSseEvent("status", "Checking column rules for type mismatches...");
-
-            var numericSqlTypes = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
-            {
-                "int", "bigint", "smallint", "tinyint", "float", "real",
-                "decimal", "numeric", "money", "smallmoney", "bit"
-            };
+            await WriteSseEvent("status", "Applying mapping rules to column rules...");
 
             var sqlTypeByColumn = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
             for (var i = 0; i < previewHeaders.Count; i++)
@@ -1275,15 +1269,19 @@ app.MapPost("/api/agents/{path}/dry-run", async (string path, HttpContext httpCo
                         if (!sqlTypeByColumn.TryGetValue(fieldName, out var sqlType))
                             continue;
 
-                        if (!numericSqlTypes.Contains(sqlType))
+                        var allowedTypes = GetAllowedAlgorithmTypes(sqlType);
+
+                        if (!algMaskTypes.TryGetValue(algName, out var maskType))
                             continue;
 
-                        if (!algMaskTypes.TryGetValue(algName, out var maskType) || maskType != "STRING")
+                        if (allowedTypes.Contains(maskType))
                             continue;
 
-                        await WriteSseEvent("status", $"Fixing type mismatch: {fieldName} ({sqlType}) mapped to STRING algorithm...");
+                        await WriteSseEvent("status", $"Fixing type mismatch: {fieldName} ({sqlType}) — algorithm type {maskType} not allowed...");
                         using var fixResp = await RelayEngineHttpAsync("PUT", $"file-field-metadata/{metadataId}", new
                         {
+                            algorithmName = "",
+                            domainName = "",
                             isMasked = false,
                             isProfilerWritable = false
                         });
@@ -1291,14 +1289,14 @@ app.MapPost("/api/agents/{path}/dry-run", async (string path, HttpContext httpCo
                     }
 
                     if (fixedCount > 0)
-                        await WriteSseEvent("status", $"Fixed {fixedCount} type mismatch(es).");
+                        await WriteSseEvent("status", $"Fixed {fixedCount} column rule(s) with incompatible algorithm types.");
                     else
-                        await WriteSseEvent("status", "No type mismatches found.");
+                        await WriteSseEvent("status", "All column rules have compatible algorithm types.");
                 }
             }
             catch (Exception ex)
             {
-                await WriteSseEvent("status", $"Warning: Could not check type mismatches: {ex.Message}");
+                await WriteSseEvent("status", $"Warning: Could not apply mapping rules: {ex.Message}");
             }
         }
 
@@ -2004,5 +2002,22 @@ string AddUniqueIdToPayload(string body, string uniqueId)
 }
 
 bool IsValidPreviewFilename(string filename) => previewFilenameRegex.IsMatch(filename);
+
+static List<string> GetAllowedAlgorithmTypes(string sqlServerType)
+{
+    var numericSqlTypes = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+    {
+        "int", "bigint", "smallint", "tinyint", "float", "real",
+        "decimal", "numeric", "money", "smallmoney", "bit"
+    };
+
+    if (numericSqlTypes.Contains(sqlServerType))
+        return new List<string> { "BIG_DECIMAL" };
+
+    return new List<string>
+    {
+        "BIG_DECIMAL", "LOCAL_DATE_TIME", "STRING", "BYTE_BUFFER", "GENERIC_DATA_ROW"
+    };
+}
 
 await app.RunAsync();
