@@ -66,10 +66,6 @@ function formatTime(iso: string): string {
   }
 }
 
-function isExpandableType(type: string): boolean {
-  return type === "dp_preview" || type === "dp_run";
-}
-
 function hasSteps(evt: StatusEvent): boolean {
   return Array.isArray(evt.steps) && evt.steps.length > 0;
 }
