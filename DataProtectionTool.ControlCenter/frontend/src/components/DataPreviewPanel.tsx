@@ -55,7 +55,7 @@ function resolveTabData(
   originalData: PreviewData | null,
   dryRuns: DryRunResult[],
 ): PreviewData | null {
-  if (tab === "Source") return originalData ?? data;
+  if (tab === "Sample") return originalData ?? data;
   const dryRun = dryRuns.find((dr) => dr.label === tab);
   if (dryRun) return dryRun.data;
   return null;
@@ -165,19 +165,19 @@ export default function DataPreviewPanel({
   panelLeft,
 }: DataPreviewPanelProps) {
   const dataTabs = useMemo(() => {
-    const list: string[] = ["Source"];
+    const list: string[] = ["Sample"];
     for (const dr of dryRuns) list.push(dr.label);
     return list;
   }, [dryRuns]);
 
   const tabs = useMemo(() => {
-    const list: string[] = ["Source"];
+    const list: string[] = ["Sample"];
     for (const dr of dryRuns) list.push(dr.label);
     if (diffTab) list.push(diffTab.name);
     return list;
   }, [dryRuns, diffTab]);
 
-  const [leftDiffTab, setLeftDiffTab] = useState("Source");
+  const [leftDiffTab, setLeftDiffTab] = useState("Sample");
   const [rightDiffTab, setRightDiffTab] = useState("");
 
   const tabsContainerRef = useRef<HTMLDivElement>(null);
