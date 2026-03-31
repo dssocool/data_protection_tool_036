@@ -13,6 +13,48 @@
   position: relative;
 }
 
+.status-bar-icon {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  margin-right: 4px;
+}
+
+.status-bar-icon-success {
+  color: #2e7d32;
+}
+
+.status-bar-icon-error {
+  color: #c62828;
+}
+
+.status-bar-icon-warn {
+  color: #e65100;
+}
+
+.status-bar-icon-info {
+  color: #1565c0;
+}
+
+.status-bar-spinner {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border: 1.5px solid #bbb;
+  border-top-color: #1976d2;
+  border-radius: 50%;
+  animation: status-bar-spin 0.8s linear infinite;
+  flex-shrink: 0;
+  margin-right: 4px;
+}
+
+@keyframes status-bar-spin {
+  to { transform: rotate(360deg); }
+}
+
 .status-bar-summary {
   white-space: nowrap;
   overflow: hidden;
