@@ -10,16 +10,19 @@ public class ClientTableService
     private readonly TableClient _tableClient;
     private readonly TableClient _controlCenterTableClient;
     private readonly TableClient _dataItemTableClient;
+    private readonly TableClient _eventsTableClient;
     private readonly ILogger<ClientTableService> _logger;
     private bool _tableInitialized;
+    private bool _eventsTableInitialized;
 
-    public ClientTableService(TableServiceClient serviceClient, string tableName, string controlCenterTableName, string dataItemTableName, ILogger<ClientTableService> logger)
+    public ClientTableService(TableServiceClient serviceClient, string tableName, string controlCenterTableName, string dataItemTableName, string eventsTableName, ILogger<ClientTableService> logger)
     {
         _tableName = tableName;
         _logger = logger;
         _tableClient = serviceClient.GetTableClient(_tableName);
         _controlCenterTableClient = serviceClient.GetTableClient(controlCenterTableName);
         _dataItemTableClient = serviceClient.GetTableClient(dataItemTableName);
+        _eventsTableClient = serviceClient.GetTableClient(eventsTableName);
     }
 
     private void EnsureTableExists()
@@ -34,6 +37,22 @@ public class ClientTableService
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "Failed to ensure table '{Table}' exists; will retry on next call", _tableName);
+            throw;
+        }
+    }
+
+    private void EnsureEventsTableExists()
+    {
+        if (_eventsTableInitialized) return;
+        try
+        {
+            _eventsTableClient.CreateIfNotExists();
+            _eventsTableInitialized = true;
+            _logger.LogInformation("Azure Table Storage initialized — events table '{Table}'", _eventsTableClient.Name);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to ensure events table '{Table}' exists; will retry on next call", _eventsTableClient.Name);
             throw;
         }
     }
@@ -209,54 +228,61 @@ public class ClientTableService
 
     public async Task AppendEventAsync(string partitionKey, string type, string summary, string detail = "")
     {
-        EnsureTableExists();
-        var cutoff = DateTime.UtcNow.AddDays(-30);
-
-        List<EventRecord> events;
-        EventEntity entity;
-
-        try
+        EnsureEventsTableExists();
+        var now = DateTime.UtcNow;
+        var entity = new EventEntity
         {
-            var response = await _tableClient.GetEntityAsync<EventEntity>(partitionKey, "all_events");
-            entity = response.Value;
-            events = JsonSerializer.Deserialize<List<EventRecord>>(entity.EventsJson) ?? new List<EventRecord>();
-        }
-        catch (Azure.RequestFailedException ex) when (ex.Status == 404)
-        {
-            entity = new EventEntity
-            {
-                PartitionKey = partitionKey,
-                RowKey = "all_events"
-            };
-            events = new List<EventRecord>();
-        }
-
-        events.RemoveAll(e => e.Timestamp < cutoff);
-
-        events.Add(new EventRecord
-        {
-            Timestamp = DateTime.UtcNow,
-            Type = type,
-            Summary = summary,
-            Detail = detail
-        });
-
-        entity.EventsJson = JsonSerializer.Serialize(events);
-        await _tableClient.UpsertEntityAsync(entity);
+            PartitionKey = partitionKey,
+            RowKey = EventEntity.BuildRowKey(type, now),
+            Value = JsonSerializer.Serialize(new { summary, detail })
+        };
+        await _eventsTableClient.AddEntityAsync(entity);
     }
 
     public async Task<List<EventRecord>> GetEventsAsync(string partitionKey)
     {
-        EnsureTableExists();
-        try
+        EnsureEventsTableExists();
+        var events = new List<EventRecord>();
+
+        await foreach (var entity in _eventsTableClient.QueryAsync<EventEntity>(
+            e => e.PartitionKey == partitionKey))
         {
-            var response = await _tableClient.GetEntityAsync<EventEntity>(partitionKey, "all_events");
-            return JsonSerializer.Deserialize<List<EventRecord>>(response.Value.EventsJson) ?? new List<EventRecord>();
+            var rowKey = entity.RowKey;
+            var lastUnderscore = rowKey.LastIndexOf('_');
+            var type = lastUnderscore > 0 ? rowKey[..lastUnderscore] : rowKey;
+            var timestampStr = lastUnderscore > 0 ? rowKey[(lastUnderscore + 1)..] : "";
+
+            DateTime timestamp;
+            if (!DateTime.TryParseExact(timestampStr, "yyyyMMddHHmmssfff",
+                    System.Globalization.CultureInfo.InvariantCulture,
+                    System.Globalization.DateTimeStyles.AssumeUniversal | System.Globalization.DateTimeStyles.AdjustToUniversal,
+                    out timestamp))
+            {
+                timestamp = entity.Timestamp?.UtcDateTime ?? DateTime.UtcNow;
+            }
+
+            var summary = "";
+            var detail = "";
+            try
+            {
+                using var doc = JsonDocument.Parse(entity.Value);
+                if (doc.RootElement.TryGetProperty("summary", out var summaryEl))
+                    summary = summaryEl.GetString() ?? "";
+                if (doc.RootElement.TryGetProperty("detail", out var detailEl))
+                    detail = detailEl.GetString() ?? "";
+            }
+            catch (JsonException) { }
+
+            events.Add(new EventRecord
+            {
+                Timestamp = timestamp,
+                Type = type,
+                Summary = summary,
+                Detail = detail
+            });
         }
-        catch (Azure.RequestFailedException ex) when (ex.Status == 404)
-        {
-            return new List<EventRecord>();
-        }
+
+        return events;
     }
 
     public async Task<int> GetNextUserIdAsync()

@@ -41,6 +41,7 @@ builder.Services.AddSingleton(sp => new ClientTableService(
     "Users",
     "ControlCenter",
     "DataItem",
+    "Events",
     sp.GetRequiredService<ILogger<ClientTableService>>()));
 
 var blobSection = builder.Configuration.GetSection("AzureBlobStorage");
@@ -88,6 +89,8 @@ try
     await controlCenterTable.CreateIfNotExistsAsync();
     var dataItemTable = tableServiceClient.GetTableClient("DataItem");
     await dataItemTable.CreateIfNotExistsAsync();
+    var eventsTable = tableServiceClient.GetTableClient("Events");
+    await eventsTable.CreateIfNotExistsAsync();
 }
 catch (Azure.RequestFailedException ex)
 {

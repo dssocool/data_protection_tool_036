@@ -6,11 +6,14 @@ namespace DataProtectionTool.ControlCenter.Models;
 public class EventEntity : ITableEntity
 {
     public string PartitionKey { get; set; } = "";
-    public string RowKey { get; set; } = "all_events";
+    public string RowKey { get; set; } = "";
     public DateTimeOffset? Timestamp { get; set; }
     public ETag ETag { get; set; }
 
-    public string EventsJson { get; set; } = "[]";
+    public string Value { get; set; } = "{}";
+
+    public static string BuildRowKey(string eventType, DateTime timestamp)
+        => $"{eventType}_{timestamp:yyyyMMddHHmmssfff}";
 }
 
 public class EventRecord
