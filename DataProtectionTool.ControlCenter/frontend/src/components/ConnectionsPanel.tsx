@@ -350,55 +350,63 @@ export default function ConnectionsPanel({
               </div>
             ) : (
               <>
-                <div className="conn-context-menu-group">Sample</div>
-                <div
-                  className="conn-context-menu-item"
-                  onClick={() => {
-                    setContextMenu(null);
-                    onReloadPreview();
-                  }}
-                >
-                  Sample Data
-                </div>
-                <div
-                  className="conn-context-menu-item conn-context-menu-item-disabled"
-                  title="Coming soon"
-                >
-                  Sample from Query
-                </div>
-                <div className="conn-context-menu-group">Data Protection</div>
-                <div
-                  className="conn-context-menu-item"
-                  onClick={() => {
-                    const { rowKey, schema, tableName } = contextMenu;
-                    setContextMenu(null);
-                    onDryRun(rowKey, schema, tableName);
-                  }}
-                >
-                  Preview
-                  <span className="conn-context-menu-subtitle">View sample output without saving changes</span>
-                </div>
-                {(() => {
-                  const t = connectionTables[contextMenu.rowKey]?.find(
-                    (ti) => ti.schema === contextMenu.schema && ti.name === contextMenu.tableName
-                  );
-                  const hasFormat = !!t?.fileFormatId;
-                  return (
+                <div className="conn-context-menu-parent">
+                  Sample
+                  <div className="conn-context-submenu">
                     <div
-                      className={`conn-context-menu-item${hasFormat ? "" : " conn-context-menu-item-disabled"}`}
-                      title={hasFormat ? undefined : "You must run Preview first."}
+                      className="conn-context-menu-item"
                       onClick={() => {
-                        if (!hasFormat) return;
-                        const { rowKey, schema, tableName } = contextMenu;
                         setContextMenu(null);
-                        onFullRun(rowKey, schema, tableName);
+                        onReloadPreview();
                       }}
                     >
-                      Run
-                      <span className="conn-context-menu-subtitle">Apply to full dataset</span>
+                      Sample Data
                     </div>
-                  );
-                })()}
+                    <div
+                      className="conn-context-menu-item conn-context-menu-item-disabled"
+                      title="Coming soon"
+                    >
+                      Sample from Query
+                    </div>
+                  </div>
+                </div>
+                <div className="conn-context-menu-parent">
+                  Data Protection
+                  <div className="conn-context-submenu">
+                    <div
+                      className="conn-context-menu-item"
+                      onClick={() => {
+                        const { rowKey, schema, tableName } = contextMenu;
+                        setContextMenu(null);
+                        onDryRun(rowKey, schema, tableName);
+                      }}
+                    >
+                      Preview
+                      <span className="conn-context-menu-subtitle">View sample output without saving changes</span>
+                    </div>
+                    {(() => {
+                      const t = connectionTables[contextMenu.rowKey]?.find(
+                        (ti) => ti.schema === contextMenu.schema && ti.name === contextMenu.tableName
+                      );
+                      const hasFormat = !!t?.fileFormatId;
+                      return (
+                        <div
+                          className={`conn-context-menu-item${hasFormat ? "" : " conn-context-menu-item-disabled"}`}
+                          title={hasFormat ? undefined : "You must run Preview first."}
+                          onClick={() => {
+                            if (!hasFormat) return;
+                            const { rowKey, schema, tableName } = contextMenu;
+                            setContextMenu(null);
+                            onFullRun(rowKey, schema, tableName);
+                          }}
+                        >
+                          Run
+                          <span className="conn-context-menu-subtitle">Apply to full dataset</span>
+                        </div>
+                      );
+                    })()}
+                  </div>
+                </div>
               </>
             )}
           </>
