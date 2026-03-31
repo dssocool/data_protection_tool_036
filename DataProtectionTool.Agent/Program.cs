@@ -164,6 +164,10 @@ while (!cts.Token.IsCancellationRequested)
                 {
                     _ = HandleGetColumnRulesAsync(call, agentId, oid, tid, response.Payload, engineMetadataStore);
                 }
+                else if (response.Type == "get_engine_metadata")
+                {
+                    _ = HandleGetEngineMetadataAsync(call, agentId, oid, tid, response.Payload, engineMetadataStore);
+                }
                 else if (response.Type == "http_request")
                 {
                     _ = HandleHttpRequestAsync(call, agentId, oid, tid, response.Payload);
@@ -1083,6 +1087,67 @@ static async Task HandleGetColumnRulesAsync(
         catch (Exception writeEx)
         {
             Console.Error.WriteLine($"[Agent] Failed to send column rules error: {writeEx.Message}");
+        }
+    }
+}
+
+static async Task HandleGetEngineMetadataAsync(
+    AsyncDuplexStreamingCall<AgentMessage, ServerMessage> call,
+    string agentId, string oid, string tid, string payload,
+    EngineMetadataStore metadataStore)
+{
+    string correlationId = "";
+    try
+    {
+        using var envelope = JsonDocument.Parse(payload);
+        correlationId = envelope.RootElement.GetProperty("correlationId").GetString() ?? "";
+
+        var resultPayload = JsonSerializer.Serialize(new
+        {
+            correlationId,
+            success = true,
+            algorithms = metadataStore.Algorithms?.Select(e => JsonSerializer.Deserialize<object>(e.GetRawText())).ToList() ?? new List<object?>(),
+            domains = metadataStore.Domains?.Select(e => JsonSerializer.Deserialize<object>(e.GetRawText())).ToList() ?? new List<object?>(),
+            frameworks = metadataStore.Frameworks?.Select(e => JsonSerializer.Deserialize<object>(e.GetRawText())).ToList() ?? new List<object?>()
+        });
+
+        await call.RequestStream.WriteAsync(new AgentMessage
+        {
+            AgentId = agentId,
+            Type = "get_engine_metadata_result",
+            Payload = resultPayload,
+            Oid = oid,
+            Tid = tid
+        });
+
+        Console.WriteLine($"[Agent] Engine metadata returned: {metadataStore.Algorithms?.Count ?? 0} algorithms, " +
+            $"{metadataStore.Domains?.Count ?? 0} domains, {metadataStore.Frameworks?.Count ?? 0} frameworks");
+    }
+    catch (Exception ex)
+    {
+        Console.Error.WriteLine($"[Agent] Engine metadata fetch failed: {ex.Message}");
+
+        var errorPayload = JsonSerializer.Serialize(new
+        {
+            correlationId,
+            success = false,
+            message = $"Engine metadata fetch failed: {ex.Message}"
+        });
+
+        try
+        {
+            await call.RequestStream.WriteAsync(new AgentMessage
+            {
+                AgentId = agentId,
+                Type = "get_engine_metadata_result",
+                Payload = errorPayload,
+                Oid = oid,
+                Tid = tid
+            });
+        }
+        catch (Exception writeEx)
+        {
+            Console.Error.WriteLine($"[Agent] Failed to send engine metadata error: {writeEx.Message}");
         }
     }
 }

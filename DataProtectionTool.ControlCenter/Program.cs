@@ -1565,6 +1565,48 @@ app.MapGet("/api/agents/{path}/column-rules", async (string path, string? fileFo
     }
 });
 
+app.MapGet("/api/agents/{path}/engine-metadata", async (string path, AgentRegistry registry) =>
+{
+    if (!registry.TryGetConnection(path, out var connection) || connection is null)
+        return Results.NotFound(new { error = "Agent not found or not connected." });
+
+    try
+    {
+        var result = await connection.SendCommandAsync("get_engine_metadata", "{}", TimeSpan.FromSeconds(30));
+        using var doc = JsonDocument.Parse(result);
+
+        var success = doc.RootElement.TryGetProperty("success", out var successEl) && successEl.GetBoolean();
+        if (!success)
+        {
+            var msg = doc.RootElement.TryGetProperty("message", out var msgEl) ? msgEl.GetString() ?? "Unknown error" : "Unknown error";
+            return Results.Ok(new { success = false, message = msg });
+        }
+
+        object[] ExtractArray(string propName)
+        {
+            if (doc.RootElement.TryGetProperty(propName, out var el) && el.ValueKind == JsonValueKind.Array)
+                return el.EnumerateArray().Select(e => JsonSerializer.Deserialize<object>(e.GetRawText())!).ToArray();
+            return Array.Empty<object>();
+        }
+
+        return Results.Ok(new
+        {
+            success = true,
+            algorithms = ExtractArray("algorithms"),
+            domains = ExtractArray("domains"),
+            frameworks = ExtractArray("frameworks")
+        });
+    }
+    catch (TimeoutException)
+    {
+        return Results.Ok(new { success = false, message = "Agent did not respond within 30 seconds." });
+    }
+    catch (Exception ex)
+    {
+        return Results.Ok(new { success = false, message = $"Engine metadata fetch error: {ex.Message}" });
+    }
+});
+
 app.MapGet("/api/agents/{path}/events", async (string path, AgentRegistry registry, ClientTableService clientTableService) =>
 {
     if (!registry.TryGet(path, out var info) || info is null)

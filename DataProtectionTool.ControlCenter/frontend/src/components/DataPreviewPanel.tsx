@@ -33,6 +33,9 @@ interface DataPreviewPanelProps {
   columnRuleDomains: Record<string, unknown>[];
   columnRuleFrameworks: Record<string, unknown>[];
   columnRulesLoading: boolean;
+  allDomains: Record<string, unknown>[];
+  allAlgorithms: Record<string, unknown>[];
+  allFrameworks: Record<string, unknown>[];
   onTabChange: (tab: string) => void;
   onTabClose: (tab: string) => void;
   onDiffSelect: (leftTab: string, rightTab: string) => void;
@@ -133,6 +136,9 @@ export default function DataPreviewPanel({
   columnRuleDomains,
   columnRuleFrameworks,
   columnRulesLoading,
+  allDomains,
+  allAlgorithms,
+  allFrameworks,
   onTabChange,
   onTabClose,
   onDiffSelect,
@@ -160,6 +166,8 @@ export default function DataPreviewPanel({
   const columnRulesScrollRef = useRef<HTMLDivElement>(null);
   const [colWidths, setColWidths] = useState<{ left: number; width: number }[]>([]);
   const [selectedRule, setSelectedRule] = useState<Record<string, unknown> | null>(null);
+  const [modalDomainName, setModalDomainName] = useState("");
+  const [modalAlgorithmName, setModalAlgorithmName] = useState("");
 
   const handleDataScroll = useCallback((e: React.UIEvent<HTMLDivElement>) => {
     if (columnRulesScrollRef.current) {
@@ -372,7 +380,12 @@ export default function DataPreviewPanel({
                     ) : rule ? (
                       <button
                         className="column-rule-btn"
-                        onClick={() => setSelectedRule(rule)}
+                        onClick={() => {
+                          setSelectedRule(rule);
+                          const isMasked = rule.isMasked !== false;
+                          setModalDomainName(isMasked && typeof rule.domainName === "string" ? rule.domainName : "");
+                          setModalAlgorithmName(isMasked && typeof rule.algorithmName === "string" ? rule.algorithmName : "");
+                        }}
                         title={`View rule for ${header}`}
                       >
                         {header}
@@ -386,12 +399,16 @@ export default function DataPreviewPanel({
         </div>
       )}
       {selectedRule && (() => {
-        const algName = typeof selectedRule.algorithmName === "string" ? selectedRule.algorithmName : "";
-        const domName = typeof selectedRule.domainName === "string" ? selectedRule.domainName : "";
-        const matchedAlg = algName ? columnRuleAlgorithms.find(a => a.algorithmName === algName) : undefined;
-        const matchedDom = domName ? columnRuleDomains.find(d => d.domainName === domName) : undefined;
+        const isMasked = selectedRule.isMasked !== false;
+        const matchedAlg = isMasked && modalAlgorithmName
+          ? allAlgorithms.find(a => a.algorithmName === modalAlgorithmName)
+          : undefined;
         const fwId = matchedAlg && matchedAlg.frameworkId != null ? String(matchedAlg.frameworkId) : "";
-        const matchedFw = fwId ? columnRuleFrameworks.find(f => String(f.frameworkId) === fwId) : undefined;
+        const matchedFw = fwId
+          ? allFrameworks.find(f => String(f.frameworkId) === fwId)
+          : undefined;
+
+        const str = (val: unknown) => (val != null ? String(val) : "");
 
         return (
           <div className="column-rule-modal-overlay" onClick={() => setSelectedRule(null)}>
@@ -411,34 +428,75 @@ export default function DataPreviewPanel({
                 </button>
               </div>
               <div className="column-rule-modal-body">
-                <div className="column-rule-section-title">Rule</div>
-                <pre className="column-rule-json">
-                  {JSON.stringify(selectedRule, null, 2)}
-                </pre>
-                {matchedAlg && (
-                  <>
-                    <div className="column-rule-section-title">Algorithm</div>
-                    <pre className="column-rule-json">
-                      {JSON.stringify(matchedAlg, null, 2)}
-                    </pre>
-                  </>
-                )}
-                {matchedDom && (
-                  <>
-                    <div className="column-rule-section-title">Domain</div>
-                    <pre className="column-rule-json">
-                      {JSON.stringify(matchedDom, null, 2)}
-                    </pre>
-                  </>
-                )}
-                {matchedFw && (
-                  <>
-                    <div className="column-rule-section-title">Framework</div>
-                    <pre className="column-rule-json">
-                      {JSON.stringify(matchedFw, null, 2)}
-                    </pre>
-                  </>
-                )}
+                <div className="column-rule-row">
+                  <span className="column-rule-label">Domain Name</span>
+                  <select
+                    className="column-rule-select"
+                    value={isMasked ? modalDomainName : ""}
+                    disabled={!isMasked}
+                    onChange={(e) => {
+                      const newDomain = e.target.value;
+                      setModalDomainName(newDomain);
+                      const dom = allDomains.find(d => d.domainName === newDomain);
+                      const defaultAlg = dom && typeof dom.defaultAlgorithmCode === "string"
+                        ? dom.defaultAlgorithmCode : "";
+                      setModalAlgorithmName(defaultAlg);
+                    }}
+                  >
+                    <option value="">-- Select --</option>
+                    {allDomains.map((d, i) => (
+                      <option key={i} value={String(d.domainName ?? "")}>
+                        {String(d.domainName ?? "")}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div className="column-rule-row">
+                  <span className="column-rule-label">Algorithm Name</span>
+                  <select
+                    className="column-rule-select"
+                    value={isMasked ? modalAlgorithmName : ""}
+                    disabled={!isMasked}
+                    onChange={(e) => setModalAlgorithmName(e.target.value)}
+                  >
+                    <option value="">-- Select --</option>
+                    {allAlgorithms.map((a, i) => (
+                      <option key={i} value={String(a.algorithmName ?? "")}>
+                        {String(a.algorithmName ?? "")}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div className="column-rule-row">
+                  <span className="column-rule-label">Legacy Name</span>
+                  <span className="column-rule-readonly">
+                    {isMasked && matchedAlg ? str(matchedAlg.legacyName) : ""}
+                  </span>
+                </div>
+                <div className="column-rule-row">
+                  <span className="column-rule-label">Algorithm Description</span>
+                  <span className="column-rule-readonly">
+                    {isMasked && matchedAlg ? str(matchedAlg.description) : ""}
+                  </span>
+                </div>
+                <div className="column-rule-row">
+                  <span className="column-rule-label">Type</span>
+                  <span className="column-rule-readonly">
+                    {isMasked && matchedAlg ? str(matchedAlg.maskType) : ""}
+                  </span>
+                </div>
+                <div className="column-rule-row">
+                  <span className="column-rule-label">Framework Name</span>
+                  <span className="column-rule-readonly">
+                    {isMasked && matchedFw ? str(matchedFw.frameworkName) : ""}
+                  </span>
+                </div>
+                <div className="column-rule-row">
+                  <span className="column-rule-label">Framework Description</span>
+                  <span className="column-rule-readonly">
+                    {isMasked && matchedFw ? str(matchedFw.description) : ""}
+                  </span>
+                </div>
               </div>
             </div>
           </div>

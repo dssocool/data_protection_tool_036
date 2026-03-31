@@ -70,6 +70,9 @@ export default function App() {
   const [columnRuleDomains, setColumnRuleDomains] = useState<Record<string, unknown>[]>([]);
   const [columnRuleFrameworks, setColumnRuleFrameworks] = useState<Record<string, unknown>[]>([]);
   const [columnRulesLoading, setColumnRulesLoading] = useState(false);
+  const [allDomains, setAllDomains] = useState<Record<string, unknown>[]>([]);
+  const [allAlgorithms, setAllAlgorithms] = useState<Record<string, unknown>[]>([]);
+  const [allFrameworks, setAllFrameworks] = useState<Record<string, unknown>[]>([]);
   const [dryRunningTables, setDryRunningTables] = useState<Set<string>>(new Set());
   const eventsTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const previewCacheRef = useRef<Map<string, string[]>>(new Map());
@@ -137,6 +140,8 @@ export default function App() {
         if (data) setUserUniqueId(data.uniqueId ?? null);
       })
       .catch(() => {});
+
+    fetchEngineMetadata(agentPath);
   }, []);
 
   function handleSqlServerConnection() {
@@ -354,6 +359,35 @@ export default function App() {
     setColumnRuleDomains([]);
     setColumnRuleFrameworks([]);
     return [];
+  }
+
+  async function fetchEngineMetadata(agentPath: string) {
+    try {
+      const res = await fetch(`/api/agents/${agentPath}/engine-metadata`);
+      if (res.ok) {
+        const result = await res.json();
+        if (result.success) {
+          const parseArray = (arr: unknown): Record<string, unknown>[] => {
+            if (!Array.isArray(arr)) return [];
+            return arr.map((item: unknown) => {
+              if (typeof item === "string") {
+                try { return JSON.parse(item); } catch { return { raw: item }; }
+              }
+              return item as Record<string, unknown>;
+            });
+          };
+          setAllDomains(parseArray(result.domains));
+          setAllAlgorithms(parseArray(result.algorithms));
+          setAllFrameworks(parseArray(result.frameworks));
+          return;
+        }
+      }
+    } catch {
+      // best-effort
+    }
+    setAllDomains([]);
+    setAllAlgorithms([]);
+    setAllFrameworks([]);
   }
 
   async function handleTableClick(rowKey: string, schema: string, tableName: string) {
@@ -966,6 +1000,9 @@ export default function App() {
             columnRuleDomains={columnRuleDomains}
             columnRuleFrameworks={columnRuleFrameworks}
             columnRulesLoading={columnRulesLoading}
+            allDomains={allDomains}
+            allAlgorithms={allAlgorithms}
+            allFrameworks={allFrameworks}
             onTabChange={setActivePreviewTab}
             onTabClose={(tab) => {
               if (diffTab && tab === diffTab.name) {
