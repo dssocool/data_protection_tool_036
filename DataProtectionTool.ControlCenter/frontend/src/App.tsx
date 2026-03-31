@@ -803,7 +803,11 @@ export default function App() {
         const response = await fetch(`/api/agents/${agentPath}/dry-run`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ rowKey, schema, tableName, previewBlobFilenames: filenames }),
+          body: JSON.stringify({
+            rowKey, schema, tableName, previewBlobFilenames: filenames,
+            previewHeaders: previewData?.headers ?? [],
+            previewColumnTypes: previewData?.columnTypes ?? [],
+          }),
         });
 
         if (!response.ok) {
@@ -848,10 +852,14 @@ export default function App() {
             } else if (eventType === "complete") {
               completed = true;
               let maskedFilenames = filenames;
+              let completedFileFormatId = "";
               try {
                 const completeData = JSON.parse(eventData);
                 if (Array.isArray(completeData.maskedFilenames) && completeData.maskedFilenames.length > 0) {
                   maskedFilenames = completeData.maskedFilenames;
+                }
+                if (typeof completeData.fileFormatId === "string") {
+                  completedFileFormatId = completeData.fileFormatId;
                 }
               } catch { /* use original filenames as fallback */ }
               const mergeRes = await fetch("/api/blob/preview-merge", {
@@ -889,6 +897,10 @@ export default function App() {
                   if (finalCached?.originalData) {
                     setOriginalData(finalCached.originalData);
                   }
+                }
+
+                if (completedFileFormatId) {
+                  fetchColumnRules(agentPath, completedFileFormatId);
                 }
               } else {
                 const latestCached = tableCacheRef.current.get(key);

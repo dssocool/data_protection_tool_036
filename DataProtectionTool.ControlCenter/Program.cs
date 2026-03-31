@@ -902,6 +902,26 @@ app.MapPost("/api/agents/{path}/dry-run", async (string path, HttpContext httpCo
             }
         }
 
+        var previewHeaders = new List<string>();
+        if (root.TryGetProperty("previewHeaders", out var headersEl) && headersEl.ValueKind == JsonValueKind.Array)
+        {
+            foreach (var el in headersEl.EnumerateArray())
+            {
+                var h = el.GetString();
+                if (h != null) previewHeaders.Add(h);
+            }
+        }
+
+        var previewColumnTypes = new List<string>();
+        if (root.TryGetProperty("previewColumnTypes", out var colTypesEl) && colTypesEl.ValueKind == JsonValueKind.Array)
+        {
+            foreach (var el in colTypesEl.EnumerateArray())
+            {
+                var ct = el.GetString();
+                if (ct != null) previewColumnTypes.Add(ct);
+            }
+        }
+
         if (previewFilenames.Count == 0)
         {
             await WriteSseError("No preview files available. Please preview the table first.");
@@ -1164,6 +1184,89 @@ app.MapPost("/api/agents/{path}/dry-run", async (string path, HttpContext httpCo
         {
             await WriteSseError($"Profile job did not succeed. Final status: {profileStatus}");
             return;
+        }
+
+        // Step 7.5: Check column rules for type mismatches (numeric SQL types mapped to STRING algorithms)
+        if (previewHeaders.Count > 0 && previewColumnTypes.Count == previewHeaders.Count)
+        {
+            await WriteSseEvent("status", "Checking column rules for type mismatches...");
+
+            var numericSqlTypes = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+            {
+                "int", "bigint", "smallint", "tinyint", "float", "real",
+                "decimal", "numeric", "money", "smallmoney", "bit"
+            };
+
+            var sqlTypeByColumn = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            for (var i = 0; i < previewHeaders.Count; i++)
+                sqlTypeByColumn[previewHeaders[i]] = previewColumnTypes[i];
+
+            var columnRulesPayload = JsonSerializer.Serialize(new
+            {
+                fileFormatId,
+                engineUrl = dataEngineConfig.EngineUrl,
+                authToken = dataEngineConfig.AuthorizationToken
+            });
+
+            try
+            {
+                var columnRulesResult = await connection.SendCommandAsync("get_column_rules", columnRulesPayload, TimeSpan.FromSeconds(120));
+                using var crDoc = JsonDocument.Parse(columnRulesResult);
+                var crSuccess = crDoc.RootElement.TryGetProperty("success", out var crSuccessEl) && crSuccessEl.GetBoolean();
+
+                if (crSuccess
+                    && crDoc.RootElement.TryGetProperty("responseList", out var crListEl) && crListEl.ValueKind == JsonValueKind.Array
+                    && crDoc.RootElement.TryGetProperty("algorithms", out var crAlgsEl) && crAlgsEl.ValueKind == JsonValueKind.Array)
+                {
+                    var algMaskTypes = new Dictionary<string, string>();
+                    foreach (var alg in crAlgsEl.EnumerateArray())
+                    {
+                        var aName = alg.TryGetProperty("algorithmName", out var anEl) ? anEl.GetString() ?? "" : "";
+                        var aMaskType = alg.TryGetProperty("maskType", out var mtEl) ? mtEl.GetString() ?? "" : "";
+                        if (!string.IsNullOrEmpty(aName))
+                            algMaskTypes[aName] = aMaskType;
+                    }
+
+                    var fixedCount = 0;
+                    foreach (var rule in crListEl.EnumerateArray())
+                    {
+                        var fieldName = rule.TryGetProperty("fieldName", out var fnEl) ? fnEl.GetString() ?? "" : "";
+                        var algName = rule.TryGetProperty("algorithmName", out var anEl) ? anEl.GetString() ?? "" : "";
+                        var metadataId = rule.TryGetProperty("fileFieldMetadataId", out var idEl) ? idEl.ToString() : "";
+                        var isMasked = !rule.TryGetProperty("isMasked", out var imEl) || imEl.ValueKind != JsonValueKind.False;
+
+                        if (string.IsNullOrEmpty(fieldName) || string.IsNullOrEmpty(algName)
+                            || string.IsNullOrEmpty(metadataId) || !isMasked)
+                            continue;
+
+                        if (!sqlTypeByColumn.TryGetValue(fieldName, out var sqlType))
+                            continue;
+
+                        if (!numericSqlTypes.Contains(sqlType))
+                            continue;
+
+                        if (!algMaskTypes.TryGetValue(algName, out var maskType) || maskType != "STRING")
+                            continue;
+
+                        await WriteSseEvent("status", $"Fixing type mismatch: {fieldName} ({sqlType}) mapped to STRING algorithm...");
+                        using var fixResp = await RelayEngineHttpAsync("PUT", $"file-field-metadata/{metadataId}", new
+                        {
+                            isMasked = false,
+                            isProfilerWritable = false
+                        });
+                        fixedCount++;
+                    }
+
+                    if (fixedCount > 0)
+                        await WriteSseEvent("status", $"Fixed {fixedCount} type mismatch(es).");
+                    else
+                        await WriteSseEvent("status", "No type mismatches found.");
+                }
+            }
+            catch (Exception ex)
+            {
+                await WriteSseEvent("status", $"Warning: Could not check type mismatches: {ex.Message}");
+            }
         }
 
         // Step 8: Run the masking job
