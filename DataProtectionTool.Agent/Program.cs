@@ -192,6 +192,10 @@ while (!cts.Token.IsCancellationRequested)
                 {
                     _ = HandleExportTableAsync(call, agentId, oid, tid, response.Payload, connectionManager, sasTokenManager);
                 }
+                else if (response.Type == "load_masked_to_table")
+                {
+                    _ = HandleLoadMaskedToTableAsync(call, agentId, oid, tid, response.Payload, connectionManager, sasTokenManager);
+                }
                 else if (response.Type == "connection_details_result")
                 {
                     connectionManager.HandleConnectionDetailsResponse(response.Payload);
@@ -593,6 +597,178 @@ static async Task HandleExportTableAsync(
             {
                 AgentId = agentId,
                 Type = "export_table_result",
+                Payload = resultPayload,
+                Oid = oid,
+                Tid = tid
+            });
+        }
+        catch (Exception writeEx)
+        {
+            Console.Error.WriteLine($"[Agent] Failed to send error result: {writeEx.Message}");
+        }
+    }
+}
+
+static async Task HandleLoadMaskedToTableAsync(
+    AsyncDuplexStreamingCall<AgentMessage, ServerMessage> call,
+    string agentId, string oid, string tid, string payload,
+    SqlConnectionManager connManager, SasTokenManager sasManager)
+{
+    string correlationId = "";
+    try
+    {
+        using var envelope = JsonDocument.Parse(payload);
+        correlationId = envelope.RootElement.GetProperty("correlationId").GetString() ?? "";
+        var dataJson = envelope.RootElement.GetProperty("data").GetString() ?? "{}";
+
+        using var paramsDoc = JsonDocument.Parse(dataJson);
+        var destRowKey = paramsDoc.RootElement.GetProperty("destRowKey").GetString() ?? "";
+        var destSchema = paramsDoc.RootElement.GetProperty("destSchema").GetString() ?? "";
+        var tableName = paramsDoc.RootElement.GetProperty("tableName").GetString() ?? "";
+        var blobFilename = paramsDoc.RootElement.GetProperty("blobFilename").GetString() ?? "";
+        var createTable = paramsDoc.RootElement.TryGetProperty("createTable", out var ctEl) && ctEl.GetBoolean();
+        var truncate = paramsDoc.RootElement.TryGetProperty("truncate", out var trEl) && trEl.GetBoolean();
+
+        Console.WriteLine($"[Agent] Loading masked file {blobFilename} -> [{destSchema}].[{tableName}] (create={createTable}, truncate={truncate})");
+
+        var sasInfo = await sasManager.RequestSasTokenAsync(call, agentId, oid, tid);
+        var blobUri = new Uri($"{sasInfo.BlobEndpoint}/{sasInfo.Container}/{blobFilename}?{sasInfo.SasToken}");
+        var blobClient = new BlobClient(blobUri);
+
+        var tempFile = Path.GetTempFileName();
+        try
+        {
+            await blobClient.DownloadToAsync(tempFile);
+
+            using var parquetReader = await ParquetReader.CreateAsync(tempFile);
+
+            var parquetFields = parquetReader.Schema.GetDataFields();
+            var columnNames = parquetFields.Select(f => f.Name).ToArray();
+
+            string[] sqlTypes;
+            if (parquetReader.CustomMetadata != null &&
+                parquetReader.CustomMetadata.TryGetValue("sql_types", out var sqlTypesJson))
+            {
+                sqlTypes = JsonSerializer.Deserialize<string[]>(sqlTypesJson) ?? columnNames.Select(_ => "nvarchar(max)").ToArray();
+            }
+            else
+            {
+                sqlTypes = columnNames.Select(_ => "nvarchar(max)").ToArray();
+            }
+
+            await connManager.ExecuteWithRetryAsync(destRowKey, call, agentId, oid, tid,
+                async (sqlConn) =>
+                {
+                    if (createTable)
+                    {
+                        var columnDefs = new StringBuilder();
+                        for (int i = 0; i < columnNames.Length; i++)
+                        {
+                            if (i > 0) columnDefs.Append(", ");
+                            columnDefs.Append($"[{columnNames[i]}] {sqlTypes[i]} NULL");
+                        }
+
+                        var createSql = $@"IF OBJECT_ID('[{destSchema}].[{tableName}]', 'U') IS NULL
+                            CREATE TABLE [{destSchema}].[{tableName}] ({columnDefs})";
+                        await using var createCmd = sqlConn.CreateCommand();
+                        createCmd.CommandText = createSql;
+                        await createCmd.ExecuteNonQueryAsync();
+                        Console.WriteLine($"[Agent] Ensured table [{destSchema}].[{tableName}] exists.");
+                    }
+
+                    if (truncate)
+                    {
+                        try
+                        {
+                            await using var truncCmd = sqlConn.CreateCommand();
+                            truncCmd.CommandText = $"TRUNCATE TABLE [{destSchema}].[{tableName}]";
+                            await truncCmd.ExecuteNonQueryAsync();
+                        }
+                        catch (SqlException)
+                        {
+                            await using var delCmd = sqlConn.CreateCommand();
+                            delCmd.CommandText = $"DELETE FROM [{destSchema}].[{tableName}]";
+                            await delCmd.ExecuteNonQueryAsync();
+                        }
+                        Console.WriteLine($"[Agent] Truncated [{destSchema}].[{tableName}].");
+                    }
+
+                    using var bulkCopy = new SqlBulkCopy(sqlConn)
+                    {
+                        DestinationTableName = $"[{destSchema}].[{tableName}]",
+                        BulkCopyTimeout = 0
+                    };
+
+                    for (int i = 0; i < columnNames.Length; i++)
+                        bulkCopy.ColumnMappings.Add(columnNames[i], columnNames[i]);
+
+                    for (int g = 0; g < parquetReader.RowGroupCount; g++)
+                    {
+                        using var rowGroupReader = parquetReader.OpenRowGroupReader(g);
+                        var columns = new DataColumn[columnNames.Length];
+                        for (int i = 0; i < columnNames.Length; i++)
+                            columns[i] = await rowGroupReader.ReadColumnAsync(parquetFields[i]);
+
+                        var rowCount = columns[0].Data.Length;
+                        var dataTable = new System.Data.DataTable();
+                        for (int i = 0; i < columnNames.Length; i++)
+                            dataTable.Columns.Add(columnNames[i], typeof(string));
+
+                        for (int r = 0; r < rowCount; r++)
+                        {
+                            var row = dataTable.NewRow();
+                            for (int c = 0; c < columnNames.Length; c++)
+                            {
+                                var val = columns[c].Data.GetValue(r);
+                                row[c] = val ?? DBNull.Value;
+                            }
+                            dataTable.Rows.Add(row);
+                        }
+
+                        await bulkCopy.WriteToServerAsync(dataTable);
+                        Console.WriteLine($"[Agent] Bulk-copied {rowCount} row(s) from row group {g + 1}/{parquetReader.RowGroupCount}");
+                    }
+
+                    return true;
+                });
+
+            var resultPayload = JsonSerializer.Serialize(new
+            {
+                correlationId,
+                success = true
+            });
+
+            await call.RequestStream.WriteAsync(new AgentMessage
+            {
+                AgentId = agentId,
+                Type = "load_masked_to_table_result",
+                Payload = resultPayload,
+                Oid = oid,
+                Tid = tid
+            });
+        }
+        finally
+        {
+            try { File.Delete(tempFile); } catch { }
+        }
+    }
+    catch (Exception ex)
+    {
+        Console.Error.WriteLine($"[Agent] Load masked to table failed: {ex.Message}");
+
+        var resultPayload = JsonSerializer.Serialize(new
+        {
+            correlationId,
+            success = false,
+            message = $"Load masked to table failed: {ex.Message}"
+        });
+
+        try
+        {
+            await call.RequestStream.WriteAsync(new AgentMessage
+            {
+                AgentId = agentId,
+                Type = "load_masked_to_table_result",
                 Payload = resultPayload,
                 Oid = oid,
                 Tid = tid

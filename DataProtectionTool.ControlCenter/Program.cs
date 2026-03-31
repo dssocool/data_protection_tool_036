@@ -1357,17 +1357,40 @@ app.MapPost("/api/agents/{path}/dry-run", async (string path, HttpContext httpCo
     }
 });
 
-app.MapPost("/api/agents/{path}/full-run", async (string path, HttpRequest request, AgentRegistry registry,
+app.MapPost("/api/agents/{path}/full-run", async (string path, HttpContext httpContext, AgentRegistry registry,
     ClientTableService clientTableService, DataEngineConfig dataEngineConfig) =>
 {
+    var response = httpContext.Response;
+    var request = httpContext.Request;
+
+    async Task WriteSseEvent(string eventType, string data)
+    {
+        await response.WriteAsync($"event: {eventType}\ndata: {data}\n\n");
+        await response.Body.FlushAsync();
+    }
+
+    async Task WriteSseError(string message)
+    {
+        var json = JsonSerializer.Serialize(new { success = false, message });
+        await WriteSseEvent("error", json);
+    }
+
     if (!registry.TryGetConnection(path, out var connection) || connection is null)
-        return Results.NotFound(new { error = "Agent not found or not connected." });
+    {
+        response.StatusCode = 404;
+        await response.WriteAsJsonAsync(new { error = "Agent not found or not connected." });
+        return;
+    }
 
     var partitionKey = ClientEntity.BuildPartitionKey(connection.Info.Oid, connection.Info.Tid);
 
     string body;
     using (var reader = new StreamReader(request.Body))
         body = await reader.ReadToEndAsync();
+
+    response.ContentType = "text/event-stream";
+    response.Headers["Cache-Control"] = "no-cache";
+    response.Headers["Connection"] = "keep-alive";
 
     try
     {
@@ -1376,28 +1399,52 @@ app.MapPost("/api/agents/{path}/full-run", async (string path, HttpRequest reque
         var rowKey = root.GetProperty("rowKey").GetString() ?? "";
         var schema = root.GetProperty("schema").GetString() ?? "";
         var tableName = root.GetProperty("tableName").GetString() ?? "";
+        var destConnectionRowKey = root.TryGetProperty("destConnectionRowKey", out var dcrEl) ? dcrEl.GetString() ?? "" : "";
+        var destSchema = root.TryGetProperty("destSchema", out var dsEl) ? dsEl.GetString() ?? "" : "";
+
+        if (string.IsNullOrEmpty(destConnectionRowKey) || string.IsNullOrEmpty(destSchema))
+        {
+            await WriteSseError("Destination connection and schema are required.");
+            return;
+        }
 
         if (string.IsNullOrEmpty(dataEngineConfig.EngineUrl) || string.IsNullOrEmpty(dataEngineConfig.AuthorizationToken))
-            return Results.Ok(new { success = false, message = "Data engine is not configured. Set EngineUrl and AuthorizationToken in appsettings.json." });
+        {
+            await WriteSseError("Data engine is not configured. Set EngineUrl and AuthorizationToken in appsettings.json.");
+            return;
+        }
 
         if (string.IsNullOrEmpty(dataEngineConfig.ConnectorId))
-            return Results.Ok(new { success = false, message = "Data engine ConnectorId is not configured. Set ConnectorId in appsettings.json." });
+        {
+            await WriteSseError("Data engine ConnectorId is not configured. Set ConnectorId in appsettings.json.");
+            return;
+        }
 
         var connEntity = await clientTableService.GetConnectionByRowKeyAsync(partitionKey, rowKey);
         if (connEntity == null)
-            return Results.Ok(new { success = false, message = "Connection not found." });
+        {
+            await WriteSseError("Connection not found.");
+            return;
+        }
 
         var dataItem = await clientTableService.GetDataItemByTableAsync(
             partitionKey, connEntity.ServerName, connEntity.DatabaseName, schema, tableName);
 
         var fileFormatId = dataItem != null ? dataItem.FileFormatId : "";
         if (string.IsNullOrEmpty(fileFormatId))
-            return Results.Ok(new { success = false, message = "File format not found. Please run Dry Run first." });
+        {
+            await WriteSseError("File format not found. Please run Dry Run first.");
+            return;
+        }
 
         // Step 1: Export full table via agent
+        await WriteSseEvent("status", "Exporting full table...");
         var uniqueId = await clientTableService.GetUserIdAsync(partitionKey);
         if (string.IsNullOrWhiteSpace(uniqueId) || !IsDigitsOnly(uniqueId))
-            return Results.BadRequest(new { success = false, message = "User unique ID is missing." });
+        {
+            await WriteSseError("User unique ID is missing.");
+            return;
+        }
 
         var exportPayload = JsonSerializer.Serialize(new { rowKey, schema, tableName, uniqueId });
         var exportResult = await connection.SendCommandAsync("export_table", exportPayload, TimeSpan.FromSeconds(600));
@@ -1408,7 +1455,8 @@ app.MapPost("/api/agents/{path}/full-run", async (string path, HttpRequest reque
         if (!(exportRoot.TryGetProperty("success", out var exportSuccessEl) && exportSuccessEl.GetBoolean()))
         {
             var msg = exportRoot.TryGetProperty("message", out var mEl) ? mEl.GetString() : "Export failed.";
-            return Results.Ok(new { success = false, message = msg });
+            await WriteSseError(msg ?? "Export failed.");
+            return;
         }
 
         var exportFilenames = new List<string>();
@@ -1423,12 +1471,16 @@ app.MapPost("/api/agents/{path}/full-run", async (string path, HttpRequest reque
         }
 
         if (exportFilenames.Count == 0)
-            return Results.Ok(new { success = false, message = "Export produced no files." });
+        {
+            await WriteSseError("Export produced no files.");
+            return;
+        }
 
         _ = clientTableService.AppendEventAsync(partitionKey, "full_run",
             $"Full run: exported {exportFilenames.Count} file(s) for {schema}.{tableName}");
 
         // Step 2: Create file ruleset
+        await WriteSseEvent("status", "Creating file ruleset...");
         var fullRunUuid = Guid.NewGuid().ToString("N");
         var rulesetPayload = JsonSerializer.Serialize(new
         {
@@ -1446,7 +1498,8 @@ app.MapPost("/api/agents/{path}/full-run", async (string path, HttpRequest reque
         if (!(rulesetRoot.TryGetProperty("success", out var rulesetSuccessEl) && rulesetSuccessEl.GetBoolean()))
         {
             var rulesetMsg = rulesetRoot.TryGetProperty("message", out var rmEl) ? rmEl.GetString() : "File ruleset creation failed.";
-            return Results.Ok(new { success = false, message = rulesetMsg });
+            await WriteSseError(rulesetMsg ?? "File ruleset creation failed.");
+            return;
         }
 
         var fileRulesetId = rulesetRoot.TryGetProperty("fileRulesetId", out var friEl)
@@ -1454,8 +1507,11 @@ app.MapPost("/api/agents/{path}/full-run", async (string path, HttpRequest reque
 
         // Step 3: Create file metadata for each exported file
         var fileMetadataIds = new List<string>();
-        foreach (var exportFile in exportFilenames)
+        for (var fi = 0; fi < exportFilenames.Count; fi++)
         {
+            var exportFile = exportFilenames[fi];
+            await WriteSseEvent("status", $"Creating file metadata... ({fi + 1} of {exportFilenames.Count})");
+
             var metadataPayload = JsonSerializer.Serialize(new
             {
                 engineUrl = dataEngineConfig.EngineUrl,
@@ -1474,7 +1530,8 @@ app.MapPost("/api/agents/{path}/full-run", async (string path, HttpRequest reque
             if (!(metadataRoot.TryGetProperty("success", out var metaSuccessEl) && metaSuccessEl.GetBoolean()))
             {
                 var metaMsg = metadataRoot.TryGetProperty("message", out var mmEl) ? mmEl.GetString() : $"File metadata creation failed for {exportFile}.";
-                return Results.Ok(new { success = false, message = metaMsg });
+                await WriteSseError(metaMsg ?? $"File metadata creation failed for {exportFile}.");
+                return;
             }
 
             var fileMetadataId = metadataRoot.TryGetProperty("fileMetadataId", out var fmiEl)
@@ -1511,6 +1568,7 @@ app.MapPost("/api/agents/{path}/full-run", async (string path, HttpRequest reque
         }
 
         // Step 4: Create masking job (skip profiling)
+        await WriteSseEvent("status", "Creating masking job...");
         using var maskingJobResp = await RelayEngineHttpAsync("POST", "masking-jobs", new
         {
             jobName = $"fullrun_masking_{fullRunUuid}",
@@ -1521,14 +1579,19 @@ app.MapPost("/api/agents/{path}/full-run", async (string path, HttpRequest reque
         if (!(maskingJobResp.RootElement.TryGetProperty("success", out var mjSuccessEl) && mjSuccessEl.GetBoolean()))
         {
             var msg = maskingJobResp.RootElement.TryGetProperty("message", out var m) ? m.GetString() : "Masking job creation failed.";
-            return Results.Ok(new { success = false, message = msg });
+            await WriteSseError(msg ?? "Masking job creation failed.");
+            return;
         }
 
         var maskingJobId = ExtractBodyField(maskingJobResp, "maskingJobId");
         if (string.IsNullOrEmpty(maskingJobId))
-            return Results.Ok(new { success = false, message = "Masking job creation returned no maskingJobId." });
+        {
+            await WriteSseError("Masking job creation returned no maskingJobId.");
+            return;
+        }
 
         // Step 5: Execute masking job
+        await WriteSseEvent("status", "Executing masking job...");
         using var maskingExecResp = await RelayEngineHttpAsync("POST", "executions", new
         {
             jobId = int.Parse(maskingJobId)
@@ -1537,14 +1600,19 @@ app.MapPost("/api/agents/{path}/full-run", async (string path, HttpRequest reque
         if (!(maskingExecResp.RootElement.TryGetProperty("success", out var meSuccessEl) && meSuccessEl.GetBoolean()))
         {
             var msg = maskingExecResp.RootElement.TryGetProperty("message", out var m) ? m.GetString() : "Masking job execution failed to start.";
-            return Results.Ok(new { success = false, message = msg });
+            await WriteSseError(msg ?? "Masking job execution failed to start.");
+            return;
         }
 
         var maskingExecId = ExtractBodyField(maskingExecResp, "executionId");
         if (string.IsNullOrEmpty(maskingExecId))
-            return Results.Ok(new { success = false, message = "Masking job execution returned no executionId." });
+        {
+            await WriteSseError("Masking job execution returned no executionId.");
+            return;
+        }
 
         // Step 6: Poll masking job status
+        await WriteSseEvent("status", "Waiting for masking to complete...");
         var maskingStatus = "";
         for (var i = 0; i < 600; i++)
         {
@@ -1561,14 +1629,46 @@ app.MapPost("/api/agents/{path}/full-run", async (string path, HttpRequest reque
 
         if (maskingStatus is not ("SUCCEEDED" or "WARNING"))
         {
-            return Results.Ok(new { success = false, message = $"Masking job did not succeed. Final status: {maskingStatus}" });
+            await WriteSseError($"Masking job did not succeed. Final status: {maskingStatus}");
+            return;
+        }
+
+        // Step 7: Load masked data to destination table (one file at a time)
+        await WriteSseEvent("status", "Loading masked data to destination...");
+        for (var fi = 0; fi < exportFilenames.Count; fi++)
+        {
+            var exportFile = exportFilenames[fi];
+            await WriteSseEvent("status", $"Loading masked file to destination... ({fi + 1} of {exportFilenames.Count})");
+
+            var loadPayload = JsonSerializer.Serialize(new
+            {
+                destRowKey = destConnectionRowKey,
+                destSchema,
+                tableName,
+                blobFilename = exportFile,
+                createTable = fi == 0,
+                truncate = fi == 0
+            });
+
+            var loadResult = await connection.SendCommandAsync("load_masked_to_table", loadPayload, TimeSpan.FromSeconds(600));
+
+            using var loadDoc = JsonDocument.Parse(loadResult);
+            var loadRoot = loadDoc.RootElement;
+
+            if (!(loadRoot.TryGetProperty("success", out var loadSuccessEl) && loadSuccessEl.GetBoolean()))
+            {
+                var loadMsg = loadRoot.TryGetProperty("message", out var lmEl) ? lmEl.GetString() : $"Failed to load masked file {exportFile} to destination.";
+                await WriteSseError(loadMsg ?? $"Failed to load masked file {exportFile} to destination.");
+                return;
+            }
         }
 
         _ = clientTableService.AppendEventAsync(partitionKey, "full_run",
             $"Full run completed: fileFormatId={fileFormatId}, fileRulesetId={fileRulesetId}, " +
-            $"maskingJobId={maskingJobId} ({maskingStatus}), files={exportFilenames.Count}");
+            $"maskingJobId={maskingJobId} ({maskingStatus}), files={exportFilenames.Count}, " +
+            $"destination=[{destSchema}].{tableName}");
 
-        return Results.Ok(new
+        var completeJson = JsonSerializer.Serialize(new
         {
             success = true,
             fileFormatId,
@@ -1578,16 +1678,17 @@ app.MapPost("/api/agents/{path}/full-run", async (string path, HttpRequest reque
             maskingStatus,
             exportFilenames
         });
+        await WriteSseEvent("complete", completeJson);
     }
     catch (TimeoutException)
     {
         _ = clientTableService.AppendEventAsync(partitionKey, "full_run", "Full run: timeout", "Agent did not respond in time.");
-        return Results.Ok(new { success = false, message = "Agent did not respond in time." });
+        await WriteSseError("Agent did not respond in time.");
     }
     catch (Exception ex)
     {
         _ = clientTableService.AppendEventAsync(partitionKey, "full_run", $"Full run error: {ex.Message}");
-        return Results.Ok(new { success = false, message = $"Full run error: {ex.Message}" });
+        await WriteSseError($"Full run error: {ex.Message}");
     }
 });
 

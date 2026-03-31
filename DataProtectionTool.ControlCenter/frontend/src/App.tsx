@@ -973,36 +973,79 @@ export default function App() {
     const agentPath = getAgentPath();
     if (!agentPath || !fullRunTarget) return;
 
+    const { rowKey, schema, tableName } = fullRunTarget;
     setFullRunTarget(null);
     setPreviewLoading(true);
     setPreviewError(null);
 
     try {
-      const res = await fetch(`/api/agents/${agentPath}/full-run`, {
+      const response = await fetch(`/api/agents/${agentPath}/full-run`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          rowKey: fullRunTarget.rowKey,
-          schema: fullRunTarget.schema,
-          tableName: fullRunTarget.tableName,
+          rowKey,
+          schema,
+          tableName,
           destConnectionRowKey,
           destSchema,
         }),
       });
 
-      if (!res.ok) {
-        setPreviewError(`Full run request failed: server error ${res.status}`);
+      if (!response.ok) {
+        setPreviewError(`Full run request failed: server error ${response.status}`);
+        setPreviewLoading(false);
+        fetchEvents();
         return;
       }
 
-      const result = await res.json();
-      if (!result.success) {
-        setPreviewError(result.message ?? "Full run failed.");
+      const sseReader = response.body!.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      let completed = false;
+
+      while (true) {
+        const { done, value } = await sseReader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const parts = buffer.split("\n\n");
+        buffer = parts.pop() ?? "";
+
+        for (const part of parts) {
+          const lines = part.split("\n");
+          let eventType = "";
+          let eventData = "";
+          for (const line of lines) {
+            if (line.startsWith("event: ")) eventType = line.slice(7);
+            else if (line.startsWith("data: ")) eventData = line.slice(6);
+          }
+
+          if (eventType === "status") {
+            setPreviewError(eventData);
+          } else if (eventType === "complete") {
+            completed = true;
+            setPreviewError(null);
+            setPreviewLoading(false);
+          } else if (eventType === "error") {
+            let errMsg = "Full run failed.";
+            try {
+              const parsed = JSON.parse(eventData);
+              errMsg = parsed.message ?? errMsg;
+            } catch { /* use default */ }
+            setPreviewError(errMsg);
+            setPreviewLoading(false);
+          }
+        }
+      }
+
+      if (!completed) {
+        setPreviewError("Full run stream ended unexpectedly.");
+        setPreviewLoading(false);
       }
     } catch (e) {
       setPreviewError(`Full run failed: ${e instanceof Error ? e.message : String(e)}`);
-    } finally {
       setPreviewLoading(false);
+    } finally {
       fetchEvents();
     }
   }
