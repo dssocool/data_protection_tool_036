@@ -1888,7 +1888,12 @@ class EngineMetadataStore
             request.Headers.TryAddWithoutValidation("Authorization", authToken);
 
             using var response = await client.SendAsync(request);
-            response.EnsureSuccessStatusCode();
+            if (!response.IsSuccessStatusCode)
+            {
+                var errorBody = await response.Content.ReadAsStringAsync();
+                Console.Error.WriteLine($"[Agent] Engine metadata HTTP {(int)response.StatusCode} from {url}: {errorBody}");
+                response.EnsureSuccessStatusCode();
+            }
 
             var body = await response.Content.ReadAsStringAsync();
             using var doc = JsonDocument.Parse(body);
