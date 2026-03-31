@@ -14,6 +14,12 @@ export interface DryRunResult {
   inProgress?: boolean;
 }
 
+export interface SampleResult {
+  label: string;
+  data: PreviewData | null;
+  blobFilenames: string[];
+}
+
 interface DiffTab {
   name: string;
   leftTab: string;
@@ -23,8 +29,7 @@ interface DiffTab {
 interface DataPreviewPanelProps {
   loading: boolean;
   error: string | null;
-  data: PreviewData | null;
-  originalData: PreviewData | null;
+  samples: SampleResult[];
   dryRuns: DryRunResult[];
   activeTab: string;
   diffTab: DiffTab | null;
@@ -51,11 +56,11 @@ interface DataPreviewPanelProps {
 
 function resolveTabData(
   tab: string,
-  data: PreviewData | null,
-  originalData: PreviewData | null,
+  samples: SampleResult[],
   dryRuns: DryRunResult[],
 ): PreviewData | null {
-  if (tab === "Sample") return originalData ?? data;
+  const sample = samples.find((s) => s.label === tab);
+  if (sample) return sample.data;
   const dryRun = dryRuns.find((dr) => dr.label === tab);
   if (dryRun) return dryRun.data;
   return null;
@@ -256,8 +261,7 @@ const DiffView = forwardRef<HTMLTableElement, DiffViewProps>(
 export default function DataPreviewPanel({
   loading,
   error,
-  data,
-  originalData,
+  samples,
   dryRuns,
   activeTab,
   diffTab,
@@ -278,19 +282,19 @@ export default function DataPreviewPanel({
   panelLeft,
 }: DataPreviewPanelProps) {
   const dataTabs = useMemo(() => {
-    const list: string[] = ["Sample"];
+    const list: string[] = samples.map((s) => s.label);
     for (const dr of dryRuns) list.push(dr.label);
     return list;
-  }, [dryRuns]);
+  }, [samples, dryRuns]);
 
   const tabs = useMemo(() => {
-    const list: string[] = ["Sample"];
+    const list: string[] = samples.map((s) => s.label);
     for (const dr of dryRuns) list.push(dr.label);
     if (diffTab) list.push(diffTab.name);
     return list;
-  }, [dryRuns, diffTab]);
+  }, [samples, dryRuns, diffTab]);
 
-  const [leftDiffTab, setLeftDiffTab] = useState("Sample");
+  const [leftDiffTab, setLeftDiffTab] = useState("");
   const [rightDiffTab, setRightDiffTab] = useState("");
 
   const tabsContainerRef = useRef<HTMLDivElement>(null);
@@ -358,13 +362,13 @@ export default function DataPreviewPanel({
 
   const activeData = isDiffActive
     ? null
-    : resolveTabData(activeTab, data, originalData, dryRuns);
+    : resolveTabData(activeTab, samples, dryRuns);
 
   const leftData = isDiffActive
-    ? resolveTabData(diffTab!.leftTab, data, originalData, dryRuns)
+    ? resolveTabData(diffTab!.leftTab, samples, dryRuns)
     : null;
   const rightData = isDiffActive
-    ? resolveTabData(diffTab!.rightTab, data, originalData, dryRuns)
+    ? resolveTabData(diffTab!.rightTab, samples, dryRuns)
     : null;
 
   const currentHeaders = isDiffActive

@@ -7,7 +7,7 @@ import type { QuerySaveData, QueryValidateResult } from "./components/QueryModal
 import ConnectionsPanel from "./components/ConnectionsPanel";
 import type { SavedConnection, TableInfo, QueryInfo } from "./components/ConnectionsPanel";
 import DataPreviewPanel from "./components/DataPreviewPanel";
-import type { PreviewData, DryRunResult } from "./components/DataPreviewPanel";
+import type { PreviewData, DryRunResult, SampleResult } from "./components/DataPreviewPanel";
 import StatusBar from "./components/StatusBar";
 import type { StatusEvent } from "./components/StatusBar";
 import EventDialog from "./components/EventDialog";
@@ -17,12 +17,10 @@ import FlowsPanel from "./components/FlowsPanel";
 import "./App.css";
 
 interface TablePreviewCache {
-  previewData: PreviewData | null;
-  originalData: PreviewData | null;
+  samples: SampleResult[];
   dryRuns: DryRunResult[];
   activePreviewTab: string;
   diffTab: { name: string; leftTab: string; rightTab: string } | null;
-  previewBlobFilenames: string[];
   previewError: string | null;
   dryRunInProgress: boolean;
   columnRules: Record<string, unknown>[];
@@ -52,13 +50,11 @@ export default function App() {
   const [loadingTables, setLoadingTables] = useState<Set<string>>(new Set());
   const [selectedTable, setSelectedTable] = useState<{ rowKey: string; schema: string; tableName: string } | null>(null);
   const [selectedQuery, setSelectedQuery] = useState<{ connectionRowKey: string; queryRowKey: string; queryText: string } | null>(null);
-  const [previewData, setPreviewData] = useState<PreviewData | null>(null);
+  const [samples, setSamples] = useState<SampleResult[]>([]);
   const [previewLoading, setPreviewLoading] = useState(false);
   const [previewError, setPreviewError] = useState<string | null>(null);
-  const [previewBlobFilenames, setPreviewBlobFilenames] = useState<string[]>([]);
-  const [originalData, setOriginalData] = useState<PreviewData | null>(null);
   const [dryRuns, setDryRuns] = useState<DryRunResult[]>([]);
-  const [activePreviewTab, setActivePreviewTab] = useState("Sample");
+  const [activePreviewTab, setActivePreviewTab] = useState("Sample 1");
   const [diffTab, setDiffTab] = useState<{ name: string; leftTab: string; rightTab: string } | null>(null);
   const [connectionsPanelWidth, setConnectionsPanelWidth] = useState(260);
   const [expandedConnections, setExpandedConnections] = useState<Set<string>>(new Set());
@@ -300,8 +296,6 @@ export default function App() {
   }
 
   async function fetchPreviewFromFilenames(filenames: string[]): Promise<PreviewData | null> {
-    setPreviewBlobFilenames(filenames);
-
     const mergeRes = await fetch("/api/blob/preview-merge", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -312,22 +306,7 @@ export default function App() {
       return null;
     }
 
-    const data = (await mergeRes.json()) as PreviewData;
-    setPreviewData(data);
-    return data;
-  }
-
-  async function deletePreviewBlobs(filenames: string[]) {
-    if (filenames.length === 0) return;
-    try {
-      await fetch("/api/blob/delete-preview", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ filenames }),
-      });
-    } catch {
-      // best-effort cleanup
-    }
+    return (await mergeRes.json()) as PreviewData;
   }
 
   function saveCurrentTableToCache() {
@@ -335,12 +314,10 @@ export default function App() {
     const key = tableKey(selectedTable.rowKey, selectedTable.schema, selectedTable.tableName);
     const existing = tableCacheRef.current.get(key);
     tableCacheRef.current.set(key, {
-      previewData,
-      originalData,
+      samples,
       dryRuns,
       activePreviewTab,
       diffTab,
-      previewBlobFilenames,
       previewError,
       dryRunInProgress: existing?.dryRunInProgress ?? false,
       columnRules,
@@ -351,12 +328,10 @@ export default function App() {
   }
 
   function restoreTableFromCache(cached: TablePreviewCache) {
-    setPreviewData(cached.previewData);
-    setOriginalData(cached.originalData);
+    setSamples(cached.samples);
     setDryRuns(cached.dryRuns);
     setActivePreviewTab(cached.activePreviewTab);
     setDiffTab(cached.diffTab);
-    setPreviewBlobFilenames(cached.previewBlobFilenames);
     setPreviewError(cached.previewError);
     setPreviewLoading(cached.dryRunInProgress);
     setColumnRules(cached.columnRules);
@@ -520,7 +495,7 @@ export default function App() {
         (t) => t.schema === selectedTable.schema && t.name === selectedTable.tableName
       );
       if (tableInfo?.fileFormatId) {
-        const origPreview = originalData ?? previewData;
+        const origPreview = samples[0]?.data ?? null;
         await fetchColumnRules(
           agentPath, tableInfo.fileFormatId,
           origPreview?.headers, origPreview?.columnTypes,
@@ -548,10 +523,9 @@ export default function App() {
 
     setPreviewLoading(true);
     setPreviewError(null);
-    setPreviewData(null);
-    setOriginalData(null);
+    setSamples([]);
     setDryRuns([]);
-    setActivePreviewTab("Sample");
+    setActivePreviewTab("Sample 1");
     setDiffTab(null);
     setColumnRules([]);
     setColumnRuleAlgorithms([]);
@@ -587,6 +561,11 @@ export default function App() {
 
       const filenames: string[] = result.filenames ?? (result.filename ? [result.filename] : []);
       const preview = await fetchPreviewFromFilenames(filenames);
+
+      if (preview) {
+        const newSample: SampleResult = { label: "Sample 1", data: preview, blobFilenames: filenames };
+        setSamples([newSample]);
+      }
 
       if (tableInfo?.fileFormatId && preview?.headers?.length && preview?.columnTypes?.length) {
         fetchColumnRules(agentPath, tableInfo.fileFormatId, preview.headers, preview.columnTypes);
@@ -688,10 +667,9 @@ export default function App() {
     setSelectedTable(null);
     setPreviewLoading(true);
     setPreviewError(null);
-    setPreviewData(null);
-    setOriginalData(null);
+    setSamples([]);
     setDryRuns([]);
-    setActivePreviewTab("Sample");
+    setActivePreviewTab("Sample 1");
     setDiffTab(null);
     setColumnRules([]);
     setColumnRuleAlgorithms([]);
@@ -702,8 +680,9 @@ export default function App() {
     const cached = previewCacheRef.current.get(cacheKey);
 
     try {
+      let filenames: string[];
       if (cached) {
-        await fetchPreviewFromFilenames(cached);
+        filenames = cached;
       } else {
         const res = await fetch(`/api/agents/${agentPath}/preview-query`, {
           method: "POST",
@@ -723,9 +702,12 @@ export default function App() {
           return;
         }
 
-        const filenames: string[] = result.filenames ?? (result.filename ? [result.filename] : []);
+        filenames = result.filenames ?? (result.filename ? [result.filename] : []);
         previewCacheRef.current.set(cacheKey, filenames);
-        await fetchPreviewFromFilenames(filenames);
+      }
+      const preview = await fetchPreviewFromFilenames(filenames);
+      if (preview) {
+        setSamples([{ label: "Sample 1", data: preview, blobFilenames: filenames }]);
       }
     } catch (e) {
       setPreviewError(`Preview failed: ${e instanceof Error ? e.message : String(e)}`);
@@ -739,19 +721,11 @@ export default function App() {
     if (!agentPath) return;
 
     if (selectedTable) {
-      const key = tableKey(selectedTable.rowKey, selectedTable.schema, selectedTable.tableName);
-      tableCacheRef.current.delete(key);
-
       setPreviewLoading(true);
       setPreviewError(null);
-      setPreviewData(null);
-      setOriginalData(null);
-      setDryRuns([]);
-      setActivePreviewTab("Sample");
-      setDiffTab(null);
 
       try {
-        const res = await fetch(`/api/agents/${agentPath}/reload-preview-table`, {
+        const res = await fetch(`/api/agents/${agentPath}/preview-table`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -769,23 +743,27 @@ export default function App() {
         const result = await res.json();
         if (result.event) addLocalEvent(result.event);
         if (!result.success) {
-          setPreviewError(result.message ?? "Reload preview failed.");
+          setPreviewError(result.message ?? "Sample data failed.");
           return;
         }
 
         const filenames: string[] = result.filenames ?? (result.filename ? [result.filename] : []);
-        await fetchPreviewFromFilenames(filenames);
+        const preview = await fetchPreviewFromFilenames(filenames);
+
+        if (preview) {
+          const newLabel = `Sample ${samples.length + 1}`;
+          const newSample: SampleResult = { label: newLabel, data: preview, blobFilenames: filenames };
+          setSamples((prev) => [...prev, newSample]);
+          setActivePreviewTab(newLabel);
+        }
       } catch (e) {
-        setPreviewError(`Reload preview failed: ${e instanceof Error ? e.message : String(e)}`);
+        setPreviewError(`Sample data failed: ${e instanceof Error ? e.message : String(e)}`);
       } finally {
         setPreviewLoading(false);
       }
     } else if (selectedQuery) {
       const cacheKey = `query:${selectedQuery.connectionRowKey}:${selectedQuery.queryRowKey}`;
       previewCacheRef.current.delete(cacheKey);
-
-      await deletePreviewBlobs(previewBlobFilenames);
-      setPreviewBlobFilenames([]);
 
       handleQueryClick(selectedQuery.connectionRowKey, selectedQuery.queryRowKey, selectedQuery.queryText);
     }
@@ -814,20 +792,21 @@ export default function App() {
     setPreviewLoading(true);
     setPreviewError(null);
 
-    let filenames = isSameTable ? previewBlobFilenames : [];
+    let currentSamples = isSameTable ? samples : [];
     const cachedEntry = tableCacheRef.current.get(key);
-    if (!isSameTable && cachedEntry && cachedEntry.previewBlobFilenames.length > 0) {
-      filenames = cachedEntry.previewBlobFilenames;
+    if (!isSameTable && cachedEntry && cachedEntry.samples.length > 0) {
+      currentSamples = cachedEntry.samples;
       restoreTableFromCache(cachedEntry);
       setPreviewLoading(true);
     }
 
+    let filenames = currentSamples.length > 0 ? currentSamples[0].blobFilenames : [];
+
     try {
       if (filenames.length === 0) {
-        setPreviewData(null);
-        setOriginalData(null);
+        setSamples([]);
         setDryRuns([]);
-        setActivePreviewTab("Sample");
+        setActivePreviewTab("Sample 1");
         setDiffTab(null);
 
         const previewRes = await fetch(`/api/agents/${agentPath}/preview-table`, {
@@ -851,12 +830,15 @@ export default function App() {
         }
 
         filenames = previewResult.filenames ?? (previewResult.filename ? [previewResult.filename] : []);
-        await fetchPreviewFromFilenames(filenames);
+        const preview = await fetchPreviewFromFilenames(filenames);
+        if (preview) {
+          const newSample: SampleResult = { label: "Sample 1", data: preview, blobFilenames: filenames };
+          currentSamples = [newSample];
+          setSamples([newSample]);
+        }
       }
 
-      if (previewData) {
-        setOriginalData({ ...previewData });
-      }
+      const sampleData = currentSamples[0]?.data ?? null;
 
       const currentCached = tableCacheRef.current.get(key);
       const prevDryRuns = currentCached?.dryRuns ?? dryRuns;
@@ -870,11 +852,11 @@ export default function App() {
 
       tableCacheRef.current.set(key, {
         ...(currentCached ?? {
-          previewData, originalData, dryRuns: prevDryRuns, activePreviewTab,
-          diffTab, previewBlobFilenames: filenames, previewError: null,
+          samples: currentSamples, dryRuns: prevDryRuns, activePreviewTab,
+          diffTab, previewError: null,
           columnRules, columnRuleAlgorithms, columnRuleDomains, columnRuleFrameworks,
         }),
-        previewBlobFilenames: filenames,
+        samples: currentSamples,
         dryRuns: updatedDryRunsWithPending,
         activePreviewTab: newLabel,
         dryRunInProgress: true,
@@ -896,14 +878,15 @@ export default function App() {
 
       const finalizeDryRunError = (errMsg: string) => {
         setDryRuns((prev) => prev.filter((dr) => dr.label !== newLabel));
-        setActivePreviewTab("Sample");
+        const fallbackTab = currentSamples[0]?.label ?? "Sample 1";
+        setActivePreviewTab(fallbackTab);
         setPreviewError(errMsg);
         const cached = tableCacheRef.current.get(key);
         if (cached) {
           tableCacheRef.current.set(key, {
             ...cached,
             dryRuns: cached.dryRuns.filter((dr) => dr.label !== newLabel),
-            activePreviewTab: "Sample",
+            activePreviewTab: fallbackTab,
             dryRunInProgress: false,
             previewError: errMsg,
           });
@@ -954,8 +937,8 @@ export default function App() {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             rowKey, schema, tableName, previewBlobFilenames: filenames,
-            previewHeaders: previewData?.headers ?? [],
-            previewColumnTypes: previewData?.columnTypes ?? [],
+            previewHeaders: sampleData?.headers ?? [],
+            previewColumnTypes: sampleData?.columnTypes ?? [],
           }),
         });
 
@@ -1047,7 +1030,6 @@ export default function App() {
                     ...latestCached,
                     dryRuns: finishDryRun(latestCached.dryRuns),
                     activePreviewTab: newLabel,
-                    originalData: latestCached.originalData ?? latestCached.previewData,
                     dryRunInProgress: false,
                   });
                 }
@@ -1056,15 +1038,11 @@ export default function App() {
                 if (isViewingTable(rowKey, schema, tableName)) {
                   setDryRuns(finishDryRun);
                   setActivePreviewTab(newLabel);
-                  const finalCached = tableCacheRef.current.get(key);
-                  if (finalCached?.originalData) {
-                    setOriginalData(finalCached.originalData);
-                  }
                 }
 
                 if (completedFileFormatId) {
                   const cachedPreview = tableCacheRef.current.get(key);
-                  const origPreview = cachedPreview?.originalData ?? cachedPreview?.previewData;
+                  const origPreview = cachedPreview?.samples[0]?.data ?? null;
                   fetchColumnRules(
                     agentPath, completedFileFormatId,
                     origPreview?.headers, origPreview?.columnTypes,
@@ -1102,10 +1080,11 @@ export default function App() {
                 const cached = tableCacheRef.current.get(key);
                 if (cached) {
                   const wasActive = cached.activePreviewTab === newLabel;
+                  const cachedFallback = cached.samples[0]?.label ?? "Sample 1";
                   tableCacheRef.current.set(key, {
                     ...cached,
                     dryRuns: cached.dryRuns.filter((dr) => dr.label !== newLabel),
-                    activePreviewTab: wasActive ? "Sample" : cached.activePreviewTab,
+                    activePreviewTab: wasActive ? cachedFallback : cached.activePreviewTab,
                     dryRunInProgress: false,
                     previewError: errMsg,
                   });
@@ -1129,10 +1108,11 @@ export default function App() {
           const cached = tableCacheRef.current.get(key);
           if (cached) {
             const wasActive = cached.activePreviewTab === newLabel;
+            const cachedFallback = cached.samples[0]?.label ?? "Sample 1";
             tableCacheRef.current.set(key, {
               ...cached,
               dryRuns: cached.dryRuns.filter((dr) => dr.label !== newLabel),
-              activePreviewTab: wasActive ? "Sample" : cached.activePreviewTab,
+              activePreviewTab: wasActive ? cachedFallback : cached.activePreviewTab,
               dryRunInProgress: false,
               previewError: errMsg,
             });
@@ -1346,17 +1326,17 @@ export default function App() {
   const tableTabCounts = useMemo(() => {
     const counts: Record<string, number> = {};
     for (const [key, cached] of tableCacheRef.current.entries()) {
-      const count = 1 + cached.dryRuns.length + (cached.diffTab ? 1 : 0);
+      const count = cached.samples.length + cached.dryRuns.length + (cached.diffTab ? 1 : 0);
       if (count >= 1) counts[key] = count;
     }
     if (selectedTable) {
       const key = tableKey(selectedTable.rowKey, selectedTable.schema, selectedTable.tableName);
-      const count = 1 + dryRuns.length + (diffTab ? 1 : 0);
+      const count = samples.length + dryRuns.length + (diffTab ? 1 : 0);
       if (count >= 1) counts[key] = count;
       else delete counts[key];
     }
     return counts;
-  }, [dryRuns, diffTab, selectedTable]);
+  }, [samples, dryRuns, diffTab, selectedTable]);
 
   return (
     <div className="app">
@@ -1409,8 +1389,7 @@ export default function App() {
               <DataPreviewPanel
                 loading={previewLoading}
                 error={previewError}
-                data={previewData}
-                originalData={originalData}
+                samples={samples}
                 dryRuns={dryRuns}
                 activeTab={activePreviewTab}
                 diffTab={diffTab}
@@ -1424,44 +1403,71 @@ export default function App() {
                 allFrameworks={allFrameworks}
                 onTabChange={setActivePreviewTab}
                 onTabClose={(tab) => {
-                  if (diffTab && tab === diffTab.name) {
+                  const isSampleTab = samples.some((s) => s.label === tab);
+                  const isDryRunTab = dryRuns.some((dr) => dr.label === tab);
+                  const isDiffCloseTab = diffTab && tab === diffTab.name;
+
+                  if (isDiffCloseTab) {
                     setDiffTab(null);
-                    setActivePreviewTab("Sample");
-                  } else if (tab !== "Sample") {
+                    const fallback = samples[0]?.label ?? dryRuns[0]?.label ?? "Sample 1";
+                    setActivePreviewTab(fallback);
+                  } else if (isDryRunTab) {
                     setDryRuns((prev) => prev.filter((dr) => dr.label !== tab));
                     if (diffTab && (diffTab.leftTab === tab || diffTab.rightTab === tab)) {
                       setDiffTab(null);
                     }
                     if (activePreviewTab === tab) {
-                      setActivePreviewTab("Sample");
+                      const fallback = samples[0]?.label ?? "Sample 1";
+                      setActivePreviewTab(fallback);
                     }
-                  } else {
-                    if (dryRuns.length > 0) {
-                      setActivePreviewTab(dryRuns[0].label);
-                    } else {
+                  } else if (isSampleTab) {
+                    const remaining = samples.filter((s) => s.label !== tab);
+                    setSamples(remaining);
+                    if (diffTab && (diffTab.leftTab === tab || diffTab.rightTab === tab)) {
+                      setDiffTab(null);
+                    }
+                    if (activePreviewTab === tab) {
+                      const fallback = remaining[0]?.label ?? dryRuns[0]?.label ?? null;
+                      if (fallback) {
+                        setActivePreviewTab(fallback);
+                      } else {
+                        setSelectedTable(null);
+                        setSelectedQuery(null);
+                        setSamples([]);
+                        setPreviewError(null);
+                        setDiffTab(null);
+                        setActivePreviewTab("Sample 1");
+                      }
+                    }
+                    if (remaining.length === 0 && dryRuns.length === 0) {
                       setSelectedTable(null);
                       setSelectedQuery(null);
-                      setPreviewData(null);
-                      setOriginalData(null);
                       setPreviewError(null);
                       setDiffTab(null);
-                      setActivePreviewTab("Sample");
+                      setActivePreviewTab("Sample 1");
                     }
                   }
                   if (selectedTable) {
-                    const key = tableKey(selectedTable.rowKey, selectedTable.schema, selectedTable.tableName);
-                    const cached = tableCacheRef.current.get(key);
+                    const cacheKey = tableKey(selectedTable.rowKey, selectedTable.schema, selectedTable.tableName);
+                    const cached = tableCacheRef.current.get(cacheKey);
                     if (cached) {
+                      const updatedSamples = cached.samples.filter((s) => s.label !== tab);
                       const updatedDryRuns = cached.dryRuns.filter((dr) => dr.label !== tab);
                       const updatedDiffTab = (cached.diffTab && (tab === cached.diffTab.name || tab === cached.diffTab.leftTab || tab === cached.diffTab.rightTab))
                         ? null : cached.diffTab;
-                      const updatedActiveTab = cached.activePreviewTab === tab ? "Sample" : cached.activePreviewTab;
-                      tableCacheRef.current.set(key, {
-                        ...cached,
-                        dryRuns: updatedDryRuns,
-                        diffTab: updatedDiffTab,
-                        activePreviewTab: updatedActiveTab,
-                      });
+                      const fallbackTab = updatedSamples[0]?.label ?? updatedDryRuns[0]?.label ?? "Sample 1";
+                      const updatedActiveTab = cached.activePreviewTab === tab ? fallbackTab : cached.activePreviewTab;
+                      if (updatedSamples.length === 0 && updatedDryRuns.length === 0) {
+                        tableCacheRef.current.delete(cacheKey);
+                      } else {
+                        tableCacheRef.current.set(cacheKey, {
+                          ...cached,
+                          samples: updatedSamples,
+                          dryRuns: updatedDryRuns,
+                          diffTab: updatedDiffTab,
+                          activePreviewTab: updatedActiveTab,
+                        });
+                      }
                     }
                   }
                 }}

@@ -610,18 +610,6 @@ app.MapPost("/api/agents/{path}/reload-preview-table", async (string path, HttpR
     var dataItem = await clientTableService.GetDataItemByTableAsync(
         partitionKey, connEntity.ServerName, connEntity.DatabaseName, schema, tName);
 
-    if (dataItem != null && !string.IsNullOrEmpty(dataItem.PreviewFileList))
-    {
-        var oldFilenames = dataItem.PreviewFileList.Split(',', StringSplitOptions.RemoveEmptyEntries);
-        var containerClient = blobClient.GetBlobContainerClient(blobStorageConfig.PreviewContainer);
-        foreach (var filename in oldFilenames)
-        {
-            try { await containerClient.GetBlobClient(filename).DeleteIfExistsAsync(); } catch { }
-        }
-
-        await clientTableService.UpdatePreviewFileListAsync(dataItem, "");
-    }
-
     try
     {
         var uniqueId = await clientTableService.GetUserIdAsync(partitionKey);
