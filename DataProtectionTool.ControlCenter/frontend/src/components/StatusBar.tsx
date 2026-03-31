@@ -3,7 +3,7 @@ import "./StatusBar.css";
 export interface StatusEventStep {
   timestamp: string;
   message: string;
-  status: "running" | "done" | "error";
+  status: "running" | "done" | "error" | "skipped";
 }
 
 export interface StatusEvent {

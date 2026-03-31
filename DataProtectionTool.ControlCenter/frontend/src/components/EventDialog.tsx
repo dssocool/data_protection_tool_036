@@ -1,10 +1,38 @@
 import { useEffect, useRef, useState } from "react";
-import type { StatusEvent } from "./StatusBar";
+import type { StatusEvent, StatusEventStep } from "./StatusBar";
 import "./EventDialog.css";
 
 interface EventDialogProps {
   events: StatusEvent[];
   onClose: () => void;
+}
+
+interface ConsolidatedStep extends StatusEventStep {
+  pollCount?: number;
+}
+
+function consolidateSteps(steps: StatusEventStep[]): ConsolidatedStep[] {
+  const result: ConsolidatedStep[] = [];
+
+  for (const step of steps) {
+    if (!step.message.startsWith("Polling ")) {
+      result.push({ ...step });
+      continue;
+    }
+
+    const prefix = step.message.replace(/:.*$/, "");
+    const prev = result[result.length - 1];
+    if (prev && prev.message.startsWith("Polling ") && prev.message.replace(/:.*$/, "") === prefix) {
+      prev.message = step.message;
+      prev.status = step.status;
+      prev.timestamp = step.timestamp;
+      prev.pollCount = (prev.pollCount ?? 1) + 1;
+    } else {
+      result.push({ ...step, pollCount: 1 });
+    }
+  }
+
+  return result;
 }
 
 function getBadgeClass(event: StatusEvent): string {
@@ -99,12 +127,18 @@ export default function EventDialog({ events, onClose }: EventDialogProps) {
                   </div>
                   {isExpanded && stepsPresent && (
                     <div className="event-steps">
-                      {evt.steps!.map((step, si) => (
+                      {consolidateSteps(evt.steps!).map((step, si) => (
                         <div className="event-step" key={si}>
                           <span className={`event-step-icon event-step-icon-${step.status}`}>
                             {step.status === "done" && (
                               <svg width="10" height="10" viewBox="0 0 10 10">
                                 <path d="M2 5 L4.5 7.5 L8 2.5" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+                              </svg>
+                            )}
+                            {step.status === "skipped" && (
+                              <svg width="10" height="10" viewBox="0 0 10 10">
+                                <path d="M1.5 2 L4.5 5 L1.5 8" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+                                <path d="M5.5 2 L8.5 5 L5.5 8" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
                               </svg>
                             )}
                             {step.status === "running" && <span className="event-step-spinner" />}
@@ -115,6 +149,9 @@ export default function EventDialog({ events, onClose }: EventDialogProps) {
                             )}
                           </span>
                           <span className="event-step-message">{step.message}</span>
+                          {step.pollCount != null && step.pollCount > 1 && (
+                            <span className="event-step-poll-count">x{step.pollCount}</span>
+                          )}
                         </div>
                       ))}
                     </div>

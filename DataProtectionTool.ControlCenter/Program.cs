@@ -1107,7 +1107,6 @@ app.MapPost("/api/agents/{path}/dry-run", async (string path, HttpContext httpCo
         }
 
         // Step 1: Get or create file format
-        await WriteSseEvent("status", "Creating file format...");
         var connEntityForFormat = await clientTableService.GetConnectionByRowKeyAsync(partitionKey, rowKey);
         DataItemEntity? dataItemForFormat = null;
         string fileFormatId = "";
@@ -1124,6 +1123,7 @@ app.MapPost("/api/agents/{path}/dry-run", async (string path, HttpContext httpCo
 
         if (string.IsNullOrEmpty(fileFormatId))
         {
+            await WriteSseEvent("status", "Creating file format...");
             var containerClient = blobClient.GetBlobContainerClient(blobConfig.Container);
             var blobRef = containerClient.GetBlobClient(previewFilenames[0]);
             using var downloadStream = new MemoryStream();
@@ -1143,6 +1143,10 @@ app.MapPost("/api/agents/{path}/dry-run", async (string path, HttpContext httpCo
             {
                 await clientTableService.UpdateFileFormatIdAsync(dataItemForFormat, fileFormatId);
             }
+        }
+        else
+        {
+            await WriteSseEvent("status", "Creating file format... (skipped, already exists)");
         }
 
         // Step 2: Create a file ruleset (new ruleset every dry run)

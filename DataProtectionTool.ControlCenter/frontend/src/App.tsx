@@ -917,7 +917,11 @@ export default function App() {
       const updateDryRunTrackedSteps = (stepMsg: string, stepStatus: "running" | "done" | "error") => {
         setStatusEvents(prev => prev.map(evt => {
           if (evt.timestamp !== dryRunTrackedTs || evt.type !== "dry_run" || !evt.steps) return evt;
-          const steps = evt.steps.map(s => s.status === "running" ? { ...s, status: "done" as const } : s);
+          const steps = evt.steps.map(s => {
+            if (s.status !== "running") return s;
+            const closedStatus = s.message.includes("(skipped") ? "skipped" as const : "done" as const;
+            return { ...s, status: closedStatus };
+          });
           if (stepStatus !== "done" || stepMsg) {
             steps.push({ timestamp: new Date().toISOString(), message: stepMsg, status: stepStatus });
           }
@@ -928,7 +932,11 @@ export default function App() {
       const finalizeDryRunTrackedEvent = (summary: string, lastStepStatus: "done" | "error") => {
         setStatusEvents(prev => prev.map(evt => {
           if (evt.timestamp !== dryRunTrackedTs || evt.type !== "dry_run" || !evt.steps) return evt;
-          const steps = evt.steps.map(s => s.status === "running" ? { ...s, status: lastStepStatus } : s);
+          const steps = evt.steps.map(s => {
+            if (s.status !== "running") return s;
+            if (s.message.includes("(skipped")) return { ...s, status: "skipped" as const };
+            return { ...s, status: lastStepStatus };
+          });
           return { ...evt, summary, steps };
         }));
       };
