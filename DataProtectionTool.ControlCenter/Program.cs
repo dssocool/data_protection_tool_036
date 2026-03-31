@@ -1994,6 +1994,12 @@ string AddFieldsToPayload(string body, object fields)
 
 bool IsValidPreviewFilename(string filename) => previewFilenameRegex.IsMatch(filename);
 
+app.MapGet("/api/allowed-algorithm-types", (string sqlType) =>
+{
+    var allowed = GetAllowedAlgorithmTypes(sqlType);
+    return Results.Ok(new { success = true, allowedTypes = allowed });
+});
+
 static List<string> GetAllowedAlgorithmTypes(string sqlServerType)
 {
     var numericSqlTypes = new HashSet<string>(StringComparer.OrdinalIgnoreCase)

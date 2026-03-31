@@ -186,6 +186,8 @@ export default function DataPreviewPanel({
   const [selectedRule, setSelectedRule] = useState<Record<string, unknown> | null>(null);
   const [modalDomainName, setModalDomainName] = useState("");
   const [modalAlgorithmName, setModalAlgorithmName] = useState("");
+  const [modalAlgorithmType, setModalAlgorithmType] = useState("");
+  const [allowedAlgorithmTypes, setAllowedAlgorithmTypes] = useState<string[]>([]);
   const [saving, setSaving] = useState(false);
 
   const handleDataScroll = useCallback((e: React.UIEvent<HTMLDivElement>) => {
@@ -269,6 +271,38 @@ export default function DataPreviewPanel({
   const currentHeaders = isDiffActive
     ? (leftData?.headers ?? [])
     : (activeData?.headers ?? []);
+
+  const currentColumnTypes = isDiffActive
+    ? (leftData?.columnTypes ?? [])
+    : (activeData?.columnTypes ?? []);
+
+  const selectedColumnSqlType = useMemo(() => {
+    if (!selectedRule) return "";
+    const fieldName = selectedRule.fieldName;
+    if (typeof fieldName !== "string") return "";
+    const idx = currentHeaders.indexOf(fieldName);
+    if (idx < 0 || idx >= currentColumnTypes.length) return "";
+    return currentColumnTypes[idx] ?? "";
+  }, [selectedRule, currentHeaders, currentColumnTypes]);
+
+  useEffect(() => {
+    if (!selectedRule || !selectedColumnSqlType) {
+      setAllowedAlgorithmTypes([]);
+      return;
+    }
+    let cancelled = false;
+    fetch(`/api/allowed-algorithm-types?sqlType=${encodeURIComponent(selectedColumnSqlType)}`)
+      .then(r => r.json())
+      .then(json => {
+        if (!cancelled && json.success) {
+          setAllowedAlgorithmTypes(json.allowedTypes ?? []);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setAllowedAlgorithmTypes([]);
+      });
+    return () => { cancelled = true; };
+  }, [selectedRule, selectedColumnSqlType]);
 
   useEffect(() => {
     const table = tableRef.current;
@@ -417,6 +451,8 @@ export default function DataPreviewPanel({
                           setModalDomainName(isMasked && typeof rule.domainName === "string" ? rule.domainName : "");
                           const candidateAlg = isMasked && typeof rule.algorithmName === "string" ? rule.algorithmName : "";
                           setModalAlgorithmName(candidateAlg);
+                          const matched = candidateAlg ? allAlgorithms.find(a => a.algorithmName === candidateAlg) : undefined;
+                          setModalAlgorithmType(matched ? String(matched.maskType ?? "") : "");
                         }}
                         title={rule.isMasked === false ? `No masking for ${header}` : `View rule for ${header}`}
                       >
@@ -433,6 +469,7 @@ export default function DataPreviewPanel({
                           setSelectedRule({ fieldName: header, _noRule: true });
                           setModalDomainName("");
                           setModalAlgorithmName("");
+                          setModalAlgorithmType("");
                         }}
                         title={`No rule for ${header}`}
                       >
@@ -487,6 +524,8 @@ export default function DataPreviewPanel({
                       const defaultAlg = dom && typeof dom.defaultAlgorithmCode === "string"
                         ? dom.defaultAlgorithmCode : "";
                       setModalAlgorithmName(defaultAlg);
+                      const matched = defaultAlg ? allAlgorithms.find(a => a.algorithmName === defaultAlg) : undefined;
+                      setModalAlgorithmType(matched ? String(matched.maskType ?? "") : "");
                     }}
                   >
                     <option value="">-- Select --</option>
@@ -502,32 +541,54 @@ export default function DataPreviewPanel({
                   <select
                     className="column-rule-select"
                     value={modalAlgorithmName}
-                    onChange={(e) => setModalAlgorithmName(e.target.value)}
+                    onChange={(e) => {
+                      const newAlgName = e.target.value;
+                      setModalAlgorithmName(newAlgName);
+                      const alg = newAlgName ? allAlgorithms.find(a => a.algorithmName === newAlgName) : undefined;
+                      setModalAlgorithmType(alg ? String(alg.maskType ?? "") : "");
+                    }}
                   >
                     <option value="">-- Select --</option>
-                    {allAlgorithms.map((a, i) => (
-                      <option key={i} value={String(a.algorithmName ?? "")}>
-                        {String(a.algorithmName ?? "")}
-                      </option>
-                    ))}
+                    {allAlgorithms
+                      .filter(a => {
+                        const mt = String(a.maskType ?? "");
+                        if (allowedAlgorithmTypes.length > 0 && !allowedAlgorithmTypes.includes(mt)) return false;
+                        if (modalAlgorithmType && mt !== modalAlgorithmType) return false;
+                        return true;
+                      })
+                      .map((a, i) => (
+                        <option key={i} value={String(a.algorithmName ?? "")}>
+                          {String(a.algorithmName ?? "")}
+                        </option>
+                      ))}
                   </select>
                 </div>
                 <div className="column-rule-row">
-                  <span className="column-rule-label">Legacy Name</span>
-                  <span className="column-rule-readonly">
-                    {matchedAlg ? str(matchedAlg.legacyName) : ""}
-                  </span>
+                  <span className="column-rule-label">Algorithm Type</span>
+                  <select
+                    className="column-rule-select"
+                    value={modalAlgorithmType}
+                    onChange={(e) => {
+                      const newType = e.target.value;
+                      setModalAlgorithmType(newType);
+                      if (modalAlgorithmName) {
+                        const currentAlg = allAlgorithms.find(a => a.algorithmName === modalAlgorithmName);
+                        if (currentAlg && String(currentAlg.maskType ?? "") !== newType) {
+                          setModalAlgorithmName("");
+                        }
+                      }
+                    }}
+                  >
+                    <option value="">-- Select --</option>
+                    {allowedAlgorithmTypes.map((t, i) => (
+                      <option key={i} value={t}>{t}</option>
+                    ))}
+                  </select>
                 </div>
                 <div className="column-rule-row">
                   <span className="column-rule-label">Algorithm Description</span>
                   <span className="column-rule-readonly">
                     {matchedAlg ? str(matchedAlg.description) : ""}
-                  </span>
-                </div>
-                <div className="column-rule-row">
-                  <span className="column-rule-label">Type</span>
-                  <span className="column-rule-readonly">
-                    {matchedAlg ? str(matchedAlg.maskType) : ""}
                   </span>
                 </div>
                 <div className="column-rule-row">
