@@ -61,18 +61,74 @@ function resolveTabData(
   return null;
 }
 
-const DataTable = forwardRef<HTMLTableElement, { data: PreviewData }>(
-  function DataTable({ data }, ref) {
+interface SortableTableProps {
+  data: PreviewData;
+  sortColumnIndex: number | null;
+  sortDirection: "asc" | "desc" | null;
+  onHeaderClick: (columnIndex: number) => void;
+  columnWidths: number[];
+  onColumnResize: (columnIndex: number, width: number) => void;
+}
+
+const DataTable = forwardRef<HTMLTableElement, SortableTableProps>(
+  function DataTable({ data, sortColumnIndex, sortDirection, onHeaderClick, columnWidths, onColumnResize }, ref) {
+    const resizing = useRef<{ colIndex: number; startX: number; startWidth: number } | null>(null);
+
+    const onResizeMouseDown = useCallback((e: React.MouseEvent, colIndex: number) => {
+      e.stopPropagation();
+      e.preventDefault();
+      const startX = e.clientX;
+      const startWidth = columnWidths[colIndex] ?? 150;
+      resizing.current = { colIndex, startX, startWidth };
+      document.body.style.cursor = "col-resize";
+      document.body.style.userSelect = "none";
+
+      const onMouseMove = (ev: MouseEvent) => {
+        if (!resizing.current) return;
+        const newWidth = Math.max(50, resizing.current.startWidth + (ev.clientX - resizing.current.startX));
+        onColumnResize(resizing.current.colIndex, newWidth);
+      };
+      const onMouseUp = () => {
+        resizing.current = null;
+        document.body.style.cursor = "";
+        document.body.style.userSelect = "";
+        document.removeEventListener("mousemove", onMouseMove);
+        document.removeEventListener("mouseup", onMouseUp);
+      };
+      document.addEventListener("mousemove", onMouseMove);
+      document.addEventListener("mouseup", onMouseUp);
+    }, [columnWidths, onColumnResize]);
+
+    const hasWidths = columnWidths.length > 0;
+
     return (
-      <table className="data-preview-table" ref={ref}>
+      <table className={`data-preview-table${hasWidths ? " data-preview-table-fixed" : ""}`} ref={ref}>
+        {hasWidths && (
+          <colgroup>
+            {columnWidths.map((w, i) => (
+              <col key={i} style={{ width: w }} />
+            ))}
+          </colgroup>
+        )}
         <thead>
           <tr>
             {data.headers.map((h, i) => (
-              <th key={i}>
-                {h}
+              <th key={i} onClick={() => onHeaderClick(i)}>
+                <span className="column-header-content">
+                  {h}
+                  {sortColumnIndex === i && sortDirection && (
+                    <span className="column-sort-indicator">
+                      {sortDirection === "asc" ? "\u25B2" : "\u25BC"}
+                    </span>
+                  )}
+                </span>
                 {data.columnTypes?.[i] && (
                   <span className="column-type-label">{data.columnTypes[i]}</span>
                 )}
+                <div
+                  className="column-resize-handle"
+                  onMouseDown={(e) => onResizeMouseDown(e, i)}
+                />
               </th>
             ))}
           </tr>
@@ -91,21 +147,78 @@ const DataTable = forwardRef<HTMLTableElement, { data: PreviewData }>(
   },
 );
 
-const DiffView = forwardRef<HTMLTableElement, { left: PreviewData; right: PreviewData }>(
-  function DiffView({ left, right }, ref) {
+interface DiffViewProps {
+  left: PreviewData;
+  right: PreviewData;
+  sortColumnIndex: number | null;
+  sortDirection: "asc" | "desc" | null;
+  onHeaderClick: (columnIndex: number) => void;
+  columnWidths: number[];
+  onColumnResize: (columnIndex: number, width: number) => void;
+}
+
+const DiffView = forwardRef<HTMLTableElement, DiffViewProps>(
+  function DiffView({ left, right, sortColumnIndex, sortDirection, onHeaderClick, columnWidths, onColumnResize }, ref) {
     const headers = left.headers;
     const maxRows = Math.max(left.rows.length, right.rows.length);
 
+    const resizing = useRef<{ colIndex: number; startX: number; startWidth: number } | null>(null);
+
+    const onResizeMouseDown = useCallback((e: React.MouseEvent, colIndex: number) => {
+      e.stopPropagation();
+      e.preventDefault();
+      const startX = e.clientX;
+      const startWidth = columnWidths[colIndex] ?? 150;
+      resizing.current = { colIndex, startX, startWidth };
+      document.body.style.cursor = "col-resize";
+      document.body.style.userSelect = "none";
+
+      const onMouseMove = (ev: MouseEvent) => {
+        if (!resizing.current) return;
+        const newWidth = Math.max(50, resizing.current.startWidth + (ev.clientX - resizing.current.startX));
+        onColumnResize(resizing.current.colIndex, newWidth);
+      };
+      const onMouseUp = () => {
+        resizing.current = null;
+        document.body.style.cursor = "";
+        document.body.style.userSelect = "";
+        document.removeEventListener("mousemove", onMouseMove);
+        document.removeEventListener("mouseup", onMouseUp);
+      };
+      document.addEventListener("mousemove", onMouseMove);
+      document.addEventListener("mouseup", onMouseUp);
+    }, [columnWidths, onColumnResize]);
+
+    const hasWidths = columnWidths.length > 0;
+
     return (
-      <table className="data-preview-table data-preview-diff-table" ref={ref}>
+      <table className={`data-preview-table data-preview-diff-table${hasWidths ? " data-preview-table-fixed" : ""}`} ref={ref}>
+        {hasWidths && (
+          <colgroup>
+            {columnWidths.map((w, i) => (
+              <col key={i} style={{ width: w }} />
+            ))}
+          </colgroup>
+        )}
         <thead>
           <tr>
             {headers.map((h, i) => (
-              <th key={i}>
-                {h}
+              <th key={i} onClick={() => onHeaderClick(i)}>
+                <span className="column-header-content">
+                  {h}
+                  {sortColumnIndex === i && sortDirection && (
+                    <span className="column-sort-indicator">
+                      {sortDirection === "asc" ? "\u25B2" : "\u25BC"}
+                    </span>
+                  )}
+                </span>
                 {left.columnTypes?.[i] && (
                   <span className="column-type-label">{left.columnTypes[i]}</span>
                 )}
+                <div
+                  className="column-resize-handle"
+                  onMouseDown={(e) => onResizeMouseDown(e, i)}
+                />
               </th>
             ))}
           </tr>
@@ -193,6 +306,8 @@ export default function DataPreviewPanel({
   const [allowedAlgorithmTypes, setAllowedAlgorithmTypes] = useState<string[]>([]);
   const [saving, setSaving] = useState(false);
   const [typeMismatchConfirm, setTypeMismatchConfirm] = useState<{ maskType: string; sqlType: string } | null>(null);
+  const [sortState, setSortState] = useState<{ columnIndex: number; direction: "asc" | "desc" } | null>(null);
+  const [userColumnWidths, setUserColumnWidths] = useState<number[]>([]);
 
   const handleDataScroll = useCallback((e: React.UIEvent<HTMLDivElement>) => {
     if (scrollingSource.current === "rules") return;
@@ -260,6 +375,74 @@ export default function DataPreviewPanel({
     ? (leftData?.columnTypes ?? [])
     : (activeData?.columnTypes ?? []);
 
+  useEffect(() => {
+    setSortState(null);
+    setUserColumnWidths([]);
+  }, [activeTab, isDiffActive]);
+
+  const handleHeaderClick = useCallback((columnIndex: number) => {
+    setSortState((prev) => {
+      if (prev === null || prev.columnIndex !== columnIndex) {
+        return { columnIndex, direction: "asc" };
+      }
+      if (prev.direction === "asc") {
+        return { columnIndex, direction: "desc" };
+      }
+      return null;
+    });
+  }, []);
+
+  const handleColumnResize = useCallback((columnIndex: number, width: number) => {
+    setUserColumnWidths((prev) => {
+      const next = [...prev];
+      next[columnIndex] = width;
+      return next;
+    });
+  }, []);
+
+  const sortRows = useCallback((rows: string[][], colIndex: number, dir: "asc" | "desc") => {
+    return [...rows].sort((a, b) => {
+      const av = a[colIndex] ?? "";
+      const bv = b[colIndex] ?? "";
+      const an = parseFloat(av);
+      const bn = parseFloat(bv);
+      if (!isNaN(an) && !isNaN(bn)) {
+        return dir === "asc" ? an - bn : bn - an;
+      }
+      const cmp = av.localeCompare(bv);
+      return dir === "asc" ? cmp : -cmp;
+    });
+  }, []);
+
+  const sortedActiveData = useMemo<PreviewData | null>(() => {
+    if (!activeData || !sortState) return activeData;
+    return { ...activeData, rows: sortRows(activeData.rows, sortState.columnIndex, sortState.direction) };
+  }, [activeData, sortState, sortRows]);
+
+  const sortedLeftData = useMemo<PreviewData | null>(() => {
+    if (!leftData || !sortState) return leftData;
+    return { ...leftData, rows: sortRows(leftData.rows, sortState.columnIndex, sortState.direction) };
+  }, [leftData, sortState, sortRows]);
+
+  const sortedRightData = useMemo<PreviewData | null>(() => {
+    if (!rightData || !leftData || !sortState) return rightData;
+    const indices = leftData.rows.map((_, i) => i);
+    const colIndex = sortState.columnIndex;
+    const dir = sortState.direction;
+    indices.sort((a, b) => {
+      const av = leftData.rows[a]?.[colIndex] ?? "";
+      const bv = leftData.rows[b]?.[colIndex] ?? "";
+      const an = parseFloat(av);
+      const bn = parseFloat(bv);
+      if (!isNaN(an) && !isNaN(bn)) {
+        return dir === "asc" ? an - bn : bn - an;
+      }
+      const cmp = av.localeCompare(bv);
+      return dir === "asc" ? cmp : -cmp;
+    });
+    return { ...rightData, rows: indices.map((i) => rightData.rows[i] ?? []) };
+  }, [rightData, leftData, sortState]);
+
   const selectedColumnSqlType = useMemo(() => {
     if (!selectedRule) return "";
     const fieldName = selectedRule.fieldName;
@@ -304,7 +487,7 @@ export default function DataPreviewPanel({
     const ro = new ResizeObserver(measure);
     ths.forEach((th) => ro.observe(th));
     return () => ro.disconnect();
-  }, [activeData, leftData, rightData]);
+  }, [activeData, leftData, rightData, userColumnWidths]);
 
   return (
     <div className="data-preview-panel" style={{ left: panelLeft + 16 }}>
@@ -391,11 +574,32 @@ export default function DataPreviewPanel({
           if (error) {
             return <div className="data-preview-error">{error}</div>;
           }
-          if (isDiffActive && leftData && rightData) {
-            return <DiffView left={leftData} right={rightData} ref={tableRef} />;
+          if (isDiffActive && sortedLeftData && sortedRightData) {
+            return (
+              <DiffView
+                left={sortedLeftData}
+                right={sortedRightData}
+                sortColumnIndex={sortState?.columnIndex ?? null}
+                sortDirection={sortState?.direction ?? null}
+                onHeaderClick={handleHeaderClick}
+                columnWidths={userColumnWidths}
+                onColumnResize={handleColumnResize}
+                ref={tableRef}
+              />
+            );
           }
-          if (activeData) {
-            return <DataTable data={activeData} ref={tableRef} />;
+          if (sortedActiveData) {
+            return (
+              <DataTable
+                data={sortedActiveData}
+                sortColumnIndex={sortState?.columnIndex ?? null}
+                sortDirection={sortState?.direction ?? null}
+                onHeaderClick={handleHeaderClick}
+                columnWidths={userColumnWidths}
+                onColumnResize={handleColumnResize}
+                ref={tableRef}
+              />
+            );
           }
           return null;
         })()}

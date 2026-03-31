@@ -73,7 +73,8 @@
 }
 
 .data-preview-tab-close {
-  display: none;
+  display: inline-flex;
+  visibility: hidden;
   align-items: center;
   justify-content: center;
   width: 18px;
@@ -92,7 +93,7 @@
 
 .data-preview-tab:hover .data-preview-tab-close,
 .data-preview-tab-active .data-preview-tab-close {
-  display: inline-flex;
+  visibility: visible;
 }
 
 .data-preview-body {
@@ -200,6 +201,10 @@
   font-size: 12px;
 }
 
+.data-preview-table-fixed {
+  table-layout: fixed;
+}
+
 .data-preview-table thead {
   position: sticky;
   top: 0;
@@ -207,14 +212,44 @@
 }
 
 .data-preview-table th {
+  position: relative;
   background: #f5f7fa;
   border-bottom: 1px solid #ddd;
   border-right: 1px solid #eee;
-  padding: 6px 10px;
+  padding: 6px 14px 6px 10px;
   text-align: left;
   font-weight: 600;
   color: #444;
   white-space: nowrap;
+  cursor: pointer;
+  user-select: none;
+}
+
+.column-header-content {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.column-sort-indicator {
+  font-size: 9px;
+  color: #0078d4;
+  line-height: 1;
+}
+
+.column-resize-handle {
+  position: absolute;
+  right: 0;
+  top: 0;
+  bottom: 0;
+  width: 5px;
+  cursor: col-resize;
+  background: transparent;
+  z-index: 2;
+}
+
+.column-resize-handle:hover {
+  background: rgba(0, 120, 212, 0.3);
 }
 
 .data-preview-table th .column-type-label {
