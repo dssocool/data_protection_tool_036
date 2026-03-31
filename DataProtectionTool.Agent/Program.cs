@@ -1001,15 +1001,15 @@ static async Task HandleGetColumnRulesAsync(
 
             responseList.AddRange(pageItems);
 
-            if (bodyDoc.RootElement.TryGetProperty("_pageInfo", out var pageInfoEl) && pageInfoEl.ValueKind == JsonValueKind.String)
-            {
-                using var pageInfoDoc = JsonDocument.Parse(pageInfoEl.GetString()!);
-                var pi = pageInfoDoc.RootElement;
-                int numberOnPage = pi.TryGetProperty("numberOnPage", out var nop) ? nop.GetInt32() : 0;
-                int total = pi.TryGetProperty("total", out var tot) ? tot.GetInt32() : 0;
-                if (numberOnPage >= total)
-                    break;
-            }
+            if (!bodyDoc.RootElement.TryGetProperty("_pageInfo", out var pageInfoEl) || pageInfoEl.ValueKind != JsonValueKind.String)
+                break;
+
+            using var pageInfoDoc = JsonDocument.Parse(pageInfoEl.GetString()!);
+            var pi = pageInfoDoc.RootElement;
+            int numberOnPage = pi.TryGetProperty("numberOnPage", out var nop) ? nop.GetInt32() : 0;
+            int total = pi.TryGetProperty("total", out var tot) ? tot.GetInt32() : 0;
+            if (numberOnPage >= total)
+                break;
 
             pageNumber++;
         }
@@ -1930,15 +1930,15 @@ class EngineMetadataStore
 
             allItems.AddRange(pageItems);
 
-            if (doc.RootElement.TryGetProperty("_pageInfo", out var pageInfoEl) && pageInfoEl.ValueKind == JsonValueKind.String)
-            {
-                using var pageInfoDoc = JsonDocument.Parse(pageInfoEl.GetString()!);
-                var pi = pageInfoDoc.RootElement;
-                int numberOnPage = pi.TryGetProperty("numberOnPage", out var nop) ? nop.GetInt32() : 0;
-                int total = pi.TryGetProperty("total", out var tot) ? tot.GetInt32() : 0;
-                if (numberOnPage >= total)
-                    break;
-            }
+            if (!doc.RootElement.TryGetProperty("_pageInfo", out var pageInfoEl) || pageInfoEl.ValueKind != JsonValueKind.String)
+                break;
+
+            using var pageInfoDoc = JsonDocument.Parse(pageInfoEl.GetString()!);
+            var pi = pageInfoDoc.RootElement;
+            int numberOnPage = pi.TryGetProperty("numberOnPage", out var nop) ? nop.GetInt32() : 0;
+            int total = pi.TryGetProperty("total", out var tot) ? tot.GetInt32() : 0;
+            if (numberOnPage >= total)
+                break;
 
             pageNumber++;
         }
