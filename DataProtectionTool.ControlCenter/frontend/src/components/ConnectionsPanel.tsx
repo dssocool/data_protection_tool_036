@@ -55,6 +55,7 @@ interface ConnectionsPanelProps {
   onClose: () => void;
   onSwitchPanel: (panel: "connections" | "flows") => void;
   onWidthChange?: (width: number) => void;
+  flowsBadgeCount?: number;
 }
 
 const MIN_WIDTH = 200;
@@ -80,6 +81,7 @@ export default function ConnectionsPanel({
   onClose,
   onSwitchPanel,
   onWidthChange,
+  flowsBadgeCount,
 }: ConnectionsPanelProps) {
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [width, setWidth] = useState(DEFAULT_WIDTH);
@@ -211,6 +213,9 @@ export default function ConnectionsPanel({
               <path d="M3 4H7M3 8H10M3 12H13" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
               <path d="M12 3L14 4L12 5" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round" />
             </svg>
+            {!!flowsBadgeCount && flowsBadgeCount > 0 && (
+              <span className="flows-badge">{flowsBadgeCount}</span>
+            )}
           </button>
         </div>
         <button

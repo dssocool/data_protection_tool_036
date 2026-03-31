@@ -176,3 +176,24 @@
   opacity: 0.6;
   cursor: not-allowed;
 }
+
+@keyframes fullrun-minimize {
+  0% {
+    transform: scale(1) translate(0, 0);
+    opacity: 1;
+  }
+  100% {
+    transform: scale(0.05) translate(-800px, -300px);
+    opacity: 0;
+  }
+}
+
+.fullrun-modal-minimizing {
+  animation: fullrun-minimize 500ms ease-in forwards;
+  pointer-events: none;
+}
+
+.fullrun-overlay-minimizing {
+  background: transparent;
+  pointer-events: none;
+}

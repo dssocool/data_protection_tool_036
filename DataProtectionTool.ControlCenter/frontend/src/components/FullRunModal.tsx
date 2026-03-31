@@ -23,9 +23,11 @@ interface FullRunModalProps {
   schema: string;
   tableName: string;
   agentPath: string;
+  minimizing?: boolean;
   onClose: () => void;
   onRun: (destConnectionRowKey: string, destSchema: string) => void;
   onAddToFlow: (source: FlowSource, dest: FlowDest) => void;
+  onMinimizeEnd?: () => void;
 }
 
 export default function FullRunModal({
@@ -34,9 +36,11 @@ export default function FullRunModal({
   schema,
   tableName,
   agentPath,
+  minimizing,
   onClose,
   onRun,
   onAddToFlow,
+  onMinimizeEnd,
 }: FullRunModalProps) {
   const [selectedConnection, setSelectedConnection] = useState(
     connections.length > 0 ? connections[0].rowKey : ""
@@ -97,8 +101,11 @@ export default function FullRunModal({
   }
 
   return (
-    <div className="fullrun-modal-overlay">
-      <div className="fullrun-modal-dialog">
+    <div className={`fullrun-modal-overlay${minimizing ? " fullrun-overlay-minimizing" : ""}`}>
+      <div
+        className={`fullrun-modal-dialog${minimizing ? " fullrun-modal-minimizing" : ""}`}
+        onAnimationEnd={minimizing ? onMinimizeEnd : undefined}
+      >
         <div className="fullrun-modal-header">
           <h2>Data Protection: Full Run</h2>
         </div>
@@ -163,7 +170,7 @@ export default function FullRunModal({
               disabled={!canSubmit}
               onClick={handleAddToFlow}
             >
-              Add to Flow
+              Save
             </button>
             <button
               className="fullrun-btn fullrun-btn-run"

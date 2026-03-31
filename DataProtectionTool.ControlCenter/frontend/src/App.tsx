@@ -68,6 +68,8 @@ export default function App() {
   const [agentUserName, setAgentUserName] = useState("");
   const [userUniqueId, setUserUniqueId] = useState<string | null>(null);
   const [fullRunTarget, setFullRunTarget] = useState<{ rowKey: string; schema: string; tableName: string } | null>(null);
+  const [fullRunMinimizing, setFullRunMinimizing] = useState(false);
+  const [unseenFlowCount, setUnseenFlowCount] = useState(0);
   const [columnRules, setColumnRules] = useState<Record<string, unknown>[]>([]);
   const [columnRuleAlgorithms, setColumnRuleAlgorithms] = useState<Record<string, unknown>[]>([]);
   const [columnRuleDomains, setColumnRuleDomains] = useState<Record<string, unknown>[]>([]);
@@ -182,6 +184,7 @@ export default function App() {
 
   function handleViewFlows() {
     setLeftPanel("flows");
+    setUnseenFlowCount(0);
   }
 
   async function handleSave(data: SqlServerConnectionData) {
@@ -1268,12 +1271,18 @@ export default function App() {
       if (res.ok) {
         const result = await res.json();
         if (result.success) {
-          setFullRunTarget(null);
+          setFullRunMinimizing(true);
         }
       }
     } catch {
       // best-effort
     }
+  }
+
+  function handleMinimizeEnd() {
+    setFullRunMinimizing(false);
+    setFullRunTarget(null);
+    setUnseenFlowCount((c) => c + 1);
   }
 
   const tableTabCounts = useMemo(() => {
@@ -1322,6 +1331,7 @@ export default function App() {
                 selectedTable={selectedTable}
                 selectedQuery={selectedQuery}
                 tableTabCounts={tableTabCounts}
+                flowsBadgeCount={unseenFlowCount}
                 onExpandConnection={handleExpandConnection}
                 onTableClick={handleTableClick}
                 onQueryClick={handleQueryClick}
@@ -1330,7 +1340,7 @@ export default function App() {
                 onDryRun={handleDryRun}
                 onFullRun={handleFullRunOpen}
                 onClose={() => setLeftPanel(null)}
-                onSwitchPanel={setLeftPanel}
+                onSwitchPanel={(p) => { setLeftPanel(p); if (p === "flows") setUnseenFlowCount(0); }}
                 onWidthChange={setConnectionsPanelWidth}
               />
             )}
@@ -1440,9 +1450,11 @@ export default function App() {
           schema={fullRunTarget.schema}
           tableName={fullRunTarget.tableName}
           agentPath={getAgentPath() ?? ""}
+          minimizing={fullRunMinimizing}
           onClose={() => setFullRunTarget(null)}
           onRun={handleFullRunExecute}
           onAddToFlow={handleAddToFlow}
+          onMinimizeEnd={handleMinimizeEnd}
         />
       )}
     </div>
