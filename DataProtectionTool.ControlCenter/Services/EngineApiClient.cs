@@ -1,4 +1,5 @@
 using System.Net.Http.Headers;
+using System.Text;
 using System.Text.Json;
 using DataProtectionTool.ControlCenter.Models;
 
@@ -15,6 +16,49 @@ public class EngineApiClient
         _httpClient = httpClient;
         _config = config;
         _logger = logger;
+    }
+
+    private async Task LogNonSuccessResponseAsync(HttpRequestMessage request, HttpResponseMessage response, string? requestBody = null)
+    {
+        if (response.IsSuccessStatusCode) return;
+
+        var sb = new StringBuilder();
+        sb.AppendLine($"*** HTTP request failed ***");
+        sb.AppendLine($"  Request : {request.Method} {request.RequestUri}");
+        foreach (var h in request.Headers)
+        {
+            var value = h.Key.Equals("Authorization", StringComparison.OrdinalIgnoreCase)
+                ? "***REDACTED***"
+                : string.Join(", ", h.Value);
+            sb.AppendLine($"  Request Header : {h.Key}: {value}");
+        }
+        if (request.Content != null)
+            foreach (var h in request.Content.Headers)
+                sb.AppendLine($"  Request Header : {h.Key}: {string.Join(", ", h.Value)}");
+
+        if (requestBody != null)
+        {
+            var bodyPreview = requestBody.Length > 2000
+                ? requestBody[..2000] + $"... (truncated, total {requestBody.Length} chars)"
+                : requestBody;
+            sb.AppendLine($"  Request Body : {bodyPreview}");
+        }
+
+        sb.AppendLine($"  Response Status : {(int)response.StatusCode} {response.ReasonPhrase}");
+        foreach (var h in response.Headers)
+            sb.AppendLine($"  Response Header: {h.Key}: {string.Join(", ", h.Value)}");
+        if (response.Content != null)
+            foreach (var h in response.Content.Headers)
+                sb.AppendLine($"  Response Header: {h.Key}: {string.Join(", ", h.Value)}");
+
+        var responseBody = await response.Content.ReadAsStringAsync();
+        var respPreview = responseBody.Length > 4000
+            ? responseBody[..4000] + $"... (truncated, total {responseBody.Length} chars)"
+            : responseBody;
+        sb.AppendLine($"  Response Body  : {respPreview}");
+        sb.AppendLine($"*** End of failed HTTP details ***");
+
+        _logger.LogError(sb.ToString());
     }
 
     public string BaseUrl => $"{_config.EngineUrl.TrimEnd('/')}/masking/api/v5.1.44";
@@ -38,9 +82,7 @@ public class EngineApiClient
             using var response = await _httpClient.SendAsync(request);
             if (!response.IsSuccessStatusCode)
             {
-                var errorBody = await response.Content.ReadAsStringAsync();
-                _logger.LogWarning("Engine API HTTP {StatusCode} from {Url}: {Body}",
-                    (int)response.StatusCode, pagedUrl, errorBody);
+                await LogNonSuccessResponseAsync(request, response);
                 response.EnsureSuccessStatusCode();
             }
 
@@ -88,6 +130,9 @@ public class EngineApiClient
         request.Content = formContent;
 
         using var response = await _httpClient.SendAsync(request);
+        if (!response.IsSuccessStatusCode)
+            await LogNonSuccessResponseAsync(request, response, $"[multipart form: file={blobFilename}, fileFormatType={fileFormatType}]");
+
         var responseBody = await response.Content.ReadAsStringAsync();
 
         string fileFormatId = "";
@@ -123,6 +168,9 @@ public class EngineApiClient
         request.Content = new StringContent(jsonBody, System.Text.Encoding.UTF8, "application/json");
 
         using var response = await _httpClient.SendAsync(request);
+        if (!response.IsSuccessStatusCode)
+            await LogNonSuccessResponseAsync(request, response, jsonBody);
+
         var responseBody = await response.Content.ReadAsStringAsync();
 
         string fileRulesetId = "";
@@ -155,6 +203,9 @@ public class EngineApiClient
         request.Content = new StringContent(jsonBody, System.Text.Encoding.UTF8, "application/json");
 
         using var response = await _httpClient.SendAsync(request);
+        if (!response.IsSuccessStatusCode)
+            await LogNonSuccessResponseAsync(request, response, jsonBody);
+
         var responseBody = await response.Content.ReadAsStringAsync();
 
         string fileMetadataId = "";
@@ -187,7 +238,7 @@ public class EngineApiClient
 
         using var response = await _httpClient.SendAsync(request);
         if (!response.IsSuccessStatusCode)
-            _logger.LogWarning("Failed to fix column rule {MetadataId}: HTTP {StatusCode}", metadataId, (int)response.StatusCode);
+            await LogNonSuccessResponseAsync(request, response, jsonBody);
         return response.IsSuccessStatusCode;
     }
 

@@ -44,8 +44,8 @@ interface DataPreviewPanelProps {
     algorithmName: string;
     domainName: string;
   }) => Promise<void>;
-  mismatchedColumns: Set<string>;
-  onMismatchedColumnsChange: (updater: (prev: Set<string>) => Set<string>) => void;
+  mismatchedColumns: Map<string, { maskType: string; sqlType: string }>;
+  onMismatchedColumnsChange: (updater: (prev: Map<string, { maskType: string; sqlType: string }>) => Map<string, { maskType: string; sqlType: string }>) => void;
   panelLeft: number;
 }
 
@@ -459,7 +459,11 @@ export default function DataPreviewPanel({
                           const matched = candidateAlg ? allAlgorithms.find(a => a.algorithmName === candidateAlg) : undefined;
                           setModalAlgorithmType(matched ? String(matched.maskType ?? "") : "");
                         }}
-                        title={rule.isMasked === false ? `No masking for ${header}` : `View rule for ${header}`}
+                        title={
+                          mismatchedColumns.has(header)
+                            ? `The Algorithm is for ${mismatchedColumns.get(header)!.maskType}, but column is ${mismatchedColumns.get(header)!.sqlType}`
+                            : rule.isMasked === false ? `No masking for ${header}` : `View rule for ${header}`
+                        }
                       >
                         <span className="column-rule-btn-text">
                           {rule.isMasked === false
@@ -573,6 +577,11 @@ export default function DataPreviewPanel({
                         </option>
                       ))}
                   </select>
+                  {modalAlgorithmType && allowedAlgorithmTypes.length > 0 && !allowedAlgorithmTypes.includes(modalAlgorithmType) && (
+                    <span className="column-rule-mismatch-hint">
+                      The Algorithm is for <strong>{modalAlgorithmType}</strong>, but column is <strong>{selectedColumnSqlType}</strong>
+                    </span>
+                  )}
                 </div>
                 <div className="column-rule-row">
                   <span className="column-rule-label">Algorithm Type</span>
@@ -636,7 +645,7 @@ export default function DataPreviewPanel({
                     const fieldName = typeof selectedRule.fieldName === "string" ? selectedRule.fieldName : "";
                     if (fieldName) {
                       onMismatchedColumnsChange(prev => {
-                        const next = new Set(prev);
+                        const next = new Map(prev);
                         next.delete(fieldName);
                         return next;
                       });
@@ -686,7 +695,8 @@ export default function DataPreviewPanel({
                 onClick={() => {
                   const fieldName = typeof selectedRule.fieldName === "string" ? selectedRule.fieldName : "";
                   if (fieldName) {
-                    onMismatchedColumnsChange(prev => new Set(prev).add(fieldName));
+                    const info = { maskType: typeMismatchConfirm.maskType, sqlType: typeMismatchConfirm.sqlType };
+                    onMismatchedColumnsChange(prev => new Map(prev).set(fieldName, info));
                   }
                   setTypeMismatchConfirm(null);
                   const id = selectedRule.fileFieldMetadataId;
