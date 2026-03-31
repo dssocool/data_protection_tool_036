@@ -137,7 +137,7 @@ export default function DataPreviewPanel({
   activeTab,
   diffTab,
   columnRules,
-  columnRuleAlgorithms,
+  columnRuleAlgorithms: _columnRuleAlgorithms,
   columnRuleDomains,
   columnRuleFrameworks,
   columnRulesLoading,
