@@ -1289,12 +1289,12 @@ export default function App() {
     const counts: Record<string, number> = {};
     for (const [key, cached] of tableCacheRef.current.entries()) {
       const count = 1 + cached.dryRuns.length + (cached.diffTab ? 1 : 0);
-      if (count > 1) counts[key] = count;
+      if (count >= 1) counts[key] = count;
     }
     if (selectedTable) {
       const key = tableKey(selectedTable.rowKey, selectedTable.schema, selectedTable.tableName);
       const count = 1 + dryRuns.length + (diffTab ? 1 : 0);
-      if (count > 1) counts[key] = count;
+      if (count >= 1) counts[key] = count;
       else delete counts[key];
     }
     return counts;

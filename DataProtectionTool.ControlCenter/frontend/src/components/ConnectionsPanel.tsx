@@ -321,7 +321,7 @@ export default function ConnectionsPanel({
                                         <span className="conn-table-name">{t.schema}.{t.name}</span>
                                         {tableTabCounts[`${conn.rowKey}:${t.schema}:${t.name}`] && (
                                           <span className="conn-table-tab-badge">
-                                            {tableTabCounts[`${conn.rowKey}:${t.schema}:${t.name}`]} tabs
+                                            {tableTabCounts[`${conn.rowKey}:${t.schema}:${t.name}`] === 1 ? "1 tab" : `${tableTabCounts[`${conn.rowKey}:${t.schema}:${t.name}`]} tabs`}
                                           </span>
                                         )}
                                       </li>
