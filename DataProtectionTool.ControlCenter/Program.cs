@@ -1388,6 +1388,7 @@ app.MapPost("/api/agents/{path}/dry-run", async (string path, HttpContext httpCo
 
 app.MapPost("/api/agents/{path}/full-run", async (string path, HttpContext httpContext, AgentRegistry registry,
     ClientTableService clientTableService, DataEngineConfig dataEngineConfig,
+    BlobServiceClient blobClient, BlobStorageConfig blobConfig,
     EngineApiClient engineApi) =>
 {
     var response = httpContext.Response;
@@ -1513,6 +1514,21 @@ app.MapPost("/api/agents/{path}/full-run", async (string path, HttpContext httpC
 
         _ = clientTableService.AppendEventAsync(partitionKey, "full_run",
             $"Full run: exported {exportFilenames.Count} file(s) for {schema}.{tableName}");
+
+        // Step 1.5: Copy fullrun files from preview container to engine container
+        await WriteSseEvent("status", "Copying exported files to engine storage...");
+        var previewContainerClient = blobClient.GetBlobContainerClient(blobConfig.PreviewContainer);
+        var engineContainerClient = blobClient.GetBlobContainerClient(blobConfig.Container);
+
+        foreach (var exportFile in exportFilenames)
+        {
+            var sourceBlob = previewContainerClient.GetBlobClient(exportFile);
+            var destBlob = engineContainerClient.GetBlobClient(exportFile);
+            using var stream = new MemoryStream();
+            await sourceBlob.DownloadToAsync(stream);
+            stream.Position = 0;
+            await destBlob.UploadAsync(stream, overwrite: true);
+        }
 
         // Step 2: Create file ruleset
         await WriteSseEvent("status", "Creating file ruleset...");
