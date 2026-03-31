@@ -13,30 +13,16 @@
   position: relative;
 }
 
-.status-bar-icon {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 20px;
-  height: 20px;
-  border-radius: 3px;
-  cursor: pointer;
-  flex-shrink: 0;
-}
-
-.status-bar-icon:hover {
-  background: #d8d8d8;
-}
-
-.status-bar-icon svg circle {
-  transition: fill 0.3s ease;
-}
-
 .status-bar-summary {
-  margin-left: 6px;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  min-width: 0;
-  flex: 1;
+  max-width: 100%;
+  cursor: pointer;
+  border-radius: 3px;
+  padding: 0 4px;
+}
+
+.status-bar-summary:hover {
+  background: #d8d8d8;
 }
