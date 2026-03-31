@@ -12,6 +12,7 @@ export interface FlowItem {
 interface FlowsPanelProps {
   agentPath: string;
   onClose: () => void;
+  onSwitchPanel: (panel: "connections" | "flows") => void;
   onWidthChange?: (width: number) => void;
 }
 
@@ -22,6 +23,7 @@ const DEFAULT_WIDTH = 260;
 export default function FlowsPanel({
   agentPath,
   onClose,
+  onSwitchPanel,
   onWidthChange,
 }: FlowsPanelProps) {
   const [flows, setFlows] = useState<FlowItem[]>([]);
@@ -88,7 +90,14 @@ export default function FlowsPanel({
   return (
     <div className="flows-panel" style={{ width }}>
       <div className="flows-panel-header">
-        <h3 className="flows-panel-title">Flows</h3>
+        <select
+          className="flows-panel-title"
+          value="flows"
+          onChange={(e) => onSwitchPanel(e.target.value as "connections" | "flows")}
+        >
+          <option value="connections">Connections</option>
+          <option value="flows">Flows</option>
+        </select>
         <button className="flows-panel-close" onClick={onClose} title="Close">
           <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
             <path d="M3 3L11 11M11 3L3 11" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />

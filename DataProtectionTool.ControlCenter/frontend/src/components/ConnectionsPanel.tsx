@@ -52,6 +52,7 @@ interface ConnectionsPanelProps {
   onDryRun: (rowKey: string, schema: string, tableName: string) => void;
   onFullRun: (rowKey: string, schema: string, tableName: string) => void;
   onClose: () => void;
+  onSwitchPanel: (panel: "connections" | "flows") => void;
   onWidthChange?: (width: number) => void;
 }
 
@@ -75,6 +76,7 @@ export default function ConnectionsPanel({
   onDryRun,
   onFullRun,
   onClose,
+  onSwitchPanel,
   onWidthChange,
 }: ConnectionsPanelProps) {
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
@@ -168,7 +170,14 @@ export default function ConnectionsPanel({
     <>
     <div className="connections-panel" style={{ width }}>
       <div className="connections-panel-header">
-        <h3 className="connections-panel-title">Connections</h3>
+        <select
+          className="connections-panel-title"
+          value="connections"
+          onChange={(e) => onSwitchPanel(e.target.value as "connections" | "flows")}
+        >
+          <option value="connections">Connections</option>
+          <option value="flows">Flows</option>
+        </select>
         <button
           className="connections-panel-close"
           onClick={onClose}

@@ -26,6 +26,11 @@
   font-size: 15px;
   font-weight: 600;
   color: #333;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  padding: 0;
+  appearance: auto;
 }
 
 .flows-panel-close {

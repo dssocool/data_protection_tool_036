@@ -971,24 +971,47 @@ static async Task HandleGetColumnRulesAsync(
         var authToken = root.GetProperty("authToken").GetString() ?? "";
 
         var baseUrl = $"{engineUrl.TrimEnd('/')}/masking/api/v5.1.44";
-        var url = $"{baseUrl}/file-field-metadata?file_format_id={Uri.EscapeDataString(fileFormatId)}&page_number=1";
 
         Console.WriteLine($"[Agent] Fetching column rules for fileFormatId={fileFormatId}...");
 
         using var httpClient = new HttpClient { Timeout = TimeSpan.FromSeconds(100) };
-        using var request = new HttpRequestMessage(HttpMethod.Get, url);
-        request.Headers.Accept.Add(new System.Net.Http.Headers.MediaTypeWithQualityHeaderValue("application/json"));
-        request.Headers.TryAddWithoutValidation("Authorization", authToken);
-
-        using var response = await httpClient.SendAsync(request);
-        response.EnsureSuccessStatusCode();
-        var responseBody = await response.Content.ReadAsStringAsync();
-
-        using var bodyDoc = JsonDocument.Parse(responseBody);
         var responseList = new List<JsonElement>();
-        if (bodyDoc.RootElement.TryGetProperty("responseList", out var listEl) && listEl.ValueKind == JsonValueKind.Array)
+        int pageNumber = 1;
+        const int maxPages = 100;
+
+        while (pageNumber <= maxPages)
         {
-            responseList = listEl.EnumerateArray().Select(e => e.Clone()).ToList();
+            var url = $"{baseUrl}/file-field-metadata?file_format_id={Uri.EscapeDataString(fileFormatId)}&page_number={pageNumber}";
+
+            using var request = new HttpRequestMessage(HttpMethod.Get, url);
+            request.Headers.Accept.Add(new System.Net.Http.Headers.MediaTypeWithQualityHeaderValue("application/json"));
+            request.Headers.TryAddWithoutValidation("Authorization", authToken);
+
+            using var response = await httpClient.SendAsync(request);
+            response.EnsureSuccessStatusCode();
+            var responseBody = await response.Content.ReadAsStringAsync();
+
+            using var bodyDoc = JsonDocument.Parse(responseBody);
+            if (!bodyDoc.RootElement.TryGetProperty("responseList", out var listEl) || listEl.ValueKind != JsonValueKind.Array)
+                break;
+
+            var pageItems = listEl.EnumerateArray().Select(e => e.Clone()).ToList();
+            if (pageItems.Count == 0)
+                break;
+
+            responseList.AddRange(pageItems);
+
+            if (bodyDoc.RootElement.TryGetProperty("_pageInfo", out var pageInfoEl) && pageInfoEl.ValueKind == JsonValueKind.String)
+            {
+                using var pageInfoDoc = JsonDocument.Parse(pageInfoEl.GetString()!);
+                var pi = pageInfoDoc.RootElement;
+                int numberOnPage = pi.TryGetProperty("numberOnPage", out var nop) ? nop.GetInt32() : 0;
+                int total = pi.TryGetProperty("total", out var tot) ? tot.GetInt32() : 0;
+                if (numberOnPage >= total)
+                    break;
+            }
+
+            pageNumber++;
         }
 
         var matchedAlgorithms = new Dictionary<string, JsonElement>();
@@ -1907,12 +1930,13 @@ class EngineMetadataStore
 
             allItems.AddRange(pageItems);
 
-            if (doc.RootElement.TryGetProperty("numberOfPages", out var numPagesEl))
+            if (doc.RootElement.TryGetProperty("_pageInfo", out var pageInfoEl) && pageInfoEl.ValueKind == JsonValueKind.String)
             {
-                int totalPages = numPagesEl.ValueKind == JsonValueKind.Number
-                    ? numPagesEl.GetInt32()
-                    : int.TryParse(numPagesEl.ToString(), out var parsed) ? parsed : 1;
-                if (pageNumber >= totalPages)
+                using var pageInfoDoc = JsonDocument.Parse(pageInfoEl.GetString()!);
+                var pi = pageInfoDoc.RootElement;
+                int numberOnPage = pi.TryGetProperty("numberOnPage", out var nop) ? nop.GetInt32() : 0;
+                int total = pi.TryGetProperty("total", out var tot) ? tot.GetInt32() : 0;
+                if (numberOnPage >= total)
                     break;
             }
 

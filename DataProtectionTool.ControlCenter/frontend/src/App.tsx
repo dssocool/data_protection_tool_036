@@ -1061,6 +1061,7 @@ export default function App() {
             onDryRun={handleDryRun}
             onFullRun={handleFullRunOpen}
             onClose={() => setLeftPanel(null)}
+            onSwitchPanel={setLeftPanel}
             onWidthChange={setConnectionsPanelWidth}
           />
         )}
@@ -1068,6 +1069,7 @@ export default function App() {
           <FlowsPanel
             agentPath={getAgentPath() ?? ""}
             onClose={() => setLeftPanel(null)}
+            onSwitchPanel={setLeftPanel}
             onWidthChange={setConnectionsPanelWidth}
           />
         )}
