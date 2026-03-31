@@ -39,6 +39,11 @@ interface DataPreviewPanelProps {
   onTabChange: (tab: string) => void;
   onTabClose: (tab: string) => void;
   onDiffSelect: (leftTab: string, rightTab: string) => void;
+  onSaveColumnRule: (params: {
+    fileFieldMetadataId: string;
+    algorithmName: string;
+    domainName: string;
+  }) => Promise<void>;
   panelLeft: number;
 }
 
@@ -142,6 +147,7 @@ export default function DataPreviewPanel({
   onTabChange,
   onTabClose,
   onDiffSelect,
+  onSaveColumnRule,
   panelLeft,
 }: DataPreviewPanelProps) {
   const dataTabs = useMemo(() => {
@@ -168,6 +174,7 @@ export default function DataPreviewPanel({
   const [selectedRule, setSelectedRule] = useState<Record<string, unknown> | null>(null);
   const [modalDomainName, setModalDomainName] = useState("");
   const [modalAlgorithmName, setModalAlgorithmName] = useState("");
+  const [saving, setSaving] = useState(false);
 
   const handleDataScroll = useCallback((e: React.UIEvent<HTMLDivElement>) => {
     if (columnRulesScrollRef.current) {
@@ -497,6 +504,38 @@ export default function DataPreviewPanel({
                     {isMasked && matchedFw ? str(matchedFw.description) : ""}
                   </span>
                 </div>
+              </div>
+              <div className="column-rule-modal-footer">
+                <button
+                  className="column-rule-btn-cancel"
+                  onClick={() => setSelectedRule(null)}
+                  disabled={saving}
+                >
+                  Cancel
+                </button>
+                <button
+                  className="column-rule-btn-save"
+                  disabled={saving || !modalAlgorithmName || !modalDomainName}
+                  onClick={async () => {
+                    const id = selectedRule.fileFieldMetadataId;
+                    if (typeof id !== "string" && typeof id !== "number") return;
+                    setSaving(true);
+                    try {
+                      await onSaveColumnRule({
+                        fileFieldMetadataId: String(id),
+                        algorithmName: modalAlgorithmName,
+                        domainName: modalDomainName,
+                      });
+                      setSelectedRule(null);
+                    } catch {
+                      // keep modal open on error
+                    } finally {
+                      setSaving(false);
+                    }
+                  }}
+                >
+                  {saving ? "Saving..." : "Save"}
+                </button>
               </div>
             </div>
           </div>

@@ -1565,6 +1565,57 @@ app.MapGet("/api/agents/{path}/column-rules", async (string path, string? fileFo
     }
 });
 
+app.MapPut("/api/agents/{path}/column-rule/{fileFieldMetadataId}", async (string path, string fileFieldMetadataId, HttpRequest request, AgentRegistry registry, DataEngineConfig dataEngineConfig) =>
+{
+    if (!registry.TryGetConnection(path, out var connection) || connection is null)
+        return Results.NotFound(new { error = "Agent not found or not connected." });
+
+    if (string.IsNullOrWhiteSpace(fileFieldMetadataId))
+        return Results.Ok(new { success = false, message = "fileFieldMetadataId is required." });
+
+    string body;
+    using (var reader = new StreamReader(request.Body))
+        body = await reader.ReadToEndAsync();
+
+    using var bodyDoc = JsonDocument.Parse(body);
+    var algorithmName = bodyDoc.RootElement.TryGetProperty("algorithmName", out var algEl) ? algEl.GetString() ?? "" : "";
+    var domainName = bodyDoc.RootElement.TryGetProperty("domainName", out var domEl) ? domEl.GetString() ?? "" : "";
+
+    var engineBaseUrl = $"{dataEngineConfig.EngineUrl.TrimEnd('/')}/masking/api/v5.1.44";
+
+    var httpPayload = JsonSerializer.Serialize(new
+    {
+        method = "PUT",
+        url = $"{engineBaseUrl}/file-field-metadata/{fileFieldMetadataId}",
+        headers = new Dictionary<string, string>
+        {
+            ["accept"] = "application/json",
+            ["Authorization"] = dataEngineConfig.AuthorizationToken,
+            ["Content-Type"] = "application/json"
+        },
+        body = JsonSerializer.Serialize(new
+        {
+            algorithmName,
+            domainName,
+            isProfilerWritable = false
+        })
+    });
+
+    try
+    {
+        var result = await connection.SendCommandAsync("http_request", httpPayload, TimeSpan.FromSeconds(120));
+        return Results.Content(result, "application/json");
+    }
+    catch (TimeoutException)
+    {
+        return Results.Ok(new { success = false, message = "Agent did not respond within 120 seconds." });
+    }
+    catch (Exception ex)
+    {
+        return Results.Ok(new { success = false, message = $"Column rule save error: {ex.Message}" });
+    }
+});
+
 app.MapGet("/api/agents/{path}/engine-metadata", async (string path, AgentRegistry registry) =>
 {
     if (!registry.TryGetConnection(path, out var connection) || connection is null)

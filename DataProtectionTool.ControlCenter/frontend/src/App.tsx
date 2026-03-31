@@ -390,6 +390,45 @@ export default function App() {
     setAllFrameworks([]);
   }
 
+  async function handleSaveColumnRule(params: {
+    fileFieldMetadataId: string;
+    algorithmName: string;
+    domainName: string;
+  }) {
+    const agentPath = getAgentPath();
+    if (!agentPath) return;
+
+    const res = await fetch(
+      `/api/agents/${agentPath}/column-rule/${encodeURIComponent(params.fileFieldMetadataId)}`,
+      {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          algorithmName: params.algorithmName,
+          domainName: params.domainName,
+        }),
+      }
+    );
+
+    if (!res.ok) {
+      throw new Error(`Server error: ${res.status}`);
+    }
+
+    const result = await res.json();
+    if (result.success === false) {
+      throw new Error(result.message || "Failed to save column rule.");
+    }
+
+    if (selectedTable) {
+      const tableInfo = connectionTables[selectedTable.rowKey]?.find(
+        (t) => t.schema === selectedTable.schema && t.name === selectedTable.tableName
+      );
+      if (tableInfo?.fileFormatId) {
+        await fetchColumnRules(agentPath, tableInfo.fileFormatId);
+      }
+    }
+  }
+
   async function handleTableClick(rowKey: string, schema: string, tableName: string) {
     const agentPath = getAgentPath();
     if (!agentPath) return;
@@ -1039,6 +1078,7 @@ export default function App() {
               setDiffTab({ name, leftTab, rightTab });
               setActivePreviewTab(name);
             }}
+            onSaveColumnRule={handleSaveColumnRule}
             panelLeft={showConnections ? connectionsPanelWidth + 16 : 0}
           />
         )}
