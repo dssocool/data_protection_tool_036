@@ -296,6 +296,30 @@
   background: none;
 }
 
+.conn-context-menu-group {
+  padding: 6px 16px 3px;
+  font-size: 11px;
+  font-weight: 600;
+  color: #888;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  cursor: default;
+  user-select: none;
+}
+
+.conn-context-menu-group + .conn-context-menu-group {
+  border-top: 1px solid #e8e8e8;
+  margin-top: 4px;
+  padding-top: 8px;
+}
+
+.conn-context-menu-subtitle {
+  display: block;
+  font-size: 11px;
+  color: #999;
+  margin-top: 1px;
+}
+
 .conn-table-running-icon {
   position: absolute;
   top: 0;

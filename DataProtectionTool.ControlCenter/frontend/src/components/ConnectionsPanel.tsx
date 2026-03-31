@@ -338,17 +338,35 @@ export default function ConnectionsPanel({
           </div>
         ) : (
           <>
-            <div
-              className="conn-context-menu-item"
-              onClick={() => {
-                setContextMenu(null);
-                onReloadPreview();
-              }}
-            >
-              Refresh
-            </div>
-            {!contextMenu.isQuery && (
+            {contextMenu.isQuery ? (
+              <div
+                className="conn-context-menu-item"
+                onClick={() => {
+                  setContextMenu(null);
+                  onReloadPreview();
+                }}
+              >
+                Refresh
+              </div>
+            ) : (
               <>
+                <div className="conn-context-menu-group">Sample</div>
+                <div
+                  className="conn-context-menu-item"
+                  onClick={() => {
+                    setContextMenu(null);
+                    onReloadPreview();
+                  }}
+                >
+                  Sample Data
+                </div>
+                <div
+                  className="conn-context-menu-item conn-context-menu-item-disabled"
+                  title="Coming soon"
+                >
+                  Sample from Query
+                </div>
+                <div className="conn-context-menu-group">Data Protection</div>
                 <div
                   className="conn-context-menu-item"
                   onClick={() => {
@@ -357,7 +375,8 @@ export default function ConnectionsPanel({
                     onDryRun(rowKey, schema, tableName);
                   }}
                 >
-                  Data Protection: Dry Run
+                  Preview
+                  <span className="conn-context-menu-subtitle">View sample output without saving changes</span>
                 </div>
                 {(() => {
                   const t = connectionTables[contextMenu.rowKey]?.find(
@@ -367,7 +386,7 @@ export default function ConnectionsPanel({
                   return (
                     <div
                       className={`conn-context-menu-item${hasFormat ? "" : " conn-context-menu-item-disabled"}`}
-                      title={hasFormat ? undefined : "You must do Dry Run first."}
+                      title={hasFormat ? undefined : "You must run Preview first."}
                       onClick={() => {
                         if (!hasFormat) return;
                         const { rowKey, schema, tableName } = contextMenu;
@@ -375,7 +394,8 @@ export default function ConnectionsPanel({
                         onFullRun(rowKey, schema, tableName);
                       }}
                     >
-                      Data Protection: Full Run
+                      Run
+                      <span className="conn-context-menu-subtitle">Apply to full dataset</span>
                     </div>
                   );
                 })()}
