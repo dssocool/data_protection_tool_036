@@ -58,7 +58,7 @@ function parseFlow(flow: FlowItem): ParsedFlow {
     srcTable: src?.tableName || "—",
     destDatabase: dest?.databaseName || dest?.serverName || "—",
     destSchema: dest?.schema || "—",
-    destTable: (dest as Record<string, unknown>)?.tableName as string || "—",
+    destTable: (dest as unknown as Record<string, unknown>)?.tableName as string || "—",
   };
 }
 
