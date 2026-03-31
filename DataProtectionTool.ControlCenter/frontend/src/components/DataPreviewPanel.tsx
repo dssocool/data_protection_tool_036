@@ -436,8 +436,7 @@ export default function DataPreviewPanel({
         </div>
       )}
       {selectedRule && (() => {
-        const isMasked = selectedRule.isMasked !== false;
-        const matchedAlg = isMasked && modalAlgorithmName
+        const matchedAlg = modalAlgorithmName
           ? allAlgorithms.find(a => a.algorithmName === modalAlgorithmName)
           : undefined;
         const fwId = matchedAlg && matchedAlg.frameworkId != null ? String(matchedAlg.frameworkId) : "";
@@ -469,8 +468,7 @@ export default function DataPreviewPanel({
                   <span className="column-rule-label">Domain Name</span>
                   <select
                     className="column-rule-select"
-                    value={isMasked ? modalDomainName : ""}
-                    disabled={!isMasked}
+                    value={modalDomainName}
                     onChange={(e) => {
                       const newDomain = e.target.value;
                       setModalDomainName(newDomain);
@@ -492,8 +490,7 @@ export default function DataPreviewPanel({
                   <span className="column-rule-label">Algorithm Name</span>
                   <select
                     className="column-rule-select"
-                    value={isMasked ? modalAlgorithmName : ""}
-                    disabled={!isMasked}
+                    value={modalAlgorithmName}
                     onChange={(e) => setModalAlgorithmName(e.target.value)}
                   >
                     <option value="">-- Select --</option>
@@ -507,31 +504,31 @@ export default function DataPreviewPanel({
                 <div className="column-rule-row">
                   <span className="column-rule-label">Legacy Name</span>
                   <span className="column-rule-readonly">
-                    {isMasked && matchedAlg ? str(matchedAlg.legacyName) : ""}
+                    {matchedAlg ? str(matchedAlg.legacyName) : ""}
                   </span>
                 </div>
                 <div className="column-rule-row">
                   <span className="column-rule-label">Algorithm Description</span>
                   <span className="column-rule-readonly">
-                    {isMasked && matchedAlg ? str(matchedAlg.description) : ""}
+                    {matchedAlg ? str(matchedAlg.description) : ""}
                   </span>
                 </div>
                 <div className="column-rule-row">
                   <span className="column-rule-label">Type</span>
                   <span className="column-rule-readonly">
-                    {isMasked && matchedAlg ? str(matchedAlg.maskType) : ""}
+                    {matchedAlg ? str(matchedAlg.maskType) : ""}
                   </span>
                 </div>
                 <div className="column-rule-row">
                   <span className="column-rule-label">Framework Name</span>
                   <span className="column-rule-readonly">
-                    {isMasked && matchedFw ? str(matchedFw.frameworkName) : ""}
+                    {matchedFw ? str(matchedFw.frameworkName) : ""}
                   </span>
                 </div>
                 <div className="column-rule-row">
                   <span className="column-rule-label">Framework Description</span>
                   <span className="column-rule-readonly">
-                    {isMasked && matchedFw ? str(matchedFw.description) : ""}
+                    {matchedFw ? str(matchedFw.description) : ""}
                   </span>
                 </div>
               </div>
