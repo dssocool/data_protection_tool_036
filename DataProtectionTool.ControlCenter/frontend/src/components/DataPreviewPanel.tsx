@@ -47,6 +47,11 @@ interface DataPreviewPanelProps {
   panelLeft: number;
 }
 
+const NUMERIC_SQL_TYPES = new Set([
+  "int", "bigint", "smallint", "tinyint", "float", "real",
+  "decimal", "numeric", "money", "smallmoney", "bit",
+]);
+
 function resolveTabData(
   tab: string,
   data: PreviewData | null,
@@ -216,6 +221,17 @@ export default function DataPreviewPanel({
     }
     return map;
   }, [columnRules]);
+
+  const isAlgorithmAllowedForField = useCallback((algName: string, fieldName: string) => {
+    if (!algName) return true;
+    const colIdx = data?.headers?.indexOf(fieldName) ?? -1;
+    const sqlType = colIdx >= 0 && data?.columnTypes?.[colIdx]
+      ? data.columnTypes[colIdx].toLowerCase()
+      : null;
+    if (sqlType == null || !NUMERIC_SQL_TYPES.has(sqlType)) return true;
+    const alg = allAlgorithms.find(a => a.algorithmName === algName);
+    return !alg || alg.maskType !== "STRING";
+  }, [data, allAlgorithms]);
 
   const closeContextMenu = useCallback(() => setContextMenu(null), []);
 
@@ -415,7 +431,10 @@ export default function DataPreviewPanel({
                           setSelectedRule(rule);
                           const isMasked = rule.isMasked !== false;
                           setModalDomainName(isMasked && typeof rule.domainName === "string" ? rule.domainName : "");
-                          setModalAlgorithmName(isMasked && typeof rule.algorithmName === "string" ? rule.algorithmName : "");
+                          const candidateAlg = isMasked && typeof rule.algorithmName === "string" ? rule.algorithmName : "";
+                          setModalAlgorithmName(
+                            isAlgorithmAllowedForField(candidateAlg, header) ? candidateAlg : ""
+                          );
                         }}
                         title={rule.isMasked === false ? `No masking for ${header}` : `View rule for ${header}`}
                       >
@@ -454,6 +473,15 @@ export default function DataPreviewPanel({
           ? allFrameworks.find(f => String(f.frameworkId) === fwId)
           : undefined;
 
+        const columnIndex = data?.headers?.indexOf(String(selectedRule.fieldName ?? "")) ?? -1;
+        const sqlType = columnIndex >= 0 && data?.columnTypes?.[columnIndex]
+          ? data.columnTypes[columnIndex].toLowerCase()
+          : null;
+        const isNumericColumn = sqlType != null && NUMERIC_SQL_TYPES.has(sqlType);
+        const filteredAlgorithms = isNumericColumn
+          ? allAlgorithms.filter(a => a.maskType !== "STRING")
+          : allAlgorithms;
+
         const str = (val: unknown) => (val != null ? String(val) : "");
 
         return (
@@ -485,7 +513,10 @@ export default function DataPreviewPanel({
                       const dom = allDomains.find(d => d.domainName === newDomain);
                       const defaultAlg = dom && typeof dom.defaultAlgorithmCode === "string"
                         ? dom.defaultAlgorithmCode : "";
-                      setModalAlgorithmName(defaultAlg);
+                      const fieldName = String(selectedRule.fieldName ?? "");
+                      setModalAlgorithmName(
+                        isAlgorithmAllowedForField(defaultAlg, fieldName) ? defaultAlg : ""
+                      );
                     }}
                   >
                     <option value="">-- Select --</option>
@@ -504,7 +535,7 @@ export default function DataPreviewPanel({
                     onChange={(e) => setModalAlgorithmName(e.target.value)}
                   >
                     <option value="">-- Select --</option>
-                    {allAlgorithms.map((a, i) => (
+                    {filteredAlgorithms.map((a, i) => (
                       <option key={i} value={String(a.algorithmName ?? "")}>
                         {String(a.algorithmName ?? "")}
                       </option>
