@@ -54,10 +54,18 @@
 .event-dialog-search {
   display: flex;
   align-items: center;
-  gap: 6px;
-  padding: 6px 10px;
-  border-bottom: 1px solid #e0e0e0;
-  flex-shrink: 0;
+  gap: 4px;
+  flex: 1;
+  margin: 0 10px;
+  padding: 2px 6px;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  background: #f8f8f8;
+}
+
+.event-dialog-search:focus-within {
+  border-color: #b0b0b0;
+  background: #fff;
 }
 
 .event-dialog-search-icon {
@@ -69,32 +77,16 @@
   flex: 1;
   border: none;
   outline: none;
-  font-size: 12px;
+  font-size: 11px;
   font-family: inherit;
   color: #333;
   background: transparent;
   padding: 2px 0;
+  min-width: 0;
 }
 
 .event-dialog-search-input::placeholder {
   color: #bbb;
-}
-
-.event-dialog-search-clear {
-  flex-shrink: 0;
-  background: none;
-  border: none;
-  cursor: pointer;
-  padding: 2px;
-  border-radius: 3px;
-  display: flex;
-  align-items: center;
-  color: #999;
-}
-
-.event-dialog-search-clear:hover {
-  background: #e8e8e8;
-  color: #666;
 }
 
 .event-dialog-body {

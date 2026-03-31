@@ -121,36 +121,24 @@ export default function EventDialog({ events, onClose }: EventDialogProps) {
       <div className="event-dialog" ref={dialogRef}>
         <div className="event-dialog-header">
           <span className="event-dialog-title">Event History</span>
+          <div className="event-dialog-search">
+            <svg className="event-dialog-search-icon" width="12" height="12" viewBox="0 0 12 12">
+              <circle cx="5" cy="5" r="3.5" fill="none" stroke="currentColor" strokeWidth="1.2" />
+              <path d="M7.5 7.5 L10.5 10.5" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" />
+            </svg>
+            <input
+              type="text"
+              className="event-dialog-search-input"
+              placeholder="Search..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+            />
+          </div>
           <button className="event-dialog-close" onClick={onClose} aria-label="Close">
             <svg width="14" height="14" viewBox="0 0 14 14">
               <path d="M3 3 L11 11 M11 3 L3 11" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
             </svg>
           </button>
-        </div>
-        <div className="event-dialog-search">
-          <svg className="event-dialog-search-icon" width="12" height="12" viewBox="0 0 12 12">
-            <circle cx="5" cy="5" r="3.5" fill="none" stroke="currentColor" strokeWidth="1.2" />
-            <path d="M7.5 7.5 L10.5 10.5" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" />
-          </svg>
-          <input
-            type="text"
-            className="event-dialog-search-input"
-            placeholder="Search events..."
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            autoFocus
-          />
-          {searchQuery && (
-            <button
-              className="event-dialog-search-clear"
-              onClick={() => setSearchQuery("")}
-              aria-label="Clear search"
-            >
-              <svg width="10" height="10" viewBox="0 0 10 10">
-                <path d="M2 2 L8 8 M8 2 L2 8" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
-              </svg>
-            </button>
-          )}
         </div>
         <div className="event-dialog-body">
           {filtered.length === 0 ? (
