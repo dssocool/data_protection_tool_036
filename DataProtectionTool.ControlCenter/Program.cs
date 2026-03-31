@@ -1719,14 +1719,19 @@ app.MapPut("/api/agents/{path}/column-rule/{fileFieldMetadataId}", async (string
     }
 });
 
-app.MapGet("/api/agents/{path}/engine-metadata", async (string path, AgentRegistry registry) =>
+app.MapGet("/api/agents/{path}/engine-metadata", async (string path, AgentRegistry registry, DataEngineConfig dataEngineConfig) =>
 {
     if (!registry.TryGetConnection(path, out var connection) || connection is null)
         return Results.NotFound(new { error = "Agent not found or not connected." });
 
     try
     {
-        var result = await connection.SendCommandAsync("get_engine_metadata", "{}", TimeSpan.FromSeconds(30));
+        var commandPayload = JsonSerializer.Serialize(new
+        {
+            engineUrl = dataEngineConfig.EngineUrl,
+            authToken = dataEngineConfig.AuthorizationToken
+        });
+        var result = await connection.SendCommandAsync("get_engine_metadata", commandPayload, TimeSpan.FromSeconds(120));
         using var doc = JsonDocument.Parse(result);
 
         var success = doc.RootElement.TryGetProperty("success", out var successEl) && successEl.GetBoolean();
@@ -1753,7 +1758,7 @@ app.MapGet("/api/agents/{path}/engine-metadata", async (string path, AgentRegist
     }
     catch (TimeoutException)
     {
-        return Results.Ok(new { success = false, message = "Agent did not respond within 30 seconds." });
+        return Results.Ok(new { success = false, message = "Agent did not respond within 120 seconds." });
     }
     catch (Exception ex)
     {

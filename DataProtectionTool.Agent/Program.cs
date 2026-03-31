@@ -1102,6 +1102,20 @@ static async Task HandleGetEngineMetadataAsync(
         using var envelope = JsonDocument.Parse(payload);
         correlationId = envelope.RootElement.GetProperty("correlationId").GetString() ?? "";
 
+        var dataJson = envelope.RootElement.TryGetProperty("data", out var dataEl) ? dataEl.GetString() ?? "{}" : "{}";
+        using var paramsDoc = JsonDocument.Parse(dataJson);
+        var root = paramsDoc.RootElement;
+        var engineUrl = root.TryGetProperty("engineUrl", out var euEl) ? euEl.GetString() ?? "" : "";
+        var authToken = root.TryGetProperty("authToken", out var atEl) ? atEl.GetString() ?? "" : "";
+
+        if (!metadataStore.IsLoaded && !string.IsNullOrEmpty(engineUrl) && !string.IsNullOrEmpty(authToken))
+        {
+            Console.WriteLine("[Agent] Metadata store not loaded, fetching on-demand...");
+            await metadataStore.FetchAllAsync(engineUrl, authToken);
+            Console.WriteLine($"[Agent] On-demand metadata loaded: {metadataStore.Algorithms?.Count ?? 0} algorithms, " +
+                $"{metadataStore.Domains?.Count ?? 0} domains, {metadataStore.Frameworks?.Count ?? 0} frameworks");
+        }
+
         var resultPayload = JsonSerializer.Serialize(new
         {
             correlationId,
