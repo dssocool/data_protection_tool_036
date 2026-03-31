@@ -61,6 +61,7 @@ export default function App() {
   const [activePreviewTab, setActivePreviewTab] = useState("Sample");
   const [diffTab, setDiffTab] = useState<{ name: string; leftTab: string; rightTab: string } | null>(null);
   const [connectionsPanelWidth, setConnectionsPanelWidth] = useState(260);
+  const [expandedConnections, setExpandedConnections] = useState<Set<string>>(new Set());
   const [statusEvents, setStatusEvents] = useState<StatusEvent[]>([]);
   const [showEventDialog, setShowEventDialog] = useState(false);
   const [agentOid, setAgentOid] = useState("");
@@ -1331,6 +1332,9 @@ export default function App() {
                 selectedTable={selectedTable}
                 selectedQuery={selectedQuery}
                 tableTabCounts={tableTabCounts}
+                expanded={expandedConnections}
+                onExpandedChange={setExpandedConnections}
+                width={connectionsPanelWidth}
                 flowsBadgeCount={unseenFlowCount}
                 onExpandConnection={handleExpandConnection}
                 onTableClick={handleTableClick}

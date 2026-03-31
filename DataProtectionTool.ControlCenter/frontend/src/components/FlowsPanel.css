@@ -39,8 +39,9 @@
 }
 
 .panel-switch-btn {
-  width: 28px;
-  height: 28px;
+  position: relative;
+  width: 36px;
+  height: 36px;
   display: flex;
   align-items: center;
   justify-content: center;

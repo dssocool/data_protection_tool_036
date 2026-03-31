@@ -45,6 +45,9 @@ interface ConnectionsPanelProps {
   selectedTable: { rowKey: string; schema: string; tableName: string } | null;
   selectedQuery: { connectionRowKey: string; queryRowKey: string; queryText: string } | null;
   tableTabCounts: Record<string, number>;
+  expanded: Set<string>;
+  onExpandedChange: (next: Set<string>) => void;
+  width: number;
   onExpandConnection: (rowKey: string) => void;
   onTableClick: (rowKey: string, schema: string, tableName: string) => void;
   onQueryClick: (connectionRowKey: string, queryRowKey: string, queryText: string) => void;
@@ -60,7 +63,6 @@ interface ConnectionsPanelProps {
 
 const MIN_WIDTH = 200;
 const MAX_WIDTH = 500;
-const DEFAULT_WIDTH = 260;
 
 export default function ConnectionsPanel({
   connections,
@@ -71,6 +73,9 @@ export default function ConnectionsPanel({
   selectedTable,
   selectedQuery,
   tableTabCounts,
+  expanded,
+  onExpandedChange,
+  width,
   onExpandConnection,
   onTableClick,
   onQueryClick,
@@ -83,8 +88,6 @@ export default function ConnectionsPanel({
   onWidthChange,
   flowsBadgeCount,
 }: ConnectionsPanelProps) {
-  const [expanded, setExpanded] = useState<Set<string>>(new Set());
-  const [width, setWidth] = useState(DEFAULT_WIDTH);
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
   const isResizing = useRef(false);
   const panelRef = useRef<HTMLDivElement>(null);
@@ -98,7 +101,6 @@ export default function ConnectionsPanel({
     function onMouseMove(ev: MouseEvent) {
       if (!isResizing.current) return;
       const newWidth = Math.min(MAX_WIDTH, Math.max(MIN_WIDTH, startWidth + ev.clientX - startX));
-      setWidth(newWidth);
       onWidthChange?.(newWidth);
     }
 
@@ -132,7 +134,6 @@ export default function ConnectionsPanel({
     const measured = Math.min(MAX_WIDTH, Math.max(MIN_WIDTH, el.scrollWidth));
     el.style.width = prev;
     if (measured !== width) {
-      setWidth(measured);
       onWidthChange?.(measured);
     }
   }, [connections, connectionTables, connectionQueries, expanded]);
@@ -168,16 +169,14 @@ export default function ConnectionsPanel({
   }, [connections]);
 
   function handleToggle(rowKey: string) {
-    setExpanded((prev) => {
-      const next = new Set(prev);
-      if (next.has(rowKey)) {
-        next.delete(rowKey);
-      } else {
-        next.add(rowKey);
-        onExpandConnection(rowKey);
-      }
-      return next;
-    });
+    const next = new Set(expanded);
+    if (next.has(rowKey)) {
+      next.delete(rowKey);
+    } else {
+      next.add(rowKey);
+      onExpandConnection(rowKey);
+    }
+    onExpandedChange(next);
   }
 
   const isExpanded = (rowKey: string) => expanded.has(rowKey);

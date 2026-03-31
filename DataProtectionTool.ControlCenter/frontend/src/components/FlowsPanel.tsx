@@ -239,7 +239,7 @@ export default function FlowsPanel({
               aria-label="Connections"
               onClick={() => onSwitchPanel("connections")}
             >
-              <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+              <svg width="24" height="24" viewBox="0 0 16 16" fill="none">
                 <circle cx="4" cy="4" r="2" stroke="currentColor" strokeWidth="1.3" />
                 <circle cx="12" cy="4" r="2" stroke="currentColor" strokeWidth="1.3" />
                 <circle cx="8" cy="12" r="2" stroke="currentColor" strokeWidth="1.3" />
@@ -252,7 +252,7 @@ export default function FlowsPanel({
               aria-label="Flows"
               onClick={() => onSwitchPanel("flows")}
             >
-              <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+              <svg width="24" height="24" viewBox="0 0 16 16" fill="none">
                 <path d="M3 4H7M3 8H10M3 12H13" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
                 <path d="M12 3L14 4L12 5" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round" />
               </svg>
