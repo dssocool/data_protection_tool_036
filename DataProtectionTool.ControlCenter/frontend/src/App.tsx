@@ -855,6 +855,7 @@ export default function App() {
               completed = true;
               let maskedFilenames = filenames;
               let completedFileFormatId = "";
+              let completeSqlColumnTypes: string[] | undefined;
               try {
                 const completeData = JSON.parse(eventData);
                 if (Array.isArray(completeData.maskedFilenames) && completeData.maskedFilenames.length > 0) {
@@ -862,6 +863,9 @@ export default function App() {
                 }
                 if (typeof completeData.fileFormatId === "string") {
                   completedFileFormatId = completeData.fileFormatId;
+                }
+                if (Array.isArray(completeData.sqlColumnTypes) && completeData.sqlColumnTypes.length > 0) {
+                  completeSqlColumnTypes = completeData.sqlColumnTypes;
                 }
               } catch { /* use original filenames as fallback */ }
               const mergeRes = await fetch("/api/blob/preview-merge", {
@@ -872,6 +876,9 @@ export default function App() {
               if (mergeRes.ok) {
                 const masked = await mergeRes.json();
                 const maskedPreview = masked as PreviewData;
+                if (completeSqlColumnTypes) {
+                  maskedPreview.columnTypes = completeSqlColumnTypes;
+                }
 
                 const finishDryRun = (prev: DryRunResult[]) =>
                   prev.map((dr) =>

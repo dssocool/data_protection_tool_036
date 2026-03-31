@@ -184,6 +184,10 @@ while (!cts.Token.IsCancellationRequested)
                 {
                     _ = HandleCreateFileMetadataAsync(call, agentId, oid, tid, response.Payload);
                 }
+                else if (response.Type == "fetch_sql_types")
+                {
+                    _ = HandleFetchSqlTypesAsync(call, agentId, oid, tid, response.Payload, connectionManager);
+                }
                 else if (response.Type == "list_schemas")
                 {
                     _ = HandleListSchemasAsync(call, agentId, oid, tid, response.Payload, connectionManager);
@@ -434,6 +438,96 @@ static async Task HandleListTablesAsync(
             {
                 AgentId = agentId,
                 Type = "list_tables_result",
+                Payload = resultPayload,
+                Oid = oid,
+                Tid = tid
+            });
+        }
+        catch (Exception writeEx)
+        {
+            Console.Error.WriteLine($"[Agent] Failed to send error result: {writeEx.Message}");
+        }
+    }
+}
+
+static async Task HandleFetchSqlTypesAsync(
+    AsyncDuplexStreamingCall<AgentMessage, ServerMessage> call,
+    string agentId, string oid, string tid, string payload,
+    SqlConnectionManager connManager)
+{
+    string correlationId = "";
+    try
+    {
+        using var envelope = JsonDocument.Parse(payload);
+        correlationId = envelope.RootElement.GetProperty("correlationId").GetString() ?? "";
+        var dataJson = envelope.RootElement.GetProperty("data").GetString() ?? "{}";
+
+        using var paramsDoc = JsonDocument.Parse(dataJson);
+        var rowKey = paramsDoc.RootElement.GetProperty("rowKey").GetString() ?? "";
+        var schema = paramsDoc.RootElement.GetProperty("schema").GetString() ?? "";
+        var tableName = paramsDoc.RootElement.GetProperty("tableName").GetString() ?? "";
+
+        Console.WriteLine($"[Agent] Fetching SQL types for [{schema}].[{tableName}] on connection {rowKey}...");
+
+        var columns = await connManager.ExecuteWithRetryAsync(rowKey, call, agentId, oid, tid,
+            async (sqlConn) =>
+            {
+                var result = new List<object>();
+                await using var cmd = sqlConn.CreateCommand();
+                cmd.CommandText = @"SELECT COLUMN_NAME, DATA_TYPE
+                    FROM INFORMATION_SCHEMA.COLUMNS
+                    WHERE TABLE_SCHEMA = @schema AND TABLE_NAME = @tableName
+                    ORDER BY ORDINAL_POSITION";
+                cmd.Parameters.AddWithValue("@schema", schema);
+                cmd.Parameters.AddWithValue("@tableName", tableName);
+
+                await using var reader = await cmd.ExecuteReaderAsync();
+                while (await reader.ReadAsync())
+                {
+                    result.Add(new
+                    {
+                        name = reader.GetString(0),
+                        dataType = reader.GetString(1)
+                    });
+                }
+                return result;
+            });
+
+        var resultPayload = JsonSerializer.Serialize(new
+        {
+            correlationId,
+            success = true,
+            columns
+        });
+
+        await call.RequestStream.WriteAsync(new AgentMessage
+        {
+            AgentId = agentId,
+            Type = "fetch_sql_types_result",
+            Payload = resultPayload,
+            Oid = oid,
+            Tid = tid
+        });
+
+        Console.WriteLine($"[Agent] Fetched SQL types for {columns.Count} columns in [{schema}].[{tableName}].");
+    }
+    catch (Exception ex)
+    {
+        Console.Error.WriteLine($"[Agent] Fetch SQL types failed: {ex.Message}");
+
+        var resultPayload = JsonSerializer.Serialize(new
+        {
+            correlationId,
+            success = false,
+            message = $"Fetch SQL types failed: {ex.Message}"
+        });
+
+        try
+        {
+            await call.RequestStream.WriteAsync(new AgentMessage
+            {
+                AgentId = agentId,
+                Type = "fetch_sql_types_result",
                 Payload = resultPayload,
                 Oid = oid,
                 Tid = tid

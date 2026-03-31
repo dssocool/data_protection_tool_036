@@ -961,6 +961,39 @@ app.MapPost("/api/agents/{path}/dry-run", async (string path, HttpContext httpCo
             await destBlob.UploadAsync(stream, overwrite: true);
         }
 
+        // Step 0.5: Fetch original SQL types from the database via the agent
+        await WriteSseEvent("status", "Fetching SQL column types...");
+        var sqlColumnTypes = new List<string>();
+        try
+        {
+            var fetchTypesPayload = JsonSerializer.Serialize(new { rowKey, schema, tableName });
+            var fetchTypesResult = await connection.SendCommandAsync("fetch_sql_types", fetchTypesPayload, TimeSpan.FromSeconds(120));
+            using var fetchTypesDoc = JsonDocument.Parse(fetchTypesResult);
+            var fetchTypesRoot = fetchTypesDoc.RootElement;
+
+            if (fetchTypesRoot.TryGetProperty("success", out var ftSuccessEl) && ftSuccessEl.GetBoolean()
+                && fetchTypesRoot.TryGetProperty("columns", out var columnsEl) && columnsEl.ValueKind == JsonValueKind.Array)
+            {
+                var typeByName = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+                foreach (var col in columnsEl.EnumerateArray())
+                {
+                    var colName = col.GetProperty("name").GetString() ?? "";
+                    var colType = col.GetProperty("dataType").GetString() ?? "";
+                    if (!string.IsNullOrEmpty(colName))
+                        typeByName[colName] = colType;
+                }
+
+                foreach (var header in previewHeaders)
+                {
+                    sqlColumnTypes.Add(typeByName.TryGetValue(header, out var t) ? t : "");
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"[DryRun] Failed to fetch SQL types: {ex.Message}");
+        }
+
         // Step 1: Get or create file format
         await WriteSseEvent("status", "Creating file format...");
         var connEntityForFormat = await clientTableService.GetConnectionByRowKeyAsync(partitionKey, rowKey);
@@ -1341,7 +1374,8 @@ app.MapPost("/api/agents/{path}/dry-run", async (string path, HttpContext httpCo
             profileStatus,
             maskingJobId,
             maskingStatus,
-            maskedFilenames
+            maskedFilenames,
+            sqlColumnTypes
         });
         await WriteSseEvent("complete", completeJson);
     }
