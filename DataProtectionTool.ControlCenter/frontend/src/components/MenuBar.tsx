@@ -76,6 +76,11 @@ export default function MenuBar({
                     </li>
                   </ul>
                 </li>
+                <li className="menu-item">
+                  <button onClick={() => handleAction(onNewQuery)}>
+                    Query
+                  </button>
+                </li>
               </ul>
             </li>
           </ul>
