@@ -15,6 +15,7 @@ export interface FlowDest {
   serverName: string;
   databaseName: string;
   schema: string;
+  tableName: string;
 }
 
 interface FullRunModalProps {
@@ -96,6 +97,7 @@ export default function FullRunModal({
         serverName: destConn.serverName,
         databaseName: destConn.databaseName,
         schema: selectedSchema,
+        tableName,
       },
     );
   }
@@ -115,6 +117,7 @@ export default function FullRunModal({
         serverName: destConn.serverName,
         databaseName: destConn.databaseName,
         schema: selectedSchema,
+        tableName,
       },
       selectedConnection,
       selectedSchema,
@@ -128,7 +131,7 @@ export default function FullRunModal({
         onAnimationEnd={minimizing ? onMinimizeEnd : undefined}
       >
         <div className="fullrun-modal-header">
-          <h2>Data Protection: Full Run</h2>
+          <h2>Data Protection: Run (Apply to full dataset)</h2>
         </div>
 
         <div className="fullrun-modal-body">
@@ -177,6 +180,16 @@ export default function FullRunModal({
                   ))
                 )}
               </select>
+            </div>
+
+            <div className="fullrun-form-row">
+              <label className="fullrun-form-label">Table:</label>
+              <input
+                className="fullrun-form-select"
+                type="text"
+                value={tableName}
+                readOnly
+              />
             </div>
           </div>
         </div>

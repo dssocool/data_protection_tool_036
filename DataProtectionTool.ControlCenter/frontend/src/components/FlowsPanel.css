@@ -326,3 +326,151 @@
   cursor: pointer;
   accent-color: #0078d4;
 }
+
+/* ── Confirm delete dialog ────────────────────────────── */
+
+.flows-confirm-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 2147483647;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.35);
+}
+
+.flows-confirm-dialog {
+  background: #fff;
+  border-radius: 10px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.22);
+  padding: 24px 28px 20px;
+  min-width: 340px;
+  max-width: 440px;
+  animation: flows-confirm-fade-in 0.15s ease-out;
+}
+
+@keyframes flows-confirm-fade-in {
+  from {
+    opacity: 0;
+    transform: scale(0.95) translateY(-8px);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+
+.flows-confirm-title {
+  margin: 0 0 8px;
+  font-size: 16px;
+  font-weight: 600;
+  color: #222;
+}
+
+.flows-confirm-body {
+  margin: 0 0 20px;
+  font-size: 13.5px;
+  line-height: 1.5;
+  color: #555;
+}
+
+.flows-confirm-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.flows-confirm-btn {
+  height: 32px;
+  padding: 0 16px;
+  font-size: 13px;
+  font-weight: 500;
+  border-radius: 6px;
+  border: 1px solid transparent;
+  cursor: pointer;
+  transition: background 0.12s, border-color 0.12s;
+}
+
+.flows-confirm-btn-cancel {
+  color: #333;
+  background: #f0f0f0;
+  border-color: #d0d0d0;
+}
+
+.flows-confirm-btn-cancel:hover {
+  background: #e5e5e5;
+  border-color: #bbb;
+}
+
+.flows-confirm-btn-delete {
+  color: #fff;
+  background: #d32f2f;
+  border-color: #d32f2f;
+}
+
+.flows-confirm-btn-delete:hover {
+  background: #b71c1c;
+  border-color: #b71c1c;
+}
+
+.flows-confirm-btn-run {
+  color: #fff;
+  background: #0078d4;
+  border-color: #0078d4;
+}
+
+.flows-confirm-btn-run:hover {
+  background: #006cbe;
+  border-color: #006cbe;
+}
+
+/* ── Confirm run dialog (wider for table) ────────────── */
+
+.flows-confirm-dialog-wide {
+  max-width: 680px;
+  min-width: 480px;
+}
+
+.flows-confirm-list {
+  max-height: 240px;
+  overflow: auto;
+  margin-bottom: 20px;
+  border: 1px solid #e4e4e4;
+  border-radius: 6px;
+}
+
+.flows-confirm-list-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12.5px;
+}
+
+.flows-confirm-list-table thead th {
+  position: sticky;
+  top: 0;
+  background: #f5f6f8;
+  padding: 6px 10px;
+  text-align: left;
+  font-weight: 600;
+  color: #444;
+  border-bottom: 1px solid #ddd;
+  white-space: nowrap;
+}
+
+.flows-confirm-list-table tbody td {
+  padding: 5px 10px;
+  color: #333;
+  border-bottom: 1px solid #f0f0f0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 140px;
+}
+
+.flows-confirm-list-table tbody tr:nth-child(even) {
+  background: #fafbfc;
+}
+
+.flows-confirm-list-table tbody tr:hover {
+  background: #edf4fc;
+}

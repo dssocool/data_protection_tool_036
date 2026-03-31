@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import type { FlowSource, FlowDest } from "./FullRunModal";
 import "./FlowsPanel.css";
 
@@ -13,6 +14,7 @@ interface FlowsPanelProps {
   agentPath: string;
   onClose: () => void;
   onSwitchPanel: (panel: "connections" | "flows") => void;
+  onRunFlows?: (flows: FlowItem[]) => void;
 }
 
 type SortField = "srcDatabase" | "srcSchema" | "srcTable" | "destDatabase" | "destSchema" | "destTable";
@@ -58,7 +60,7 @@ function parseFlow(flow: FlowItem): ParsedFlow {
     srcTable: src?.tableName || "—",
     destDatabase: dest?.databaseName || dest?.serverName || "—",
     destSchema: dest?.schema || "—",
-    destTable: (dest as unknown as Record<string, unknown>)?.tableName as string || "—",
+    destTable: dest?.tableName || "—",
   };
 }
 
@@ -66,6 +68,7 @@ export default function FlowsPanel({
   agentPath,
   onClose,
   onSwitchPanel,
+  onRunFlows,
 }: FlowsPanelProps) {
   const [flows, setFlows] = useState<FlowItem[]>([]);
   const [loading, setLoading] = useState(true);
@@ -75,6 +78,8 @@ export default function FlowsPanel({
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [colWidths, setColWidths] = useState<number[]>(COLUMNS.map(() => DEFAULT_COL_WIDTH));
   const [actionOpen, setActionOpen] = useState(false);
+  const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false);
+  const [confirmRunOpen, setConfirmRunOpen] = useState(false);
   const actionRef = useRef<HTMLDivElement>(null);
 
   const resizingCol = useRef<number | null>(null);
@@ -139,15 +144,21 @@ export default function FlowsPanel({
   const filtered = useMemo(() => {
     if (!searchText.trim()) return parsed;
     const q = searchText.toLowerCase();
-    return parsed.filter((f) =>
-      f.srcDatabase.toLowerCase().includes(q) ||
-      f.srcSchema.toLowerCase().includes(q) ||
-      f.srcTable.toLowerCase().includes(q) ||
-      f.destDatabase.toLowerCase().includes(q) ||
-      f.destSchema.toLowerCase().includes(q) ||
-      f.destTable.toLowerCase().includes(q)
-    );
-  }, [parsed, searchText]);
+    return parsed.filter((f) => {
+      const raw = flows.find((r) => r.rowKey === f.rowKey);
+      return (
+        f.srcDatabase.toLowerCase().includes(q) ||
+        f.srcSchema.toLowerCase().includes(q) ||
+        f.srcTable.toLowerCase().includes(q) ||
+        f.destDatabase.toLowerCase().includes(q) ||
+        f.destSchema.toLowerCase().includes(q) ||
+        f.destTable.toLowerCase().includes(q) ||
+        f.rowKey.toLowerCase().includes(q) ||
+        (raw?.sourceJson ?? "").toLowerCase().includes(q) ||
+        (raw?.destJson ?? "").toLowerCase().includes(q)
+      );
+    });
+  }, [parsed, flows, searchText]);
 
   const sorted = useMemo(() => {
     if (!sortField) return filtered;
@@ -196,8 +207,14 @@ export default function FlowsPanel({
   const allFilteredSelected = sorted.length > 0 && sorted.every((f) => selected.has(f.rowKey));
   const someFilteredSelected = sorted.some((f) => selected.has(f.rowKey));
 
-  async function handleDeleteSelected() {
+  function handleDeleteSelected() {
     setActionOpen(false);
+    if (selected.size === 0) return;
+    setConfirmDeleteOpen(true);
+  }
+
+  async function confirmDelete() {
+    setConfirmDeleteOpen(false);
     const rowKeys = [...selected];
     if (rowKeys.length === 0) return;
     try {
@@ -217,8 +234,21 @@ export default function FlowsPanel({
 
   function handleRunSelected() {
     setActionOpen(false);
-    // placeholder for batch run
+    if (selected.size === 0) return;
+    setConfirmRunOpen(true);
   }
+
+  function confirmRun() {
+    setConfirmRunOpen(false);
+    const selectedFlows = flows.filter((f) => selected.has(f.rowKey));
+    if (selectedFlows.length === 0) return;
+    onRunFlows?.(selectedFlows);
+  }
+
+  const selectedParsedForRun = useMemo(
+    () => parsed.filter((f) => selected.has(f.rowKey)),
+    [parsed, selected],
+  );
 
   function handleResizeStart(e: React.MouseEvent, colIdx: number) {
     e.preventDefault();
@@ -373,6 +403,88 @@ export default function FlowsPanel({
           </table>
         )}
       </div>
+
+      {confirmDeleteOpen &&
+        createPortal(
+          <div className="flows-confirm-overlay" onMouseDown={() => setConfirmDeleteOpen(false)}>
+            <div className="flows-confirm-dialog" onMouseDown={(e) => e.stopPropagation()}>
+              <h3 className="flows-confirm-title">Confirm Delete</h3>
+              <p className="flows-confirm-body">
+                Are you sure you want to delete {selected.size}{" "}
+                {selected.size === 1 ? "flow" : "flows"}? This action cannot be undone.
+              </p>
+              <div className="flows-confirm-actions">
+                <button
+                  className="flows-confirm-btn flows-confirm-btn-cancel"
+                  onClick={() => setConfirmDeleteOpen(false)}
+                >
+                  Cancel
+                </button>
+                <button
+                  className="flows-confirm-btn flows-confirm-btn-delete"
+                  onClick={confirmDelete}
+                >
+                  Delete
+                </button>
+              </div>
+            </div>
+          </div>,
+          document.body
+        )}
+
+      {confirmRunOpen &&
+        createPortal(
+          <div className="flows-confirm-overlay" onMouseDown={() => setConfirmRunOpen(false)}>
+            <div className="flows-confirm-dialog flows-confirm-dialog-wide" onMouseDown={(e) => e.stopPropagation()}>
+              <h3 className="flows-confirm-title">Confirm Run</h3>
+              <p className="flows-confirm-body">
+                Run {selectedParsedForRun.length}{" "}
+                {selectedParsedForRun.length === 1 ? "flow" : "flows"}?
+              </p>
+              <div className="flows-confirm-list">
+                <table className="flows-confirm-list-table">
+                  <thead>
+                    <tr>
+                      <th>Source Database</th>
+                      <th>Source Schema</th>
+                      <th>Source Table</th>
+                      <th>Dest Database</th>
+                      <th>Dest Schema</th>
+                      <th>Dest Table</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {selectedParsedForRun.map((f) => (
+                      <tr key={f.rowKey}>
+                        <td>{f.srcDatabase}</td>
+                        <td>{f.srcSchema}</td>
+                        <td>{f.srcTable}</td>
+                        <td>{f.destDatabase}</td>
+                        <td>{f.destSchema}</td>
+                        <td>{f.destTable}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              <div className="flows-confirm-actions">
+                <button
+                  className="flows-confirm-btn flows-confirm-btn-cancel"
+                  onClick={() => setConfirmRunOpen(false)}
+                >
+                  Cancel
+                </button>
+                <button
+                  className="flows-confirm-btn flows-confirm-btn-run"
+                  onClick={confirmRun}
+                >
+                  Run
+                </button>
+              </div>
+            </div>
+          </div>,
+          document.body
+        )}
     </div>
   );
 }

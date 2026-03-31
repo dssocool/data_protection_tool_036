@@ -14,6 +14,7 @@ import EventDialog from "./components/EventDialog";
 import FullRunModal from "./components/FullRunModal";
 import type { FlowSource, FlowDest } from "./components/FullRunModal";
 import FlowsPanel from "./components/FlowsPanel";
+import type { FlowItem } from "./components/FlowsPanel";
 import "./App.css";
 
 interface TablePreviewCache {
@@ -31,6 +32,10 @@ interface TablePreviewCache {
 
 function tableKey(rowKey: string, schema: string, tableName: string) {
   return `${rowKey}:${schema}:${tableName}`;
+}
+
+function safeJsonParse<T>(json: string): T | null {
+  try { return JSON.parse(json); } catch { return null; }
 }
 
 function getAgentPath(): string | null {
@@ -1323,6 +1328,21 @@ export default function App() {
     }
   }
 
+  function handleRunFlows(flowItems: FlowItem[]) {
+    for (const flow of flowItems) {
+      const src = safeJsonParse<FlowSource>(flow.sourceJson);
+      const dest = safeJsonParse<FlowDest>(flow.destJson);
+      if (!src || !dest) continue;
+      handleFullRunExecute(
+        dest.connectionRowKey,
+        dest.schema,
+        src.connectionRowKey,
+        src.schema,
+        src.tableName,
+      );
+    }
+  }
+
   const tableTabCounts = useMemo(() => {
     const counts: Record<string, number> = {};
     for (const [key, cached] of tableCacheRef.current.entries()) {
@@ -1356,6 +1376,7 @@ export default function App() {
             agentPath={getAgentPath() ?? ""}
             onClose={() => setLeftPanel(null)}
             onSwitchPanel={setLeftPanel}
+            onRunFlows={handleRunFlows}
           />
         ) : (
           <>
