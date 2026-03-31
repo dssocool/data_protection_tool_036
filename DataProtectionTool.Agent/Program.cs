@@ -622,6 +622,33 @@ static async Task<object> HandleHttpRequestCore(string correlationId, JsonElemen
         responseHeaders[h.Key] = string.Join(", ", h.Value);
 
     Console.WriteLine($"[Agent] HTTP relay completed: {(int)response.StatusCode} {response.StatusCode}");
+
+    if (!response.IsSuccessStatusCode)
+    {
+        Console.WriteLine($"[Agent] *** HTTP request failed ***");
+        Console.WriteLine($"[Agent]   Request : {method} {url}");
+        foreach (var h in requestMessage.Headers)
+            Console.WriteLine($"[Agent]   Request Header : {h.Key}: {string.Join(", ", h.Value)}");
+        if (requestMessage.Content != null)
+            foreach (var h in requestMessage.Content.Headers)
+                Console.WriteLine($"[Agent]   Request Header : {h.Key}: {string.Join(", ", h.Value)}");
+        if (bodyContent != null)
+        {
+            var bodyPreview = bodyContent.Length > 2000
+                ? bodyContent[..2000] + $"... (truncated, total {bodyContent.Length} chars)"
+                : bodyContent;
+            Console.WriteLine($"[Agent]   Request Body : {bodyPreview}");
+        }
+        Console.WriteLine($"[Agent]   Response Status : {(int)response.StatusCode} {response.ReasonPhrase}");
+        foreach (var h in responseHeaders)
+            Console.WriteLine($"[Agent]   Response Header: {h.Key}: {h.Value}");
+        var respPreview = responseBody.Length > 4000
+            ? responseBody[..4000] + $"... (truncated, total {responseBody.Length} chars)"
+            : responseBody;
+        Console.WriteLine($"[Agent]   Response Body  : {respPreview}");
+        Console.WriteLine($"[Agent] *** End of failed HTTP details ***");
+    }
+
     return new
     {
         correlationId,
