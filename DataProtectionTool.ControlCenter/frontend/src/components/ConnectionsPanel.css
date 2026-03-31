@@ -219,6 +219,13 @@
   background: #d4e4f4;
 }
 
+.conn-table-icon-wrapper {
+  position: relative;
+  flex-shrink: 0;
+  width: 14px;
+  height: 14px;
+}
+
 .conn-table-icon {
   flex-shrink: 0;
   color: #999;
@@ -266,7 +273,9 @@
 }
 
 .conn-table-running-icon {
-  flex-shrink: 0;
+  position: absolute;
+  top: 0;
+  left: 0;
   color: #0078d4;
   animation: conn-spin 1s linear infinite;
 }

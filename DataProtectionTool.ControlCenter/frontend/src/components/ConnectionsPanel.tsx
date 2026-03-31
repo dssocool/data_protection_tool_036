@@ -265,17 +265,19 @@ export default function ConnectionsPanel({
                                         onClick={() => onTableClick(conn.rowKey, t.schema, t.name)}
                                         onContextMenu={(e) => handleTableContextMenu(e, conn.rowKey, t.schema, t.name)}
                                       >
-                                        {isDryRunning && (
-                                          <svg className="conn-table-running-icon" width="14" height="14" viewBox="0 0 14 14">
-                                            <circle cx="7" cy="7" r="5.5" fill="none" stroke="currentColor" strokeWidth="1.5" strokeDasharray="20 12" />
+                                        <span className="conn-table-icon-wrapper">
+                                          {isDryRunning && (
+                                            <svg className="conn-table-running-icon" width="14" height="14" viewBox="0 0 14 14">
+                                              <circle cx="7" cy="7" r="5.5" fill="none" stroke="currentColor" strokeWidth="1.5" strokeDasharray="20 12" />
+                                            </svg>
+                                          )}
+                                          <svg className="conn-table-icon" width="14" height="14" viewBox="0 0 14 14">
+                                            <rect x="1" y="1" width="12" height="12" rx="1.5" fill="none" stroke="currentColor" strokeWidth="1" />
+                                            <line x1="1" y1="5" x2="13" y2="5" stroke="currentColor" strokeWidth="1" />
+                                            <line x1="1" y1="9" x2="13" y2="9" stroke="currentColor" strokeWidth="1" />
+                                            <line x1="5" y1="5" x2="5" y2="13" stroke="currentColor" strokeWidth="1" />
                                           </svg>
-                                        )}
-                                        <svg className="conn-table-icon" width="14" height="14" viewBox="0 0 14 14">
-                                          <rect x="1" y="1" width="12" height="12" rx="1.5" fill="none" stroke="currentColor" strokeWidth="1" />
-                                          <line x1="1" y1="5" x2="13" y2="5" stroke="currentColor" strokeWidth="1" />
-                                          <line x1="1" y1="9" x2="13" y2="9" stroke="currentColor" strokeWidth="1" />
-                                          <line x1="5" y1="5" x2="5" y2="13" stroke="currentColor" strokeWidth="1" />
-                                        </svg>
+                                        </span>
                                         <span className="conn-table-name">{t.schema}.{t.name}</span>
                                       </li>
                                     );
