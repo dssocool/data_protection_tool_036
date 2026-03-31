@@ -175,6 +175,22 @@ public class EngineApiClient
         return await FetchAllPagesAsync(url);
     }
 
+    public async Task<bool> FixColumnRuleAsync(string metadataId)
+    {
+        var url = $"{BaseUrl}/file-field-metadata/{Uri.EscapeDataString(metadataId)}";
+        var jsonBody = JsonSerializer.Serialize(new { isMasked = false, isProfilerWritable = false });
+
+        using var request = new HttpRequestMessage(HttpMethod.Put, url);
+        request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
+        request.Headers.TryAddWithoutValidation("Authorization", _config.AuthorizationToken);
+        request.Content = new StringContent(jsonBody, System.Text.Encoding.UTF8, "application/json");
+
+        using var response = await _httpClient.SendAsync(request);
+        if (!response.IsSuccessStatusCode)
+            _logger.LogWarning("Failed to fix column rule {MetadataId}: HTTP {StatusCode}", metadataId, (int)response.StatusCode);
+        return response.IsSuccessStatusCode;
+    }
+
     public record ColumnRulesResult(
         List<JsonElement> Rules,
         List<JsonElement> Algorithms,

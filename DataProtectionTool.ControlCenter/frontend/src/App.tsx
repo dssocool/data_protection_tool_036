@@ -261,7 +261,7 @@ export default function App() {
     }
   }
 
-  async function fetchPreviewFromFilenames(filenames: string[]) {
+  async function fetchPreviewFromFilenames(filenames: string[]): Promise<PreviewData | null> {
     setPreviewBlobFilenames(filenames);
 
     const mergeRes = await fetch("/api/blob/preview-merge", {
@@ -271,11 +271,12 @@ export default function App() {
     });
     if (!mergeRes.ok) {
       setPreviewError(`Failed to fetch preview data: ${mergeRes.status}`);
-      return;
+      return null;
     }
 
-    const data = await mergeRes.json();
-    setPreviewData(data as PreviewData);
+    const data = (await mergeRes.json()) as PreviewData;
+    setPreviewData(data);
+    return data;
   }
 
   async function deletePreviewBlobs(filenames: string[]) {
@@ -326,12 +327,20 @@ export default function App() {
     setColumnRuleFrameworks(cached.columnRuleFrameworks);
   }
 
-  async function fetchColumnRules(agentPath: string, fileFormatId: string) {
+  async function fetchColumnRules(
+    agentPath: string,
+    fileFormatId: string,
+    previewHeaders?: string[],
+    previewColumnTypes?: string[],
+  ) {
     setColumnRulesLoading(true);
     try {
-      const res = await fetch(
-        `/api/agents/${agentPath}/column-rules?fileFormatId=${encodeURIComponent(fileFormatId)}`
-      );
+      let url = `/api/agents/${agentPath}/column-rules?fileFormatId=${encodeURIComponent(fileFormatId)}`;
+      if (previewHeaders?.length && previewColumnTypes?.length) {
+        url += `&headers=${encodeURIComponent(JSON.stringify(previewHeaders))}`;
+        url += `&columnTypes=${encodeURIComponent(JSON.stringify(previewColumnTypes))}`;
+      }
+      const res = await fetch(url);
       if (res.ok) {
         const result = await res.json();
         if (result.success && Array.isArray(result.responseList)) {
@@ -426,7 +435,11 @@ export default function App() {
         (t) => t.schema === selectedTable.schema && t.name === selectedTable.tableName
       );
       if (tableInfo?.fileFormatId) {
-        await fetchColumnRules(agentPath, tableInfo.fileFormatId);
+        const origPreview = originalData ?? previewData;
+        await fetchColumnRules(
+          agentPath, tableInfo.fileFormatId,
+          origPreview?.headers, origPreview?.columnTypes,
+        );
       }
     }
   }
@@ -486,7 +499,11 @@ export default function App() {
       }
 
       const filenames: string[] = result.filenames ?? (result.filename ? [result.filename] : []);
-      await fetchPreviewFromFilenames(filenames);
+      const preview = await fetchPreviewFromFilenames(filenames);
+
+      if (tableInfo?.fileFormatId && preview?.headers?.length && preview?.columnTypes?.length) {
+        fetchColumnRules(agentPath, tableInfo.fileFormatId, preview.headers, preview.columnTypes);
+      }
     } catch (e) {
       setPreviewError(`Preview failed: ${e instanceof Error ? e.message : String(e)}`);
     } finally {
@@ -909,7 +926,12 @@ export default function App() {
                 }
 
                 if (completedFileFormatId) {
-                  fetchColumnRules(agentPath, completedFileFormatId);
+                  const cachedPreview = tableCacheRef.current.get(key);
+                  const origPreview = cachedPreview?.originalData ?? cachedPreview?.previewData;
+                  fetchColumnRules(
+                    agentPath, completedFileFormatId,
+                    origPreview?.headers, origPreview?.columnTypes,
+                  );
                 }
               } else {
                 const latestCached = tableCacheRef.current.get(key);
