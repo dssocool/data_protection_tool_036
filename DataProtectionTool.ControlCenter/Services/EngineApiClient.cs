@@ -51,7 +51,9 @@ public class EngineApiClient
             foreach (var h in response.Content.Headers)
                 sb.AppendLine($"  Response Header: {h.Key}: {string.Join(", ", h.Value)}");
 
-        var responseBody = await response.Content.ReadAsStringAsync();
+        var responseBody = response.Content != null
+            ? await response.Content.ReadAsStringAsync()
+            : string.Empty;
         var respPreview = responseBody.Length > 4000
             ? responseBody[..4000] + $"... (truncated, total {responseBody.Length} chars)"
             : responseBody;
