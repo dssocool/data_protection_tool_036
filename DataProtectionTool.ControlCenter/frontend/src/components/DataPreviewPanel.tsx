@@ -305,6 +305,21 @@ export default function DataPreviewPanel({
   }, [selectedRule, selectedColumnSqlType]);
 
   useEffect(() => {
+    if (!modalDomainName || allowedAlgorithmTypes.length === 0) return;
+    const dom = allDomains.find(d => d.domainName === modalDomainName);
+    const defAlg = dom && typeof dom.defaultAlgorithmCode === "string" ? dom.defaultAlgorithmCode : "";
+    if (!defAlg) return;
+    const alg = defAlg ? allAlgorithms.find(a => a.algorithmName === defAlg) : undefined;
+    if (!alg) return;
+    const mt = String(alg.maskType ?? "");
+    if (!allowedAlgorithmTypes.includes(mt)) {
+      setModalDomainName("");
+      setModalAlgorithmName("");
+      setModalAlgorithmType("");
+    }
+  }, [allowedAlgorithmTypes, modalDomainName, allDomains, allAlgorithms]);
+
+  useEffect(() => {
     const table = tableRef.current;
     if (!table) return;
     const ths = table.querySelectorAll("thead th");
@@ -529,11 +544,21 @@ export default function DataPreviewPanel({
                     }}
                   >
                     <option value="">-- Select --</option>
-                    {allDomains.map((d, i) => (
-                      <option key={i} value={String(d.domainName ?? "")}>
-                        {String(d.domainName ?? "")}
-                      </option>
-                    ))}
+                    {allDomains
+                      .filter(d => {
+                        if (allowedAlgorithmTypes.length === 0) return true;
+                        const defAlg = typeof d.defaultAlgorithmCode === "string" ? d.defaultAlgorithmCode : "";
+                        if (!defAlg) return true;
+                        const alg = allAlgorithms.find(a => a.algorithmName === defAlg);
+                        if (!alg) return true;
+                        const mt = String(alg.maskType ?? "");
+                        return allowedAlgorithmTypes.includes(mt);
+                      })
+                      .map((d, i) => (
+                        <option key={i} value={String(d.domainName ?? "")}>
+                          {String(d.domainName ?? "")}
+                        </option>
+                      ))}
                   </select>
                 </div>
                 <div className="column-rule-row">
