@@ -121,9 +121,9 @@ while (!cts.Token.IsCancellationRequested)
                 {
                     _ = HandleValidateSqlAsync(call, agentId, oid, tid, response.Payload);
                 }
-                else if (response.Type == "list_tables")
+                else if (response.Type == "execute_sql")
                 {
-                    _ = HandleListTablesAsync(call, agentId, oid, tid, response.Payload, connectionManager);
+                    _ = HandleExecuteSqlAsync(call, agentId, oid, tid, response.Payload, connectionManager);
                 }
                 else if (response.Type == "preview_table")
                 {
@@ -140,14 +140,6 @@ while (!cts.Token.IsCancellationRequested)
                 else if (response.Type == "http_request")
                 {
                     _ = HandleHttpRequestAsync(call, agentId, oid, tid, response.Payload);
-                }
-                else if (response.Type == "fetch_sql_types")
-                {
-                    _ = HandleFetchSqlTypesAsync(call, agentId, oid, tid, response.Payload, connectionManager);
-                }
-                else if (response.Type == "list_schemas")
-                {
-                    _ = HandleListSchemasAsync(call, agentId, oid, tid, response.Payload, connectionManager);
                 }
                 else if (response.Type == "export_table")
                 {
@@ -321,7 +313,7 @@ static async Task HandleValidateSqlAsync(
     }
 }
 
-static async Task HandleListTablesAsync(
+static async Task HandleExecuteSqlAsync(
     AsyncDuplexStreamingCall<AgentMessage, ServerMessage> call,
     string agentId, string oid, string tid, string payload,
     SqlConnectionManager connManager)
@@ -337,98 +329,12 @@ static async Task HandleListTablesAsync(
         var rowKey = paramsDoc.RootElement.GetProperty("rowKey").GetString() ?? "";
         var sqlStatement = paramsDoc.RootElement.GetProperty("sqlStatement").GetString() ?? "";
 
-        Console.WriteLine($"[Agent] Listing tables for connection {rowKey}...");
+        Console.WriteLine($"[Agent] Executing SQL on connection {rowKey}...");
 
-        var tables = await connManager.ExecuteWithRetryAsync(rowKey, call, agentId, oid, tid,
+        var rows = await connManager.ExecuteWithRetryAsync(rowKey, call, agentId, oid, tid,
             async (sqlConn) =>
             {
-                var result = new List<object>();
-                await using var cmd = sqlConn.CreateCommand();
-                cmd.CommandText = sqlStatement;
-
-                await using var reader = await cmd.ExecuteReaderAsync();
-                while (await reader.ReadAsync())
-                {
-                    result.Add(new
-                    {
-                        schema = reader.GetString(0),
-                        name = reader.GetString(1)
-                    });
-                }
-                return result;
-            });
-
-        var resultPayload = JsonSerializer.Serialize(new
-        {
-            correlationId,
-            success = true,
-            tables
-        });
-
-        await call.RequestStream.WriteAsync(new AgentMessage
-        {
-            AgentId = agentId,
-            Type = "list_tables_result",
-            Payload = resultPayload,
-            Oid = oid,
-            Tid = tid
-        });
-
-        Console.WriteLine($"[Agent] Listed {tables.Count} tables for connection {rowKey}.");
-    }
-    catch (Exception ex)
-    {
-        Console.Error.WriteLine($"[Agent] List tables failed: {ex.Message}");
-
-        var resultPayload = JsonSerializer.Serialize(new
-        {
-            correlationId,
-            success = false,
-            message = $"List tables failed: {ex.Message}"
-        });
-
-        try
-        {
-            await call.RequestStream.WriteAsync(new AgentMessage
-            {
-                AgentId = agentId,
-                Type = "list_tables_result",
-                Payload = resultPayload,
-                Oid = oid,
-                Tid = tid
-            });
-        }
-        catch (Exception writeEx)
-        {
-            Console.Error.WriteLine($"[Agent] Failed to send error result: {writeEx.Message}");
-        }
-    }
-}
-
-static async Task HandleFetchSqlTypesAsync(
-    AsyncDuplexStreamingCall<AgentMessage, ServerMessage> call,
-    string agentId, string oid, string tid, string payload,
-    SqlConnectionManager connManager)
-{
-    string correlationId = "";
-    try
-    {
-        using var envelope = JsonDocument.Parse(payload);
-        correlationId = envelope.RootElement.GetProperty("correlationId").GetString() ?? "";
-        var dataJson = envelope.RootElement.GetProperty("data").GetString() ?? "{}";
-
-        using var paramsDoc = JsonDocument.Parse(dataJson);
-        var rowKey = paramsDoc.RootElement.GetProperty("rowKey").GetString() ?? "";
-        var schema = paramsDoc.RootElement.GetProperty("schema").GetString() ?? "";
-        var tableName = paramsDoc.RootElement.GetProperty("tableName").GetString() ?? "";
-        var sqlStatement = paramsDoc.RootElement.GetProperty("sqlStatement").GetString() ?? "";
-
-        Console.WriteLine($"[Agent] Fetching SQL types for [{schema}].[{tableName}] on connection {rowKey}...");
-
-        var columns = await connManager.ExecuteWithRetryAsync(rowKey, call, agentId, oid, tid,
-            async (sqlConn) =>
-            {
-                var result = new List<object>();
+                var result = new List<Dictionary<string, object?>>();
                 await using var cmd = sqlConn.CreateCommand();
                 cmd.CommandText = sqlStatement;
 
@@ -444,11 +350,12 @@ static async Task HandleFetchSqlTypesAsync(
                 await using var reader = await cmd.ExecuteReaderAsync();
                 while (await reader.ReadAsync())
                 {
-                    result.Add(new
+                    var row = new Dictionary<string, object?>();
+                    for (int i = 0; i < reader.FieldCount; i++)
                     {
-                        name = reader.GetString(0),
-                        dataType = reader.GetString(1)
-                    });
+                        row[reader.GetName(i)] = reader.IsDBNull(i) ? null : reader.GetValue(i);
+                    }
+                    result.Add(row);
                 }
                 return result;
             });
@@ -457,29 +364,29 @@ static async Task HandleFetchSqlTypesAsync(
         {
             correlationId,
             success = true,
-            columns
+            rows
         });
 
         await call.RequestStream.WriteAsync(new AgentMessage
         {
             AgentId = agentId,
-            Type = "fetch_sql_types_result",
+            Type = "execute_sql_result",
             Payload = resultPayload,
             Oid = oid,
             Tid = tid
         });
 
-        Console.WriteLine($"[Agent] Fetched SQL types for {columns.Count} columns in [{schema}].[{tableName}].");
+        Console.WriteLine($"[Agent] Executed SQL, returned {rows.Count} rows for connection {rowKey}.");
     }
     catch (Exception ex)
     {
-        Console.Error.WriteLine($"[Agent] Fetch SQL types failed: {ex.Message}");
+        Console.Error.WriteLine($"[Agent] Execute SQL failed: {ex.Message}");
 
         var resultPayload = JsonSerializer.Serialize(new
         {
             correlationId,
             success = false,
-            message = $"Fetch SQL types failed: {ex.Message}"
+            message = $"Execute SQL failed: {ex.Message}"
         });
 
         try
@@ -487,87 +394,7 @@ static async Task HandleFetchSqlTypesAsync(
             await call.RequestStream.WriteAsync(new AgentMessage
             {
                 AgentId = agentId,
-                Type = "fetch_sql_types_result",
-                Payload = resultPayload,
-                Oid = oid,
-                Tid = tid
-            });
-        }
-        catch (Exception writeEx)
-        {
-            Console.Error.WriteLine($"[Agent] Failed to send error result: {writeEx.Message}");
-        }
-    }
-}
-
-static async Task HandleListSchemasAsync(
-    AsyncDuplexStreamingCall<AgentMessage, ServerMessage> call,
-    string agentId, string oid, string tid, string payload,
-    SqlConnectionManager connManager)
-{
-    string correlationId = "";
-    try
-    {
-        using var envelope = JsonDocument.Parse(payload);
-        correlationId = envelope.RootElement.GetProperty("correlationId").GetString() ?? "";
-        var dataJson = envelope.RootElement.GetProperty("data").GetString() ?? "{}";
-
-        using var paramsDoc = JsonDocument.Parse(dataJson);
-        var rowKey = paramsDoc.RootElement.GetProperty("rowKey").GetString() ?? "";
-        var sqlStatement = paramsDoc.RootElement.GetProperty("sqlStatement").GetString() ?? "";
-
-        Console.WriteLine($"[Agent] Listing schemas for connection {rowKey}...");
-
-        var schemas = await connManager.ExecuteWithRetryAsync(rowKey, call, agentId, oid, tid,
-            async (sqlConn) =>
-            {
-                var result = new List<string>();
-                await using var cmd = sqlConn.CreateCommand();
-                cmd.CommandText = sqlStatement;
-
-                await using var reader = await cmd.ExecuteReaderAsync();
-                while (await reader.ReadAsync())
-                {
-                    result.Add(reader.GetString(0));
-                }
-                return result;
-            });
-
-        var resultPayload = JsonSerializer.Serialize(new
-        {
-            correlationId,
-            success = true,
-            schemas
-        });
-
-        await call.RequestStream.WriteAsync(new AgentMessage
-        {
-            AgentId = agentId,
-            Type = "list_schemas_result",
-            Payload = resultPayload,
-            Oid = oid,
-            Tid = tid
-        });
-
-        Console.WriteLine($"[Agent] Listed {schemas.Count} schemas for connection {rowKey}.");
-    }
-    catch (Exception ex)
-    {
-        Console.Error.WriteLine($"[Agent] List schemas failed: {ex.Message}");
-
-        var resultPayload = JsonSerializer.Serialize(new
-        {
-            correlationId,
-            success = false,
-            message = $"List schemas failed: {ex.Message}"
-        });
-
-        try
-        {
-            await call.RequestStream.WriteAsync(new AgentMessage
-            {
-                AgentId = agentId,
-                Type = "list_schemas_result",
+                Type = "execute_sql_result",
                 Payload = resultPayload,
                 Oid = oid,
                 Tid = tid

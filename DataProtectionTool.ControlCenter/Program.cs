@@ -274,18 +274,18 @@ app.MapPost("/api/agents/{path}/list-tables", async (string path, HttpRequest re
             rowKey,
             sqlStatement = "SELECT TABLE_SCHEMA, TABLE_NAME FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_TYPE = 'BASE TABLE' ORDER BY TABLE_SCHEMA, TABLE_NAME"
         });
-        var result = await connection.SendCommandAsync("list_tables", listTablesPayload, TimeSpan.FromSeconds(30));
+        var result = await connection.SendCommandAsync("execute_sql", listTablesPayload, TimeSpan.FromSeconds(30));
 
         try
         {
             using var doc = JsonDocument.Parse(result);
-            if (doc.RootElement.TryGetProperty("tables", out var tEl) && tEl.ValueKind == JsonValueKind.Array)
+            if (doc.RootElement.TryGetProperty("rows", out var tEl) && tEl.ValueKind == JsonValueKind.Array)
             {
                 var tableList = new List<(string schema, string name)>();
                 foreach (var item in tEl.EnumerateArray())
                 {
-                    var schema = item.TryGetProperty("schema", out var sEl) ? sEl.GetString() ?? "" : "";
-                    var name = item.TryGetProperty("name", out var nEl) ? nEl.GetString() ?? "" : "";
+                    var schema = item.TryGetProperty("TABLE_SCHEMA", out var sEl) ? sEl.GetString() ?? "" : "";
+                    var name = item.TryGetProperty("TABLE_NAME", out var nEl) ? nEl.GetString() ?? "" : "";
                     tableList.Add((schema, name));
                 }
                 var tables = tableList.Select(t => new { schema = t.schema, name = t.name }).ToList();
@@ -343,7 +343,20 @@ app.MapGet("/api/agents/{path}/list-schemas", async (string path, string rowKey,
             rowKey,
             sqlStatement = "SELECT DISTINCT TABLE_SCHEMA FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_TYPE = 'BASE TABLE' ORDER BY TABLE_SCHEMA"
         });
-        var result = await connection.SendCommandAsync("list_schemas", payload, TimeSpan.FromSeconds(30));
+        var result = await connection.SendCommandAsync("execute_sql", payload, TimeSpan.FromSeconds(30));
+
+        using var doc = JsonDocument.Parse(result);
+        if (doc.RootElement.TryGetProperty("rows", out var rowsEl) && rowsEl.ValueKind == JsonValueKind.Array)
+        {
+            var schemas = new List<string>();
+            foreach (var item in rowsEl.EnumerateArray())
+            {
+                if (item.TryGetProperty("TABLE_SCHEMA", out var sEl))
+                    schemas.Add(sEl.GetString() ?? "");
+            }
+            return Results.Ok(new { success = true, schemas });
+        }
+
         return Results.Content(result, "application/json");
     }
     catch (TimeoutException)
@@ -1001,22 +1014,22 @@ app.MapPost("/api/agents/{path}/dry-run", async (string path, HttpContext httpCo
         {
             var fetchTypesPayload = JsonSerializer.Serialize(new
             {
-                rowKey, schema, tableName,
+                rowKey,
                 sqlStatement = "SELECT COLUMN_NAME, DATA_TYPE FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = @schema AND TABLE_NAME = @tableName ORDER BY ORDINAL_POSITION",
                 sqlParams = new Dictionary<string, string> { ["@schema"] = schema, ["@tableName"] = tableName }
             });
-            var fetchTypesResult = await connection.SendCommandAsync("fetch_sql_types", fetchTypesPayload, TimeSpan.FromSeconds(120));
+            var fetchTypesResult = await connection.SendCommandAsync("execute_sql", fetchTypesPayload, TimeSpan.FromSeconds(120));
             using var fetchTypesDoc = JsonDocument.Parse(fetchTypesResult);
             var fetchTypesRoot = fetchTypesDoc.RootElement;
 
             if (fetchTypesRoot.TryGetProperty("success", out var ftSuccessEl) && ftSuccessEl.GetBoolean()
-                && fetchTypesRoot.TryGetProperty("columns", out var columnsEl) && columnsEl.ValueKind == JsonValueKind.Array)
+                && fetchTypesRoot.TryGetProperty("rows", out var columnsEl) && columnsEl.ValueKind == JsonValueKind.Array)
             {
                 var typeByName = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
                 foreach (var col in columnsEl.EnumerateArray())
                 {
-                    var colName = col.GetProperty("name").GetString() ?? "";
-                    var colType = col.GetProperty("dataType").GetString() ?? "";
+                    var colName = col.GetProperty("COLUMN_NAME").GetString() ?? "";
+                    var colType = col.GetProperty("DATA_TYPE").GetString() ?? "";
                     if (!string.IsNullOrEmpty(colName))
                         typeByName[colName] = colType;
                 }
