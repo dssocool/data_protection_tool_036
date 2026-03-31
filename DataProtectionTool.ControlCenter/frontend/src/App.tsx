@@ -76,6 +76,7 @@ export default function App() {
   const [allAlgorithms, setAllAlgorithms] = useState<Record<string, unknown>[]>([]);
   const [allFrameworks, setAllFrameworks] = useState<Record<string, unknown>[]>([]);
   const [dryRunningTables, setDryRunningTables] = useState<Set<string>>(new Set());
+  const [mismatchedColumns, setMismatchedColumns] = useState<Set<string>>(new Set());
   const eventsTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const previewCacheRef = useRef<Map<string, string[]>>(new Map());
   const tableCacheRef = useRef<Map<string, TablePreviewCache>>(new Map());
@@ -472,6 +473,7 @@ export default function App() {
     setColumnRuleAlgorithms([]);
     setColumnRuleDomains([]);
     setColumnRuleFrameworks([]);
+    setMismatchedColumns(new Set());
 
     const tableInfo = connectionTables[rowKey]?.find(
       (t) => t.schema === schema && t.name === tableName
@@ -1199,6 +1201,8 @@ export default function App() {
               setActivePreviewTab(name);
             }}
             onSaveColumnRule={handleSaveColumnRule}
+            mismatchedColumns={mismatchedColumns}
+            onMismatchedColumnsChange={setMismatchedColumns}
             panelLeft={leftPanel ? connectionsPanelWidth + 16 : 0}
           />
         )}

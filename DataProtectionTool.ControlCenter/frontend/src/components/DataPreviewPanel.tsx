@@ -44,6 +44,8 @@ interface DataPreviewPanelProps {
     algorithmName: string;
     domainName: string;
   }) => Promise<void>;
+  mismatchedColumns: Set<string>;
+  onMismatchedColumnsChange: (updater: (prev: Set<string>) => Set<string>) => void;
   panelLeft: number;
 }
 
@@ -158,6 +160,8 @@ export default function DataPreviewPanel({
   onTabClose,
   onDiffSelect,
   onSaveColumnRule,
+  mismatchedColumns,
+  onMismatchedColumnsChange,
   panelLeft,
 }: DataPreviewPanelProps) {
   const dataTabs = useMemo(() => {
@@ -190,7 +194,6 @@ export default function DataPreviewPanel({
   const [allowedAlgorithmTypes, setAllowedAlgorithmTypes] = useState<string[]>([]);
   const [saving, setSaving] = useState(false);
   const [typeMismatchConfirm, setTypeMismatchConfirm] = useState<{ maskType: string; sqlType: string } | null>(null);
-  const [mismatchedColumns, setMismatchedColumns] = useState<Set<string>>(new Set());
 
   const handleDataScroll = useCallback((e: React.UIEvent<HTMLDivElement>) => {
     if (scrollingSource.current === "rules") return;
@@ -630,7 +633,7 @@ export default function DataPreviewPanel({
                     }
                     const fieldName = typeof selectedRule.fieldName === "string" ? selectedRule.fieldName : "";
                     if (fieldName) {
-                      setMismatchedColumns(prev => {
+                      onMismatchedColumnsChange(prev => {
                         const next = new Set(prev);
                         next.delete(fieldName);
                         return next;
@@ -681,7 +684,7 @@ export default function DataPreviewPanel({
                 onClick={() => {
                   const fieldName = typeof selectedRule.fieldName === "string" ? selectedRule.fieldName : "";
                   if (fieldName) {
-                    setMismatchedColumns(prev => new Set(prev).add(fieldName));
+                    onMismatchedColumnsChange(prev => new Set(prev).add(fieldName));
                   }
                   setTypeMismatchConfirm(null);
                   const id = selectedRule.fileFieldMetadataId;
