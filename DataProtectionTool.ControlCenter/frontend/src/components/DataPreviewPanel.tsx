@@ -189,6 +189,8 @@ export default function DataPreviewPanel({
   const [modalAlgorithmType, setModalAlgorithmType] = useState("");
   const [allowedAlgorithmTypes, setAllowedAlgorithmTypes] = useState<string[]>([]);
   const [saving, setSaving] = useState(false);
+  const [typeMismatchConfirm, setTypeMismatchConfirm] = useState<{ maskType: string; sqlType: string } | null>(null);
+  const [mismatchedColumns, setMismatchedColumns] = useState<Set<string>>(new Set());
 
   const handleDataScroll = useCallback((e: React.UIEvent<HTMLDivElement>) => {
     if (scrollingSource.current === "rules") return;
@@ -303,21 +305,6 @@ export default function DataPreviewPanel({
       });
     return () => { cancelled = true; };
   }, [selectedRule, selectedColumnSqlType]);
-
-  useEffect(() => {
-    if (!modalDomainName || allowedAlgorithmTypes.length === 0) return;
-    const dom = allDomains.find(d => d.domainName === modalDomainName);
-    const defAlg = dom && typeof dom.defaultAlgorithmCode === "string" ? dom.defaultAlgorithmCode : "";
-    if (!defAlg) return;
-    const alg = defAlg ? allAlgorithms.find(a => a.algorithmName === defAlg) : undefined;
-    if (!alg) return;
-    const mt = String(alg.maskType ?? "");
-    if (!allowedAlgorithmTypes.includes(mt)) {
-      setModalDomainName("");
-      setModalAlgorithmName("");
-      setModalAlgorithmType("");
-    }
-  }, [allowedAlgorithmTypes, modalDomainName, allDomains, allAlgorithms]);
 
   useEffect(() => {
     const table = tableRef.current;
@@ -476,6 +463,12 @@ export default function DataPreviewPanel({
                           : typeof rule.algorithmName === "string"
                             ? rule.algorithmName
                             : header}
+                        {mismatchedColumns.has(header) && (
+                          <svg className="column-rule-warning-icon" width="14" height="14" viewBox="0 0 24 24" fill="none">
+                            <path d="M12 2L1 21h22L12 2z" fill="#e8a012" stroke="#b37a00" strokeWidth="1"/>
+                            <text x="12" y="18" textAnchor="middle" fontSize="13" fontWeight="bold" fill="#fff">!</text>
+                          </svg>
+                        )}
                       </button>
                     ) : (
                       <button
@@ -544,17 +537,7 @@ export default function DataPreviewPanel({
                     }}
                   >
                     <option value="">-- Select --</option>
-                    {allDomains
-                      .filter(d => {
-                        if (allowedAlgorithmTypes.length === 0) return true;
-                        const defAlg = typeof d.defaultAlgorithmCode === "string" ? d.defaultAlgorithmCode : "";
-                        if (!defAlg) return true;
-                        const alg = allAlgorithms.find(a => a.algorithmName === defAlg);
-                        if (!alg) return true;
-                        const mt = String(alg.maskType ?? "");
-                        return allowedAlgorithmTypes.includes(mt);
-                      })
-                      .map((d, i) => (
+                    {allDomains.map((d, i) => (
                         <option key={i} value={String(d.domainName ?? "")}>
                           {String(d.domainName ?? "")}
                         </option>
@@ -576,9 +559,7 @@ export default function DataPreviewPanel({
                     <option value="">-- Select --</option>
                     {allAlgorithms
                       .filter(a => {
-                        const mt = String(a.maskType ?? "");
-                        if (allowedAlgorithmTypes.length > 0 && !allowedAlgorithmTypes.includes(mt)) return false;
-                        if (modalAlgorithmType && mt !== modalAlgorithmType) return false;
+                        if (modalAlgorithmType && String(a.maskType ?? "") !== modalAlgorithmType) return false;
                         return true;
                       })
                       .map((a, i) => (
@@ -605,7 +586,7 @@ export default function DataPreviewPanel({
                     }}
                   >
                     <option value="">-- Select --</option>
-                    {allowedAlgorithmTypes.map((t, i) => (
+                    {[...new Set(allAlgorithms.map(a => String(a.maskType ?? "")).filter(Boolean))].map((t, i) => (
                       <option key={i} value={t}>{t}</option>
                     ))}
                   </select>
@@ -640,10 +621,73 @@ export default function DataPreviewPanel({
                 <button
                   className="column-rule-btn-save"
                   disabled={saving || !modalAlgorithmName || !modalDomainName}
-                  onClick={async () => {
+                  onClick={() => {
+                    const alg = allAlgorithms.find(a => a.algorithmName === modalAlgorithmName);
+                    const mt = alg ? String(alg.maskType ?? "") : "";
+                    if (mt && allowedAlgorithmTypes.length > 0 && !allowedAlgorithmTypes.includes(mt)) {
+                      setTypeMismatchConfirm({ maskType: mt, sqlType: selectedColumnSqlType });
+                      return;
+                    }
+                    const fieldName = typeof selectedRule.fieldName === "string" ? selectedRule.fieldName : "";
+                    if (fieldName) {
+                      setMismatchedColumns(prev => {
+                        const next = new Set(prev);
+                        next.delete(fieldName);
+                        return next;
+                      });
+                    }
                     const id = selectedRule.fileFieldMetadataId;
                     if (typeof id !== "string" && typeof id !== "number") return;
                     setSaving(true);
+                    (async () => {
+                      try {
+                        await onSaveColumnRule({
+                          fileFieldMetadataId: String(id),
+                          algorithmName: modalAlgorithmName,
+                          domainName: modalDomainName,
+                        });
+                        setSelectedRule(null);
+                      } catch {
+                        // keep modal open on error
+                      } finally {
+                        setSaving(false);
+                      }
+                    })();
+                  }}
+                >
+                  {saving ? "Saving..." : "Save"}
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+      {typeMismatchConfirm && selectedRule && (
+        <div className="column-rule-mismatch-overlay" onClick={() => setTypeMismatchConfirm(null)}>
+          <div className="column-rule-mismatch-dialog" onClick={(e) => e.stopPropagation()}>
+            <p className="column-rule-mismatch-msg">
+              The selected Algorithm has Type {typeMismatchConfirm.maskType} but the column is <strong>{typeMismatchConfirm.sqlType}</strong> in database. Still proceed?
+            </p>
+            <div className="column-rule-mismatch-actions">
+              <button
+                className="column-rule-btn-cancel"
+                onClick={() => setTypeMismatchConfirm(null)}
+              >
+                Cancel
+              </button>
+              <button
+                className="column-rule-btn-save"
+                disabled={saving}
+                onClick={() => {
+                  const fieldName = typeof selectedRule.fieldName === "string" ? selectedRule.fieldName : "";
+                  if (fieldName) {
+                    setMismatchedColumns(prev => new Set(prev).add(fieldName));
+                  }
+                  setTypeMismatchConfirm(null);
+                  const id = selectedRule.fileFieldMetadataId;
+                  if (typeof id !== "string" && typeof id !== "number") return;
+                  setSaving(true);
+                  (async () => {
                     try {
                       await onSaveColumnRule({
                         fileFieldMetadataId: String(id),
@@ -656,15 +700,15 @@ export default function DataPreviewPanel({
                     } finally {
                       setSaving(false);
                     }
-                  }}
-                >
-                  {saving ? "Saving..." : "Save"}
-                </button>
-              </div>
+                  })();
+                }}
+              >
+                {saving ? "Saving..." : "Confirm"}
+              </button>
             </div>
           </div>
-        );
-      })()}
+        </div>
+      )}
     </div>
   );
 }
