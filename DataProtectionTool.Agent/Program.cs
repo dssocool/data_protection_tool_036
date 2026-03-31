@@ -647,6 +647,30 @@ static async Task<object> HandleHttpRequestCore(string correlationId, JsonElemen
             : responseBody;
         Console.WriteLine($"[Agent]   Response Body  : {respPreview}");
         Console.WriteLine($"[Agent] *** End of failed HTTP details ***");
+
+        var requestHeaders = new Dictionary<string, string>();
+        foreach (var h in requestMessage.Headers)
+            requestHeaders[h.Key] = string.Join(", ", h.Value);
+        if (requestMessage.Content != null)
+            foreach (var h in requestMessage.Content.Headers)
+                requestHeaders[h.Key] = string.Join(", ", h.Value);
+
+        return new
+        {
+            correlationId,
+            success = false,
+            message = $"HTTP {(int)response.StatusCode} {response.ReasonPhrase}",
+            statusCode = (int)response.StatusCode,
+            headers = responseHeaders,
+            body = responseBody,
+            requestDetails = new
+            {
+                method,
+                url,
+                headers = requestHeaders,
+                body = bodyContent
+            }
+        };
     }
 
     return new
