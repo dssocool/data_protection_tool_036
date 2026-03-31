@@ -13,23 +13,15 @@
 .flows-panel-header {
   display: flex;
   align-items: center;
-  justify-content: space-between;
   padding: 10px 16px;
   border-bottom: 1px solid #e4e4e4;
-  gap: 12px;
   flex-shrink: 0;
 }
 
 .flows-panel-header-left {
   display: flex;
   align-items: center;
-  gap: 8px;
-}
-
-.flows-panel-header-right {
-  display: flex;
-  align-items: center;
-  gap: 10px;
+  gap: 12px;
 }
 
 .panel-switch-icons {

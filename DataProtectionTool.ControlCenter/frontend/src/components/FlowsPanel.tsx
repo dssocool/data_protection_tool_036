@@ -13,7 +13,6 @@ export interface FlowItem {
 
 interface FlowsPanelProps {
   agentPath: string;
-  onClose: () => void;
   onSwitchPanel: (panel: "connections" | "flows") => void;
   onRunFlows?: (flows: FlowItem[]) => void;
 }
@@ -82,7 +81,6 @@ function formatHistoryTime(iso: string): string {
 
 export default function FlowsPanel({
   agentPath,
-  onClose,
   onSwitchPanel,
   onRunFlows,
 }: FlowsPanelProps) {
@@ -355,14 +353,6 @@ export default function FlowsPanel({
               </svg>
             </button>
           </div>
-          <button className="flows-panel-close" onClick={onClose} title="Close">
-            <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
-              <path d="M3 3L11 11M11 3L3 11" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
-            </svg>
-          </button>
-        </div>
-
-        <div className="flows-panel-header-right">
           <div className="flows-search-wrapper">
             <svg className="flows-search-icon" width="14" height="14" viewBox="0 0 14 14" fill="none">
               <circle cx="6" cy="6" r="4.5" stroke="currentColor" strokeWidth="1.3" />

@@ -1379,7 +1379,6 @@ export default function App() {
         {leftPanel === "flows" ? (
           <FlowsPanel
             agentPath={getAgentPath() ?? ""}
-            onClose={() => setLeftPanel(null)}
             onSwitchPanel={setLeftPanel}
             onRunFlows={handleRunFlows}
           />
@@ -1406,7 +1405,6 @@ export default function App() {
                 onRefreshConnection={handleRefreshConnection}
                 onDryRun={handleDryRun}
                 onFullRun={handleFullRunOpen}
-                onClose={() => setLeftPanel(null)}
                 onSwitchPanel={(p) => { setLeftPanel(p); if (p === "flows") setUnseenFlowCount(0); }}
                 onWidthChange={setConnectionsPanelWidth}
               />

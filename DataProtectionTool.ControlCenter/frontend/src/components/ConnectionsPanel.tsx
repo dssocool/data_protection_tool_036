@@ -55,7 +55,6 @@ interface ConnectionsPanelProps {
   onRefreshConnection: (rowKey: string) => void;
   onDryRun: (rowKey: string, schema: string, tableName: string) => void;
   onFullRun: (rowKey: string, schema: string, tableName: string) => void;
-  onClose: () => void;
   onSwitchPanel: (panel: "connections" | "flows") => void;
   onWidthChange?: (width: number) => void;
   flowsBadgeCount?: number;
@@ -83,7 +82,6 @@ export default function ConnectionsPanel({
   onRefreshConnection,
   onDryRun,
   onFullRun,
-  onClose,
   onSwitchPanel,
   onWidthChange,
   flowsBadgeCount,
@@ -217,15 +215,6 @@ export default function ConnectionsPanel({
             )}
           </button>
         </div>
-        <button
-          className="connections-panel-close"
-          onClick={onClose}
-          aria-label="Close panel"
-        >
-          <svg width="14" height="14" viewBox="0 0 14 14">
-            <path d="M3 3 L11 11 M11 3 L3 11" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
-          </svg>
-        </button>
       </div>
       {connections.length === 0 ? (
         <p className="connections-panel-empty">No saved connections.</p>
