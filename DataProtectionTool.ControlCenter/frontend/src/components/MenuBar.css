@@ -71,6 +71,15 @@
   background: #fff;
 }
 
+.menu-item.disabled > button {
+  color: #aaa;
+  cursor: default;
+}
+
+.menu-item.disabled:hover > button {
+  background: none;
+}
+
 /* Arrow indicator for items with sub-menus */
 .menu-item.has-submenu > span::after {
   content: "▸";
