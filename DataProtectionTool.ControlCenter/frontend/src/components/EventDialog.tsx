@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { StatusEvent, StatusEventStep } from "./StatusBar";
 import "./EventDialog.css";
 
@@ -65,17 +65,20 @@ function isInProgress(evt: StatusEvent): boolean {
   return evt.steps[evt.steps.length - 1].status === "running";
 }
 
-function eventMatchesQuery(evt: StatusEvent, query: string): boolean {
+function eventMatchesSearch(evt: StatusEvent, query: string): boolean {
   const q = query.toLowerCase();
   if (evt.summary.toLowerCase().includes(q)) return true;
   if (evt.detail && evt.detail.toLowerCase().includes(q)) return true;
   if (evt.type.toLowerCase().includes(q)) return true;
-  if (evt.steps) {
-    for (const step of evt.steps) {
-      if (step.message.toLowerCase().includes(q)) return true;
-    }
-  }
+  if (formatTime(evt.timestamp).toLowerCase().includes(q)) return true;
+  if (evt.steps?.some((s) => s.message.toLowerCase().includes(q))) return true;
   return false;
+}
+
+function stepsMatchSearch(evt: StatusEvent, query: string): boolean {
+  if (!query || !evt.steps) return false;
+  const q = query.toLowerCase();
+  return evt.steps.some((s) => s.message.toLowerCase().includes(q));
 }
 
 export default function EventDialog({ events, onClose }: EventDialogProps) {
@@ -94,9 +97,23 @@ export default function EventDialog({ events, onClose }: EventDialogProps) {
   }, [onClose]);
 
   const reversed = [...events].reverse();
-  const filtered = searchQuery
-    ? reversed.filter((evt) => eventMatchesQuery(evt, searchQuery))
-    : reversed;
+
+  const filtered = useMemo(() => {
+    if (!searchQuery.trim()) return reversed;
+    return reversed.filter((evt) => eventMatchesSearch(evt, searchQuery.trim()));
+  }, [reversed, searchQuery]);
+
+  const autoExpandedIndices = useMemo(() => {
+    if (!searchQuery.trim()) return new Set<number>();
+    const set = new Set<number>();
+    for (const evt of filtered) {
+      const originalIdx = events.indexOf(evt);
+      if (hasSteps(evt) && stepsMatchSearch(evt, searchQuery.trim())) {
+        set.add(originalIdx);
+      }
+    }
+    return set;
+  }, [filtered, events, searchQuery]);
 
   return (
     <>
@@ -111,22 +128,39 @@ export default function EventDialog({ events, onClose }: EventDialogProps) {
           </button>
         </div>
         <div className="event-dialog-search">
+          <svg className="event-dialog-search-icon" width="12" height="12" viewBox="0 0 12 12">
+            <circle cx="5" cy="5" r="3.5" fill="none" stroke="currentColor" strokeWidth="1.2" />
+            <path d="M7.5 7.5 L10.5 10.5" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" />
+          </svg>
           <input
             type="text"
+            className="event-dialog-search-input"
             placeholder="Search events..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
+            autoFocus
           />
+          {searchQuery && (
+            <button
+              className="event-dialog-search-clear"
+              onClick={() => setSearchQuery("")}
+              aria-label="Clear search"
+            >
+              <svg width="10" height="10" viewBox="0 0 10 10">
+                <path d="M2 2 L8 8 M8 2 L2 8" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+              </svg>
+            </button>
+          )}
         </div>
         <div className="event-dialog-body">
-          {reversed.length === 0 ? (
-            <div className="event-dialog-empty">No events recorded yet.</div>
-          ) : filtered.length === 0 ? (
-            <div className="event-dialog-empty">No matching events.</div>
+          {filtered.length === 0 ? (
+            <div className="event-dialog-empty">
+              {searchQuery.trim() ? "No matching events." : "No events recorded yet."}
+            </div>
           ) : (
             filtered.map((evt, idx) => {
               const originalIdx = events.indexOf(evt);
-              const isExpanded = expandedIdx === originalIdx;
+              const isExpanded = expandedIdx === originalIdx || autoExpandedIndices.has(originalIdx);
               const stepsPresent = hasSteps(evt);
               const inProgress = isInProgress(evt);
 
