@@ -400,18 +400,20 @@ export default function DataPreviewPanel({
                       <span className="column-rule-loading">...</span>
                     ) : rule ? (
                       <button
-                        className="column-rule-btn"
+                        className={`column-rule-btn${rule.isMasked === false ? " column-rule-btn-na" : ""}`}
                         onClick={() => {
                           setSelectedRule(rule);
                           const isMasked = rule.isMasked !== false;
                           setModalDomainName(isMasked && typeof rule.domainName === "string" ? rule.domainName : "");
                           setModalAlgorithmName(isMasked && typeof rule.algorithmName === "string" ? rule.algorithmName : "");
                         }}
-                        title={`View rule for ${header}`}
+                        title={rule.isMasked === false ? `No masking for ${header}` : `View rule for ${header}`}
                       >
-                        {rule.isMasked !== false && typeof rule.algorithmName === "string"
-                          ? rule.algorithmName
-                          : header}
+                        {rule.isMasked === false
+                          ? "N/A"
+                          : typeof rule.algorithmName === "string"
+                            ? rule.algorithmName
+                            : header}
                       </button>
                     ) : (
                       <button
