@@ -39,6 +39,17 @@ function formatBadgeLabel(type: string): string {
   return type.replace(/_/g, " ");
 }
 
+function getEventStatus(evt: StatusEvent): "running" | "error" | "done" {
+  const s = evt.summary.toLowerCase();
+  if (s.includes("error") || s.includes("failed")) return "error";
+  if (evt.steps && evt.steps.length > 0) {
+    const last = evt.steps[evt.steps.length - 1];
+    if (last.status === "running") return "running";
+    if (last.status === "error") return "error";
+  }
+  return "done";
+}
+
 function formatTime(iso: string): string {
   try {
     const d = new Date(iso);
@@ -49,7 +60,7 @@ function formatTime(iso: string): string {
     const mm = String(d.getMinutes()).padStart(2, "0");
     const ss = String(d.getSeconds()).padStart(2, "0");
     const fff = String(d.getMilliseconds()).padStart(3, "0");
-    return `${yyyy}${MM}${dd}${HH}${mm}${ss}${fff}`;
+    return `${yyyy}/${MM}/${dd}:${HH}${mm}${ss}.${fff}`;
   } catch {
     return "";
   }
@@ -165,9 +176,21 @@ export default function EventDialog({ events, onClose }: EventDialogProps) {
                           </svg>
                         </span>
                       )}
+                      <span className={`event-item-status event-item-status-${getEventStatus(evt)}`}>
+                        {getEventStatus(evt) === "done" && (
+                          <svg width="10" height="10" viewBox="0 0 10 10">
+                            <path d="M2 5 L4.5 7.5 L8 2.5" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+                          </svg>
+                        )}
+                        {getEventStatus(evt) === "error" && (
+                          <svg width="10" height="10" viewBox="0 0 10 10">
+                            <path d="M3 3 L7 7 M7 3 L3 7" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+                          </svg>
+                        )}
+                        {getEventStatus(evt) === "running" && <span className="event-item-spinner" />}
+                      </span>
                       <span className="event-item-time">{formatTime(evt.timestamp)}</span>
                       <span className="event-item-type">{formatBadgeLabel(evt.type)}</span>
-                      {inProgress && <span className="event-item-spinner" />}
                     </div>
                     <div className="event-item-row2">
                       <span className="event-item-summary">{evt.summary}</span>

@@ -121,12 +121,12 @@
 }
 
 .event-item-row2 {
-  padding-left: 12px;
+  padding-left: 20px;
   padding-top: 1px;
 }
 
 .event-item-expandable .event-item-row2 {
-  padding-left: 22px;
+  padding-left: 36px;
 }
 
 .event-item-chevron {
@@ -142,6 +142,27 @@
 
 .event-item-chevron-open {
   transform: rotate(90deg);
+}
+
+.event-item-status {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+}
+
+.event-item-status-done {
+  color: #2e7d32;
+}
+
+.event-item-status-error {
+  color: #c62828;
+}
+
+.event-item-status-running {
+  color: #1976d2;
 }
 
 .event-item-time {
