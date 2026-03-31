@@ -44,6 +44,7 @@ interface ConnectionsPanelProps {
   dryRunningTables: Set<string>;
   selectedTable: { rowKey: string; schema: string; tableName: string } | null;
   selectedQuery: { connectionRowKey: string; queryRowKey: string; queryText: string } | null;
+  tableTabCounts: Record<string, number>;
   onExpandConnection: (rowKey: string) => void;
   onTableClick: (rowKey: string, schema: string, tableName: string) => void;
   onQueryClick: (connectionRowKey: string, queryRowKey: string, queryText: string) => void;
@@ -68,6 +69,7 @@ export default function ConnectionsPanel({
   dryRunningTables,
   selectedTable,
   selectedQuery,
+  tableTabCounts,
   onExpandConnection,
   onTableClick,
   onQueryClick,
@@ -192,7 +194,7 @@ export default function ConnectionsPanel({
             aria-label="Connections"
             onClick={() => onSwitchPanel("connections")}
           >
-            <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+            <svg width="24" height="24" viewBox="0 0 16 16" fill="none">
               <circle cx="4" cy="4" r="2" stroke="currentColor" strokeWidth="1.3" />
               <circle cx="12" cy="4" r="2" stroke="currentColor" strokeWidth="1.3" />
               <circle cx="8" cy="12" r="2" stroke="currentColor" strokeWidth="1.3" />
@@ -205,7 +207,7 @@ export default function ConnectionsPanel({
             aria-label="Flows"
             onClick={() => onSwitchPanel("flows")}
           >
-            <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+            <svg width="24" height="24" viewBox="0 0 16 16" fill="none">
               <path d="M3 4H7M3 8H10M3 12H13" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
               <path d="M12 3L14 4L12 5" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round" />
             </svg>
@@ -312,6 +314,11 @@ export default function ConnectionsPanel({
                                           </svg>
                                         </span>
                                         <span className="conn-table-name">{t.schema}.{t.name}</span>
+                                        {tableTabCounts[`${conn.rowKey}:${t.schema}:${t.name}`] && (
+                                          <span className="conn-table-tab-badge">
+                                            {tableTabCounts[`${conn.rowKey}:${t.schema}:${t.name}`]} tabs
+                                          </span>
+                                        )}
                                       </li>
                                     );
                                   })}

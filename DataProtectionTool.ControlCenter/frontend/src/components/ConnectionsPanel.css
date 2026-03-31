@@ -28,8 +28,8 @@
 }
 
 .panel-switch-btn {
-  width: 28px;
-  height: 28px;
+  width: 36px;
+  height: 36px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -353,6 +353,18 @@
 
 .conn-query-icon {
   color: #0078d4;
+}
+
+.conn-table-tab-badge {
+  margin-left: auto;
+  padding: 1px 6px;
+  border-radius: 8px;
+  background: #e8f0fe;
+  color: #0078d4;
+  font-size: 10px;
+  font-weight: 600;
+  white-space: nowrap;
+  flex-shrink: 0;
 }
 
 .conn-query-item {

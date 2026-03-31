@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import MenuBar from "./components/MenuBar";
 import SqlServerConnectionModal from "./components/SqlServerConnectionModal";
 import type { SqlServerConnectionData, ValidateResult } from "./components/SqlServerConnectionModal";
@@ -1276,6 +1276,21 @@ export default function App() {
     }
   }
 
+  const tableTabCounts = useMemo(() => {
+    const counts: Record<string, number> = {};
+    for (const [key, cached] of tableCacheRef.current.entries()) {
+      const count = 1 + cached.dryRuns.length + (cached.diffTab ? 1 : 0);
+      if (count > 1) counts[key] = count;
+    }
+    if (selectedTable) {
+      const key = tableKey(selectedTable.rowKey, selectedTable.schema, selectedTable.tableName);
+      const count = 1 + dryRuns.length + (diffTab ? 1 : 0);
+      if (count > 1) counts[key] = count;
+      else delete counts[key];
+    }
+    return counts;
+  }, [dryRuns, diffTab, selectedTable]);
+
   return (
     <div className="app">
       <MenuBar
@@ -1306,6 +1321,7 @@ export default function App() {
                 dryRunningTables={dryRunningTables}
                 selectedTable={selectedTable}
                 selectedQuery={selectedQuery}
+                tableTabCounts={tableTabCounts}
                 onExpandConnection={handleExpandConnection}
                 onTableClick={handleTableClick}
                 onQueryClick={handleQueryClick}
