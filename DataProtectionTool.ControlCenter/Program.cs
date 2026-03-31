@@ -76,19 +76,34 @@ var previewFilenameRegex = new Regex(
     "^(?:dryrun_[0-9a-fA-F]{32}_)?(?:preview|fullrun)_(\\d+)_([0-9a-fA-F]{32})(?:_([2-9]\\d*))?\\.parquet$",
     RegexOptions.Compiled | RegexOptions.CultureInvariant);
 
+try
 {
     var containerClient = app.Services.GetRequiredService<BlobServiceClient>()
         .GetBlobContainerClient(blobStorageConfig.Container);
     await containerClient.CreateIfNotExistsAsync();
-}
 
-{
     var usersTable = tableServiceClient.GetTableClient("Users");
     await usersTable.CreateIfNotExistsAsync();
     var controlCenterTable = tableServiceClient.GetTableClient("ControlCenter");
     await controlCenterTable.CreateIfNotExistsAsync();
     var dataItemTable = tableServiceClient.GetTableClient("DataItem");
     await dataItemTable.CreateIfNotExistsAsync();
+}
+catch (Azure.RequestFailedException ex)
+{
+    Console.Error.WriteLine("=== Azure Storage initialization failed ===");
+    Console.Error.WriteLine($"HTTP Status : {ex.Status}");
+    Console.Error.WriteLine($"Error Code  : {ex.ErrorCode}");
+    Console.Error.WriteLine($"Message     : {ex.Message}");
+    Console.Error.WriteLine($"Stack Trace : {ex.StackTrace}");
+    Console.Error.WriteLine($"Full Details: {ex}");
+    throw;
+}
+catch (Exception ex)
+{
+    Console.Error.WriteLine("=== Storage initialization failed (unexpected error) ===");
+    Console.Error.WriteLine(ex.ToString());
+    throw;
 }
 
 app.UseStaticFiles();
