@@ -403,4 +403,39 @@ public class ClientTableService
             "Updated FileFormatId for DataItem {RowKey} — fileFormatId={FileFormatId}",
             entity.RowKey, fileFormatId);
     }
+
+    public async Task<FlowEntity> SaveFlowAsync(string partitionKey, string sourceJson, string destJson)
+    {
+        EnsureTableExists();
+        var id = Guid.NewGuid().ToString("N");
+        var entity = new FlowEntity
+        {
+            PartitionKey = partitionKey,
+            RowKey = FlowEntity.BuildRowKey(id),
+            SourceJson = sourceJson,
+            DestJson = destJson,
+            CreatedAt = DateTime.UtcNow
+        };
+
+        await _tableClient.AddEntityAsync(entity);
+        _logger.LogInformation(
+            "Saved flow — partitionKey={PK}, rowKey={RK}",
+            partitionKey, entity.RowKey);
+        return entity;
+    }
+
+    public async Task<List<FlowEntity>> GetFlowsAsync(string partitionKey)
+    {
+        EnsureTableExists();
+        var flows = new List<FlowEntity>();
+
+        await foreach (var entity in _tableClient.QueryAsync<FlowEntity>(
+            e => e.PartitionKey == partitionKey && e.RowKey.CompareTo("flow_") >= 0
+                                                && e.RowKey.CompareTo("flow_~") < 0))
+        {
+            flows.Add(entity);
+        }
+
+        return flows;
+    }
 }

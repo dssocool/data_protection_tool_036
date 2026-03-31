@@ -12,6 +12,8 @@ import StatusBar from "./components/StatusBar";
 import type { StatusEvent } from "./components/StatusBar";
 import EventDialog from "./components/EventDialog";
 import FullRunModal from "./components/FullRunModal";
+import type { FlowSource, FlowDest } from "./components/FullRunModal";
+import FlowsPanel from "./components/FlowsPanel";
 import "./App.css";
 
 interface TablePreviewCache {
@@ -43,7 +45,7 @@ function getAgentPath(): string | null {
 export default function App() {
   const [showSqlModal, setShowSqlModal] = useState(false);
   const [showQueryModal, setShowQueryModal] = useState(false);
-  const [showConnections, setShowConnections] = useState(true);
+  const [leftPanel, setLeftPanel] = useState<"connections" | "flows" | null>("connections");
   const [connections, setConnections] = useState<SavedConnection[]>([]);
   const [connectionTables, setConnectionTables] = useState<Record<string, TableInfo[]>>({});
   const [connectionQueries, setConnectionQueries] = useState<Record<string, QueryInfo[]>>({});
@@ -149,11 +151,11 @@ export default function App() {
   }
 
   function handleViewConnections() {
-    setShowConnections(true);
+    setLeftPanel("connections");
   }
 
   function handleViewFlows() {
-    console.log("View -> Flows");
+    setLeftPanel("flows");
   }
 
   async function handleSave(data: SqlServerConnectionData) {
@@ -1005,6 +1007,31 @@ export default function App() {
     }
   }
 
+  async function handleAddToFlow(source: FlowSource, dest: FlowDest) {
+    const agentPath = getAgentPath();
+    if (!agentPath) return;
+
+    try {
+      const res = await fetch(`/api/agents/${agentPath}/save-flow`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          sourceJson: JSON.stringify(source),
+          destJson: JSON.stringify(dest),
+        }),
+      });
+
+      if (res.ok) {
+        const result = await res.json();
+        if (result.success) {
+          setFullRunTarget(null);
+        }
+      }
+    } catch {
+      // best-effort
+    }
+  }
+
   return (
     <div className="app">
       <MenuBar
@@ -1017,7 +1044,7 @@ export default function App() {
         uniqueId={userUniqueId}
       />
       <main className="app-content">
-        {showConnections && (
+        {leftPanel === "connections" && (
           <ConnectionsPanel
             connections={connections}
             connectionTables={connectionTables}
@@ -1033,7 +1060,14 @@ export default function App() {
             onRefreshConnection={handleRefreshConnection}
             onDryRun={handleDryRun}
             onFullRun={handleFullRunOpen}
-            onClose={() => setShowConnections(false)}
+            onClose={() => setLeftPanel(null)}
+            onWidthChange={setConnectionsPanelWidth}
+          />
+        )}
+        {leftPanel === "flows" && (
+          <FlowsPanel
+            agentPath={getAgentPath() ?? ""}
+            onClose={() => setLeftPanel(null)}
             onWidthChange={setConnectionsPanelWidth}
           />
         )}
@@ -1091,7 +1125,7 @@ export default function App() {
               setActivePreviewTab(name);
             }}
             onSaveColumnRule={handleSaveColumnRule}
-            panelLeft={showConnections ? connectionsPanelWidth + 16 : 0}
+            panelLeft={leftPanel ? connectionsPanelWidth + 16 : 0}
           />
         )}
       </main>
@@ -1123,11 +1157,13 @@ export default function App() {
       {fullRunTarget && (
         <FullRunModal
           connections={connections}
+          sourceConnectionRowKey={fullRunTarget.rowKey}
           schema={fullRunTarget.schema}
           tableName={fullRunTarget.tableName}
           agentPath={getAgentPath() ?? ""}
           onClose={() => setFullRunTarget(null)}
           onRun={handleFullRunExecute}
+          onAddToFlow={handleAddToFlow}
         />
       )}
     </div>

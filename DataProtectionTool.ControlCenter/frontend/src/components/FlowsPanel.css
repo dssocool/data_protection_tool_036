@@ -1,0 +1,105 @@
+.flows-panel {
+  position: absolute;
+  top: 16px;
+  left: 16px;
+  bottom: 16px;
+  background: #fff;
+  border-radius: 8px;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.12), 0 1px 4px rgba(0, 0, 0, 0.08);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  z-index: 10;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+}
+
+.flows-panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 10px 10px 18px;
+  border-bottom: 1px solid #e8e8e8;
+}
+
+.flows-panel-title {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+  color: #333;
+}
+
+.flows-panel-close {
+  flex-shrink: 0;
+  width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: none;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  color: #888;
+  padding: 0;
+  transition: color 0.12s, background 0.12s;
+}
+
+.flows-panel-close:hover {
+  color: #333;
+  background: #eee;
+}
+
+.flows-panel-resize {
+  position: absolute;
+  top: 0;
+  right: -3px;
+  width: 6px;
+  height: 100%;
+  cursor: col-resize;
+  z-index: 20;
+}
+
+.flows-panel-resize:hover {
+  background: rgba(0, 120, 212, 0.15);
+}
+
+.flows-panel-empty {
+  padding: 18px;
+  margin: 0;
+  color: #999;
+  font-size: 13px;
+}
+
+.flows-list {
+  margin: 0;
+  padding: 6px 4px 6px 0;
+  overflow-y: auto;
+  flex: 1;
+}
+
+.flow-item {
+  padding: 8px 18px;
+  cursor: default;
+  transition: background 0.12s;
+}
+
+.flow-item:hover {
+  background: #f5f7fa;
+}
+
+.flow-item-line {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.flow-item-source {
+  font-size: 13px;
+  font-weight: 500;
+  color: #333;
+}
+
+.flow-item-dest {
+  font-size: 12px;
+  color: #777;
+}

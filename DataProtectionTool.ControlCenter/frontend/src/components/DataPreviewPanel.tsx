@@ -170,6 +170,8 @@ export default function DataPreviewPanel({
   const contextMenuRef = useRef<HTMLDivElement>(null);
   const tableRef = useRef<HTMLTableElement>(null);
   const columnRulesScrollRef = useRef<HTMLDivElement>(null);
+  const dataBodyRef = useRef<HTMLDivElement>(null);
+  const scrollingSource = useRef<"body" | "rules" | null>(null);
   const [colWidths, setColWidths] = useState<{ left: number; width: number }[]>([]);
   const [selectedRule, setSelectedRule] = useState<Record<string, unknown> | null>(null);
   const [modalDomainName, setModalDomainName] = useState("");
@@ -177,9 +179,21 @@ export default function DataPreviewPanel({
   const [saving, setSaving] = useState(false);
 
   const handleDataScroll = useCallback((e: React.UIEvent<HTMLDivElement>) => {
+    if (scrollingSource.current === "rules") return;
+    scrollingSource.current = "body";
     if (columnRulesScrollRef.current) {
       columnRulesScrollRef.current.scrollLeft = e.currentTarget.scrollLeft;
     }
+    requestAnimationFrame(() => { scrollingSource.current = null; });
+  }, []);
+
+  const handleColumnRulesScroll = useCallback((e: React.UIEvent<HTMLDivElement>) => {
+    if (scrollingSource.current === "body") return;
+    scrollingSource.current = "rules";
+    if (dataBodyRef.current) {
+      dataBodyRef.current.scrollLeft = e.currentTarget.scrollLeft;
+    }
+    requestAnimationFrame(() => { scrollingSource.current = null; });
   }, []);
 
   const rulesByField = useMemo(() => {
@@ -335,7 +349,7 @@ export default function DataPreviewPanel({
           </div>
         )}
       </div>
-      <div className="data-preview-body" onScroll={handleDataScroll}>
+      <div className="data-preview-body" ref={dataBodyRef} onScroll={handleDataScroll}>
         {(() => {
           const activeDryRun = dryRuns.find((dr) => dr.label === activeTab);
           if (activeDryRun?.inProgress && !activeData) {
@@ -366,7 +380,7 @@ export default function DataPreviewPanel({
           <div className="data-preview-column-rules-header">
             <span className="data-preview-column-rules-tab">Column Rules</span>
           </div>
-          <div className="data-preview-column-rules-scroll" ref={columnRulesScrollRef}>
+          <div className="data-preview-column-rules-scroll" ref={columnRulesScrollRef} onScroll={handleColumnRulesScroll}>
             <div
               className="data-preview-column-rules-row"
               style={colWidths.length > 0 ? {

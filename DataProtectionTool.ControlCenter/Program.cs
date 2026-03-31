@@ -1780,6 +1780,53 @@ app.MapGet("/api/agents/{path}/events", async (string path, AgentRegistry regist
     return Results.Ok(result);
 });
 
+app.MapPost("/api/agents/{path}/save-flow", async (string path, HttpRequest request, AgentRegistry registry, ClientTableService clientTableService) =>
+{
+    if (!registry.TryGet(path, out var info) || info is null)
+        return Results.NotFound(new { error = "Agent not found." });
+
+    string body;
+    using (var reader = new StreamReader(request.Body))
+        body = await reader.ReadToEndAsync();
+
+    try
+    {
+        using var doc = JsonDocument.Parse(body);
+        var root = doc.RootElement;
+
+        var sourceJson = root.TryGetProperty("sourceJson", out var sj) ? sj.GetString() ?? "" : "";
+        var destJson = root.TryGetProperty("destJson", out var dj) ? dj.GetString() ?? "" : "";
+
+        var partitionKey = ClientEntity.BuildPartitionKey(info.Oid, info.Tid);
+        var entity = await clientTableService.SaveFlowAsync(partitionKey, sourceJson, destJson);
+
+        return Results.Ok(new { success = true, rowKey = entity.RowKey });
+    }
+    catch (Exception ex)
+    {
+        return Results.Ok(new { success = false, message = $"Failed to save flow: {ex.Message}" });
+    }
+});
+
+app.MapGet("/api/agents/{path}/flows", async (string path, AgentRegistry registry, ClientTableService clientTableService) =>
+{
+    if (!registry.TryGet(path, out var info) || info is null)
+        return Results.NotFound(new { error = "Agent not found." });
+
+    var partitionKey = ClientEntity.BuildPartitionKey(info.Oid, info.Tid);
+    var flows = await clientTableService.GetFlowsAsync(partitionKey);
+
+    var result = flows.Select(f => new
+    {
+        rowKey = f.RowKey,
+        sourceJson = f.SourceJson,
+        destJson = f.DestJson,
+        createdAt = f.CreatedAt.ToString("O")
+    });
+
+    return Results.Ok(result);
+});
+
 app.MapGet("/agents/{path}", (string path, AgentRegistry registry, IWebHostEnvironment env) =>
 {
     if (!registry.TryGet(path, out _))
