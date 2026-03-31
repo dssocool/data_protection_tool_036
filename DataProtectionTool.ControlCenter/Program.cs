@@ -78,10 +78,6 @@ var previewFilenameRegex = new Regex(
 
 try
 {
-    var containerClient = app.Services.GetRequiredService<BlobServiceClient>()
-        .GetBlobContainerClient(blobStorageConfig.Container);
-    await containerClient.CreateIfNotExistsAsync();
-
     var usersTable = tableServiceClient.GetTableClient("Users");
     await usersTable.CreateIfNotExistsAsync();
     var controlCenterTable = tableServiceClient.GetTableClient("ControlCenter");
