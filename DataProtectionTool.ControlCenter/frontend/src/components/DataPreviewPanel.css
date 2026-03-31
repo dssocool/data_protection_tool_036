@@ -15,42 +15,84 @@
 
 .data-preview-header {
   display: flex;
-  align-items: center;
+  align-items: flex-end;
   gap: 12px;
-  padding: 10px 14px 0 14px;
-  border-bottom: 1px solid #e8e8e8;
+  padding: 0 14px;
+  border-bottom: 1px solid #d4d4d4;
+  background: #ececec;
 }
 
 .data-preview-tabs {
   display: flex;
   gap: 0;
+  overflow-x: auto;
+  scrollbar-width: none;
+  flex-shrink: 1;
+  min-width: 0;
+}
+
+.data-preview-tabs::-webkit-scrollbar {
+  display: none;
 }
 
 .data-preview-tab {
-  padding: 8px 16px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 10px;
   font-size: 13px;
-  font-weight: 500;
-  color: #666;
-  background: none;
+  font-weight: 400;
+  color: #888;
+  background: #ececec;
   border: none;
-  border-bottom: 2px solid transparent;
-  border-radius: 6px 6px 0 0;
+  border-right: 1px solid #d4d4d4;
+  border-top: 2px solid transparent;
+  border-radius: 0;
   cursor: pointer;
-  transition: color 0.15s, border-color 0.15s, background-color 0.15s;
+  white-space: nowrap;
+  flex-shrink: 0;
+  transition: color 0.1s, background-color 0.1s;
 }
 
 .data-preview-tab:hover {
   color: #333;
-  background-color: #e8edf3;
+  background-color: #e0e0e0;
 }
 
+.data-preview-tab-active,
 .data-preview-tab-active:hover {
-  background-color: #e0ecf7;
+  color: #333;
+  background: #fff;
+  border-top-color: #0078d4;
+  margin-bottom: -1px;
+  padding-bottom: 7px;
 }
 
-.data-preview-tab-active {
-  color: #0078d4;
-  border-bottom-color: #0078d4;
+.data-preview-tab-label {
+  pointer-events: none;
+}
+
+.data-preview-tab-close {
+  display: none;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  font-size: 14px;
+  line-height: 1;
+  color: #888;
+  border-radius: 3px;
+  margin-left: 2px;
+}
+
+.data-preview-tab-close:hover {
+  background: #c8c8c8;
+  color: #333;
+}
+
+.data-preview-tab:hover .data-preview-tab-close,
+.data-preview-tab-active .data-preview-tab-close {
+  display: inline-flex;
 }
 
 .data-preview-body {
@@ -203,6 +245,7 @@
   align-items: center;
   gap: 8px;
   margin-left: auto;
+  padding: 6px 0;
 }
 
 .data-preview-diff-select {

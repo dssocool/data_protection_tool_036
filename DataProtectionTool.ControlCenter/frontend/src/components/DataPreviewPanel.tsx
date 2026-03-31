@@ -182,6 +182,7 @@ export default function DataPreviewPanel({
 
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; tab: string } | null>(null);
   const contextMenuRef = useRef<HTMLDivElement>(null);
+  const tabsContainerRef = useRef<HTMLDivElement>(null);
   const tableRef = useRef<HTMLTableElement>(null);
   const columnRulesScrollRef = useRef<HTMLDivElement>(null);
   const dataBodyRef = useRef<HTMLDivElement>(null);
@@ -330,7 +331,16 @@ export default function DataPreviewPanel({
   return (
     <div className="data-preview-panel" style={{ left: panelLeft + 16 }}>
       <div className="data-preview-header">
-        <div className="data-preview-tabs">
+        <div
+          className="data-preview-tabs"
+          ref={tabsContainerRef}
+          onWheel={(e) => {
+            if (tabsContainerRef.current) {
+              tabsContainerRef.current.scrollLeft += e.deltaY;
+              e.preventDefault();
+            }
+          }}
+        >
           {tabs.map((tab) => (
             <button
               key={tab}
@@ -341,7 +351,18 @@ export default function DataPreviewPanel({
                 setContextMenu({ x: e.clientX, y: e.clientY, tab });
               }}
             >
-              {tab}
+              <span className="data-preview-tab-label">{tab}</span>
+              {tab !== "Original" && (
+                <span
+                  className="data-preview-tab-close"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onTabClose(tab);
+                  }}
+                >
+                  {"\u00d7"}
+                </span>
+              )}
             </button>
           ))}
           {contextMenu && (
