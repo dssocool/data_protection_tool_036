@@ -308,7 +308,9 @@
 }
 
 .column-rule-btn {
-  display: inline-block;
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
   padding: 2px 8px;
   font-size: 11px;
   font-weight: 500;
@@ -541,8 +543,12 @@
   gap: 10px;
 }
 
+.column-rule-btn-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+
 .column-rule-warning-icon {
-  margin-left: 4px;
-  vertical-align: middle;
   flex-shrink: 0;
 }

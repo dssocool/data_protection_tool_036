@@ -461,11 +461,13 @@ export default function DataPreviewPanel({
                         }}
                         title={rule.isMasked === false ? `No masking for ${header}` : `View rule for ${header}`}
                       >
-                        {rule.isMasked === false
-                          ? "N/A"
-                          : typeof rule.algorithmName === "string"
-                            ? rule.algorithmName
-                            : header}
+                        <span className="column-rule-btn-text">
+                          {rule.isMasked === false
+                            ? "N/A"
+                            : typeof rule.algorithmName === "string"
+                              ? rule.algorithmName
+                              : header}
+                        </span>
                         {mismatchedColumns.has(header) && (
                           <svg className="column-rule-warning-icon" width="14" height="14" viewBox="0 0 24 24" fill="none">
                             <path d="M12 2L1 21h22L12 2z" fill="#e8a012" stroke="#b37a00" strokeWidth="1"/>
