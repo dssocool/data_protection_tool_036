@@ -29,17 +29,28 @@ function getStatusColor(events: StatusEvent[]): string {
   return "#2e7d32";
 }
 
+function isAnyRunning(events: StatusEvent[]): boolean {
+  return events.some(
+    (e) => Array.isArray(e.steps) && e.steps.length > 0 && e.steps[e.steps.length - 1].status === "running"
+  );
+}
+
 export default function StatusBar({ events, onIconClick }: StatusBarProps) {
   const latest = events.length > 0 ? events[events.length - 1] : null;
   const color = getStatusColor(events);
+  const running = isAnyRunning(events);
 
   return (
     <div className="status-bar">
       <div className="status-bar-icon" onClick={onIconClick} title="Show event history">
-        <svg width="14" height="14" viewBox="0 0 14 14">
-          <circle cx="7" cy="7" r="5" fill={color} opacity="0.9" />
-          <circle cx="7" cy="7" r="2.5" fill="#fff" opacity="0.5" />
-        </svg>
+        {running ? (
+          <span className="status-bar-spinner" />
+        ) : (
+          <svg width="14" height="14" viewBox="0 0 14 14">
+            <circle cx="7" cy="7" r="5" fill={color} opacity="0.9" />
+            <circle cx="7" cy="7" r="2.5" fill="#fff" opacity="0.5" />
+          </svg>
+        )}
       </div>
       <span className="status-bar-summary">
         {latest ? latest.summary : "No recent activity"}

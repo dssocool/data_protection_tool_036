@@ -65,9 +65,23 @@ function isInProgress(evt: StatusEvent): boolean {
   return evt.steps[evt.steps.length - 1].status === "running";
 }
 
+function eventMatchesQuery(evt: StatusEvent, query: string): boolean {
+  const q = query.toLowerCase();
+  if (evt.summary.toLowerCase().includes(q)) return true;
+  if (evt.detail && evt.detail.toLowerCase().includes(q)) return true;
+  if (evt.type.toLowerCase().includes(q)) return true;
+  if (evt.steps) {
+    for (const step of evt.steps) {
+      if (step.message.toLowerCase().includes(q)) return true;
+    }
+  }
+  return false;
+}
+
 export default function EventDialog({ events, onClose }: EventDialogProps) {
   const dialogRef = useRef<HTMLDivElement>(null);
   const [expandedIdx, setExpandedIdx] = useState<number | null>(null);
+  const [searchQuery, setSearchQuery] = useState("");
 
   useEffect(() => {
     function handleClickOutside(e: MouseEvent) {
@@ -80,6 +94,9 @@ export default function EventDialog({ events, onClose }: EventDialogProps) {
   }, [onClose]);
 
   const reversed = [...events].reverse();
+  const filtered = searchQuery
+    ? reversed.filter((evt) => eventMatchesQuery(evt, searchQuery))
+    : reversed;
 
   return (
     <>
@@ -93,12 +110,22 @@ export default function EventDialog({ events, onClose }: EventDialogProps) {
             </svg>
           </button>
         </div>
+        <div className="event-dialog-search">
+          <input
+            type="text"
+            placeholder="Search events..."
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+          />
+        </div>
         <div className="event-dialog-body">
           {reversed.length === 0 ? (
             <div className="event-dialog-empty">No events recorded yet.</div>
+          ) : filtered.length === 0 ? (
+            <div className="event-dialog-empty">No matching events.</div>
           ) : (
-            reversed.map((evt, idx) => {
-              const originalIdx = events.length - 1 - idx;
+            filtered.map((evt, idx) => {
+              const originalIdx = events.indexOf(evt);
               const isExpanded = expandedIdx === originalIdx;
               const stepsPresent = hasSteps(evt);
               const inProgress = isInProgress(evt);

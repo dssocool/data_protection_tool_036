@@ -1552,7 +1552,8 @@ app.MapPost("/api/agents/{path}/full-run", async (string path, HttpContext httpC
         {
             rowKey, schema, tableName, uniqueId,
             sqlStatement = $"SELECT * FROM [{schema}].[{tableName}]",
-            filePrefix = "fullrun"
+            filePrefix = "fullrun",
+            containerName = blobConfig.Container
         });
         var exportResult = await connection.SendCommandAsync("export_table", exportPayload, TimeSpan.FromSeconds(600));
 
@@ -1586,21 +1587,6 @@ app.MapPost("/api/agents/{path}/full-run", async (string path, HttpContext httpC
         var exportEvtSummary = $"Full run: exported {exportFilenames.Count} file(s) for {schema}.{tableName}";
         _ = clientTableService.AppendEventAsync(partitionKey, "full_run", exportEvtSummary);
         await WriteSseEvent("event", JsonSerializer.Serialize(new { timestamp = DateTime.UtcNow.ToString("O"), type = "full_run", summary = exportEvtSummary, detail = "" }));
-
-        // Step 1.5: Copy fullrun files from preview container to engine container
-        await WriteSseEvent("status", "Copying exported files to engine storage...");
-        var previewContainerClient = blobClient.GetBlobContainerClient(blobConfig.PreviewContainer);
-        var engineContainerClient = blobClient.GetBlobContainerClient(blobConfig.Container);
-
-        foreach (var exportFile in exportFilenames)
-        {
-            var sourceBlob = previewContainerClient.GetBlobClient(exportFile);
-            var destBlob = engineContainerClient.GetBlobClient(exportFile);
-            using var stream = new MemoryStream();
-            await sourceBlob.DownloadToAsync(stream);
-            stream.Position = 0;
-            await destBlob.UploadAsync(stream, overwrite: true);
-        }
 
         // Step 2: Create file ruleset
         await WriteSseEvent("status", "Creating file ruleset...");
@@ -1739,7 +1725,8 @@ app.MapPost("/api/agents/{path}/full-run", async (string path, HttpContext httpC
                 tableName,
                 blobFilename = exportFile,
                 createTable = fi == 0,
-                truncate = fi == 0
+                truncate = fi == 0,
+                containerName = blobConfig.Container
             });
 
             var loadResult = await connection.SendCommandAsync("load_masked_to_table", loadPayload, TimeSpan.FromSeconds(600));

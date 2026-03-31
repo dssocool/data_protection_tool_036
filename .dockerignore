@@ -1,0 +1,15 @@
+**/.git
+**/.vs
+**/.vscode
+**/.idea
+**/bin
+**/obj
+**/node_modules
+**/wwwroot
+**/.azurite
+**/.DS_Store
+**/*.user
+**/*.log
+**/*.swp
+**/*.bak
+**/*.tmp

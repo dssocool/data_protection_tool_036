@@ -202,6 +202,8 @@ public class AgentHubService : AgentHub.AgentHubBase
             using var doc = JsonDocument.Parse(payload);
             var correlationId = doc.RootElement.TryGetProperty("correlationId", out var cidEl)
                 ? cidEl.GetString() ?? "" : "";
+            var requestedContainer = doc.RootElement.TryGetProperty("containerName", out var cnEl)
+                ? cnEl.GetString() : null;
 
             var sasBuilder = new AccountSasBuilder
             {
@@ -223,7 +225,7 @@ public class AgentHubService : AgentHub.AgentHubBase
                 correlationId,
                 sasToken,
                 blobEndpoint,
-                container = _blobStorageConfig.PreviewContainer
+                container = requestedContainer ?? _blobStorageConfig.PreviewContainer
             });
 
             await responseStream.WriteAsync(new ServerMessage

@@ -339,6 +339,7 @@ static async Task<object> HandleExportTableCore(
     var uniqueId = root.GetProperty("uniqueId").GetString() ?? "";
     var sqlStatement = root.GetProperty("sqlStatement").GetString() ?? "";
     var filePrefix = root.TryGetProperty("filePrefix", out var fpEl) ? fpEl.GetString() ?? "preview" : "preview";
+    var containerName = root.TryGetProperty("containerName", out var cnEl) ? cnEl.GetString() : null;
 
     if (string.IsNullOrWhiteSpace(uniqueId))
         throw new InvalidOperationException("Missing uniqueId in export request.");
@@ -353,7 +354,7 @@ static async Task<object> HandleExportTableCore(
             cmd.CommandTimeout = 0;
 
             await using var reader = await cmd.ExecuteReaderAsync();
-            return await StreamReaderToParquetBlobs(reader, call, agentId, oid, tid, uniqueId, sasManager, filePrefix);
+            return await StreamReaderToParquetBlobs(reader, call, agentId, oid, tid, uniqueId, sasManager, filePrefix, containerName);
         });
 
     Console.WriteLine($"[Agent] Exported {filenames.Count} Parquet file(s) for [{schema}].[{tableName}]");
@@ -372,10 +373,11 @@ static async Task<object> HandleLoadMaskedToTableCore(
     var blobFilename = root.GetProperty("blobFilename").GetString() ?? "";
     var createTable = root.TryGetProperty("createTable", out var ctEl) && ctEl.GetBoolean();
     var truncate = root.TryGetProperty("truncate", out var trEl) && trEl.GetBoolean();
+    var containerName = root.TryGetProperty("containerName", out var cnEl) ? cnEl.GetString() : null;
 
     Console.WriteLine($"[Agent] Loading masked file {blobFilename} -> [{destSchema}].[{tableName}] (create={createTable}, truncate={truncate})");
 
-    var sasInfo = await sasManager.RequestSasTokenAsync(call, agentId, oid, tid);
+    var sasInfo = await sasManager.RequestSasTokenAsync(call, agentId, oid, tid, containerName);
     var blobUri = new Uri($"{sasInfo.BlobEndpoint}/{sasInfo.Container}/{blobFilename}?{sasInfo.SasToken}");
     var blobClient = new BlobClient(blobUri);
 
@@ -690,7 +692,8 @@ static async Task<List<string>> StreamReaderToParquetBlobs(
     SqlDataReader reader,
     AsyncDuplexStreamingCall<AgentMessage, ServerMessage> call,
     string agentId, string oid, string tid, string uniqueId,
-    SasTokenManager sasManager, string filePrefix = "preview")
+    SasTokenManager sasManager, string filePrefix = "preview",
+    string? containerName = null)
 {
     var columnCount = reader.FieldCount;
     var columnNames = new string[columnCount];
@@ -710,7 +713,7 @@ static async Task<List<string>> StreamReaderToParquetBlobs(
     };
 
     var parquetSchema = new ParquetSchema(dataFields);
-    var sasInfo = await sasManager.RequestSasTokenAsync(call, agentId, oid, tid);
+    var sasInfo = await sasManager.RequestSasTokenAsync(call, agentId, oid, tid, containerName);
     var filenames = new List<string>();
     var previewRequestUuid = Guid.NewGuid().ToString("N");
     var fileSequence = 1;
@@ -1050,7 +1053,8 @@ class SasTokenManager
 
     public async Task<SasTokenInfo> RequestSasTokenAsync(
         AsyncDuplexStreamingCall<AgentMessage, ServerMessage> call,
-        string agentId, string oid, string tid)
+        string agentId, string oid, string tid,
+        string? containerName = null)
     {
         var correlationId = Guid.NewGuid().ToString("N");
         var tcs = new TaskCompletionSource<SasTokenInfo>(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -1058,7 +1062,9 @@ class SasTokenManager
 
         try
         {
-            var requestPayload = JsonSerializer.Serialize(new { correlationId });
+            var requestPayload = string.IsNullOrEmpty(containerName)
+                ? JsonSerializer.Serialize(new { correlationId })
+                : JsonSerializer.Serialize(new { correlationId, containerName });
             await call.RequestStream.WriteAsync(new AgentMessage
             {
                 AgentId = agentId,
