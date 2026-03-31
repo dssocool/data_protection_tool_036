@@ -1,10 +1,17 @@
 import "./StatusBar.css";
 
+export interface StatusEventStep {
+  timestamp: string;
+  message: string;
+  status: "running" | "done" | "error";
+}
+
 export interface StatusEvent {
   timestamp: string;
   type: string;
   summary: string;
   detail: string;
+  steps?: StatusEventStep[];
 }
 
 interface StatusBarProps {

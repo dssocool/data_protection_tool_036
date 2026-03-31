@@ -75,6 +75,26 @@
   background: #f5f5f5;
 }
 
+.event-item-expandable {
+  padding-left: 4px;
+}
+
+.event-item-chevron {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  color: #999;
+  transition: transform 0.15s ease;
+  margin-top: 1px;
+}
+
+.event-item-chevron-open {
+  transform: rotate(90deg);
+}
+
 .event-item-time {
   flex-shrink: 0;
   color: #999;
@@ -118,6 +138,20 @@
   min-width: 0;
   color: #333;
   line-height: 1.4;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.event-item-spinner {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border: 1.5px solid #bbb;
+  border-top-color: #1976d2;
+  border-radius: 50%;
+  animation: event-spin 0.8s linear infinite;
+  flex-shrink: 0;
 }
 
 .event-item-detail {
@@ -126,4 +160,62 @@
   color: #777;
   line-height: 1.4;
   word-break: break-word;
+}
+
+/* Expandable step list */
+.event-steps {
+  padding: 2px 0 4px 36px;
+  border-left: 2px solid #e0e0e0;
+  margin-left: 18px;
+}
+
+.event-step {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 8px;
+  font-size: 11px;
+  color: #555;
+  line-height: 1.3;
+}
+
+.event-step-icon {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+}
+
+.event-step-icon-done {
+  color: #2e7d32;
+}
+
+.event-step-icon-error {
+  color: #c62828;
+}
+
+.event-step-icon-running {
+  color: #1976d2;
+}
+
+.event-step-spinner {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border: 1.5px solid #bbb;
+  border-top-color: #1976d2;
+  border-radius: 50%;
+  animation: event-spin 0.8s linear infinite;
+}
+
+.event-step-message {
+  flex: 1;
+  min-width: 0;
+  word-break: break-word;
+}
+
+@keyframes event-spin {
+  to { transform: rotate(360deg); }
 }

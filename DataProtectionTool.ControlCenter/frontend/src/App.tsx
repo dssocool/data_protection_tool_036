@@ -89,8 +89,12 @@ export default function App() {
     try {
       const res = await fetch(`/api/agents/${agentPath}/events`);
       if (res.ok) {
-        const data = await res.json();
-        setStatusEvents(data);
+        const data: StatusEvent[] = await res.json();
+        setStatusEvents(prev => {
+          const tracked = prev.filter(e => Array.isArray(e.steps) && e.steps.length > 0);
+          if (tracked.length === 0) return data;
+          return [...data, ...tracked];
+        });
       }
     } catch {
       // silently ignore
@@ -885,6 +889,35 @@ export default function App() {
         setDryRunningTables((prev) => { const next = new Set(prev); next.delete(key); return next; });
       };
 
+      const dryRunTrackedTs = new Date().toISOString();
+      const dryRunTrackedEvent: StatusEvent = {
+        timestamp: dryRunTrackedTs,
+        type: "dry_run",
+        summary: `Dry run started: ${schema}.${tableName}`,
+        detail: "",
+        steps: [],
+      };
+      addLocalEvent(dryRunTrackedEvent);
+
+      const updateDryRunTrackedSteps = (stepMsg: string, stepStatus: "running" | "done" | "error") => {
+        setStatusEvents(prev => prev.map(evt => {
+          if (evt.timestamp !== dryRunTrackedTs || evt.type !== "dry_run" || !evt.steps) return evt;
+          const steps = evt.steps.map(s => s.status === "running" ? { ...s, status: "done" as const } : s);
+          if (stepStatus !== "done" || stepMsg) {
+            steps.push({ timestamp: new Date().toISOString(), message: stepMsg, status: stepStatus });
+          }
+          return { ...evt, steps };
+        }));
+      };
+
+      const finalizeDryRunTrackedEvent = (summary: string, lastStepStatus: "done" | "error") => {
+        setStatusEvents(prev => prev.map(evt => {
+          if (evt.timestamp !== dryRunTrackedTs || evt.type !== "dry_run" || !evt.steps) return evt;
+          const steps = evt.steps.map(s => s.status === "running" ? { ...s, status: lastStepStatus } : s);
+          return { ...evt, summary, steps };
+        }));
+      };
+
       try {
         const response = await fetch(`/api/agents/${agentPath}/dry-run`, {
           method: "POST",
@@ -897,6 +930,7 @@ export default function App() {
         });
 
         if (!response.ok) {
+          finalizeDryRunTrackedEvent(`Dry run failed: server error ${response.status}`, "error");
           finalizeDryRunError(`Dry run request failed: server error ${response.status}`);
           return;
         }
@@ -924,8 +958,12 @@ export default function App() {
             }
 
             if (eventType === "event") {
-              try { addLocalEvent(JSON.parse(eventData)); } catch { /* ignore parse errors */ }
+              try {
+                const parsed = JSON.parse(eventData);
+                finalizeDryRunTrackedEvent(parsed.summary ?? `Dry run completed: ${schema}.${tableName}`, "done");
+              } catch { /* ignore parse errors */ }
             } else if (eventType === "status") {
+              updateDryRunTrackedSteps(eventData, "running");
               if (isViewingTable(rowKey, schema, tableName)) {
                 updateDryRunStatus(eventData);
               } else {
@@ -1027,6 +1065,7 @@ export default function App() {
                 const parsed = JSON.parse(eventData);
                 errMsg = parsed.message ?? errMsg;
               } catch { /* use default */ }
+              finalizeDryRunTrackedEvent(errMsg, "error");
               if (isViewingTable(rowKey, schema, tableName)) {
                 finalizeDryRunError(errMsg);
               } else {
@@ -1048,10 +1087,12 @@ export default function App() {
         }
 
         if (!completed) {
+          finalizeDryRunTrackedEvent("Dry run stream ended unexpectedly.", "error");
           finalizeDryRunError("Dry run stream ended unexpectedly.");
         }
       } catch (e) {
         const errMsg = `Dry run failed: ${e instanceof Error ? e.message : String(e)}`;
+        finalizeDryRunTrackedEvent(errMsg, "error");
         if (isViewingTable(rowKey, schema, tableName)) {
           finalizeDryRunError(errMsg);
         } else {
@@ -1085,8 +1126,34 @@ export default function App() {
 
     const { rowKey, schema, tableName } = fullRunTarget;
     setFullRunTarget(null);
-    setPreviewLoading(true);
-    setPreviewError(null);
+
+    const trackedEvent: StatusEvent = {
+      timestamp: new Date().toISOString(),
+      type: "full_run",
+      summary: `Full run started: ${schema}.${tableName}`,
+      detail: "",
+      steps: [],
+    };
+    addLocalEvent(trackedEvent);
+
+    const updateTrackedSteps = (stepMsg: string, stepStatus: "running" | "done" | "error") => {
+      setStatusEvents(prev => prev.map(evt => {
+        if (evt.timestamp !== trackedEvent.timestamp || evt.type !== "full_run" || !evt.steps) return evt;
+        const steps = evt.steps.map(s => s.status === "running" ? { ...s, status: "done" as const } : s);
+        if (stepStatus !== "done" || stepMsg) {
+          steps.push({ timestamp: new Date().toISOString(), message: stepMsg, status: stepStatus });
+        }
+        return { ...evt, steps };
+      }));
+    };
+
+    const finalizeTrackedEvent = (summary: string, lastStepStatus: "done" | "error") => {
+      setStatusEvents(prev => prev.map(evt => {
+        if (evt.timestamp !== trackedEvent.timestamp || evt.type !== "full_run" || !evt.steps) return evt;
+        const steps = evt.steps.map(s => s.status === "running" ? { ...s, status: lastStepStatus } : s);
+        return { ...evt, summary, steps };
+      }));
+    };
 
     try {
       const response = await fetch(`/api/agents/${agentPath}/full-run`, {
@@ -1102,8 +1169,7 @@ export default function App() {
       });
 
       if (!response.ok) {
-        setPreviewError(`Full run request failed: server error ${response.status}`);
-        setPreviewLoading(false);
+        finalizeTrackedEvent(`Full run failed: server error ${response.status}`, "error");
         fetchEvents();
         return;
       }
@@ -1131,32 +1197,30 @@ export default function App() {
           }
 
           if (eventType === "event") {
-            try { addLocalEvent(JSON.parse(eventData)); } catch { /* ignore parse errors */ }
+            try {
+              const parsed = JSON.parse(eventData);
+              finalizeTrackedEvent(parsed.summary ?? `Full run completed: ${schema}.${tableName}`, "done");
+            } catch { /* ignore parse errors */ }
           } else if (eventType === "status") {
-            setPreviewError(eventData);
+            updateTrackedSteps(eventData, "running");
           } else if (eventType === "complete") {
             completed = true;
-            setPreviewError(null);
-            setPreviewLoading(false);
           } else if (eventType === "error") {
             let errMsg = "Full run failed.";
             try {
               const parsed = JSON.parse(eventData);
               errMsg = parsed.message ?? errMsg;
             } catch { /* use default */ }
-            setPreviewError(errMsg);
-            setPreviewLoading(false);
+            finalizeTrackedEvent(errMsg, "error");
           }
         }
       }
 
       if (!completed) {
-        setPreviewError("Full run stream ended unexpectedly.");
-        setPreviewLoading(false);
+        finalizeTrackedEvent("Full run stream ended unexpectedly.", "error");
       }
     } catch (e) {
-      setPreviewError(`Full run failed: ${e instanceof Error ? e.message : String(e)}`);
-      setPreviewLoading(false);
+      finalizeTrackedEvent(`Full run failed: ${e instanceof Error ? e.message : String(e)}`, "error");
     } finally {
       fetchEvents();
     }

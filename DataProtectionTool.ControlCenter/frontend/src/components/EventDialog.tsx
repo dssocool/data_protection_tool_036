@@ -28,6 +28,15 @@ function formatTime(iso: string): string {
   }
 }
 
+function hasSteps(evt: StatusEvent): boolean {
+  return Array.isArray(evt.steps) && evt.steps.length > 0;
+}
+
+function isInProgress(evt: StatusEvent): boolean {
+  if (!evt.steps || evt.steps.length === 0) return false;
+  return evt.steps[evt.steps.length - 1].status === "running";
+}
+
 export default function EventDialog({ events, onClose }: EventDialogProps) {
   const dialogRef = useRef<HTMLDivElement>(null);
   const [expandedIdx, setExpandedIdx] = useState<number | null>(null);
@@ -63,19 +72,54 @@ export default function EventDialog({ events, onClose }: EventDialogProps) {
             reversed.map((evt, idx) => {
               const originalIdx = events.length - 1 - idx;
               const isExpanded = expandedIdx === originalIdx;
+              const stepsPresent = hasSteps(evt);
+              const inProgress = isInProgress(evt);
+
               return (
                 <div key={originalIdx}>
                   <div
-                    className="event-item"
+                    className={`event-item${stepsPresent ? " event-item-expandable" : ""}`}
                     onClick={() => setExpandedIdx(isExpanded ? null : originalIdx)}
                   >
+                    {stepsPresent && (
+                      <span className={`event-item-chevron${isExpanded ? " event-item-chevron-open" : ""}`}>
+                        <svg width="10" height="10" viewBox="0 0 10 10">
+                          <path d="M3 2 L7 5 L3 8" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+                        </svg>
+                      </span>
+                    )}
                     <span className="event-item-time">{formatTime(evt.timestamp)}</span>
                     <span className={`event-item-badge ${getBadgeClass(evt)}`}>
                       {formatBadgeLabel(evt.type)}
                     </span>
-                    <span className="event-item-summary">{evt.summary}</span>
+                    <span className="event-item-summary">
+                      {evt.summary}
+                      {inProgress && <span className="event-item-spinner" />}
+                    </span>
                   </div>
-                  {isExpanded && evt.detail && (
+                  {isExpanded && stepsPresent && (
+                    <div className="event-steps">
+                      {evt.steps!.map((step, si) => (
+                        <div className="event-step" key={si}>
+                          <span className={`event-step-icon event-step-icon-${step.status}`}>
+                            {step.status === "done" && (
+                              <svg width="10" height="10" viewBox="0 0 10 10">
+                                <path d="M2 5 L4.5 7.5 L8 2.5" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+                              </svg>
+                            )}
+                            {step.status === "running" && <span className="event-step-spinner" />}
+                            {step.status === "error" && (
+                              <svg width="10" height="10" viewBox="0 0 10 10">
+                                <path d="M3 3 L7 7 M7 3 L3 7" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+                              </svg>
+                            )}
+                          </span>
+                          <span className="event-step-message">{step.message}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  {isExpanded && !stepsPresent && evt.detail && (
                     <div className="event-item-detail">{evt.detail}</div>
                   )}
                 </div>
