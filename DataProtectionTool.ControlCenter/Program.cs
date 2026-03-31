@@ -269,7 +269,12 @@ app.MapPost("/api/agents/{path}/list-tables", async (string path, HttpRequest re
 
     try
     {
-        var result = await connection.SendCommandAsync("list_tables", body, TimeSpan.FromSeconds(30));
+        var listTablesPayload = JsonSerializer.Serialize(new
+        {
+            rowKey,
+            sqlStatement = "SELECT TABLE_SCHEMA, TABLE_NAME FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_TYPE = 'BASE TABLE' ORDER BY TABLE_SCHEMA, TABLE_NAME"
+        });
+        var result = await connection.SendCommandAsync("list_tables", listTablesPayload, TimeSpan.FromSeconds(30));
 
         try
         {
@@ -333,7 +338,11 @@ app.MapGet("/api/agents/{path}/list-schemas", async (string path, string rowKey,
 
     try
     {
-        var payload = JsonSerializer.Serialize(new { rowKey });
+        var payload = JsonSerializer.Serialize(new
+        {
+            rowKey,
+            sqlStatement = "SELECT DISTINCT TABLE_SCHEMA FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_TYPE = 'BASE TABLE' ORDER BY TABLE_SCHEMA"
+        });
         var result = await connection.SendCommandAsync("list_schemas", payload, TimeSpan.FromSeconds(30));
         return Results.Content(result, "application/json");
     }
@@ -391,7 +400,7 @@ app.MapPost("/api/agents/{path}/preview-table", async (string path, HttpRequest 
         if (string.IsNullOrWhiteSpace(uniqueId) || !IsDigitsOnly(uniqueId))
             return Results.BadRequest(new { success = false, message = "User unique ID is missing." });
 
-        var requestBody = AddUniqueIdToPayload(body, uniqueId);
+        var requestBody = AddFieldsToPayload(body, new { uniqueId, sqlStatement = $"SELECT * FROM [{schema}].[{tName}] TABLESAMPLE (200 ROWS)" });
         var result = await connection.SendCommandAsync("preview_table", requestBody, TimeSpan.FromSeconds(60));
 
         if (dataItem != null)
@@ -481,7 +490,7 @@ app.MapPost("/api/agents/{path}/reload-preview-table", async (string path, HttpR
         if (string.IsNullOrWhiteSpace(uniqueId) || !IsDigitsOnly(uniqueId))
             return Results.BadRequest(new { success = false, message = "User unique ID is missing." });
 
-        var requestBody = AddUniqueIdToPayload(body, uniqueId);
+        var requestBody = AddFieldsToPayload(body, new { uniqueId, sqlStatement = $"SELECT * FROM [{schema}].[{tName}] TABLESAMPLE (200 ROWS)" });
         var result = await connection.SendCommandAsync("preview_table", requestBody, TimeSpan.FromSeconds(60));
 
         if (dataItem != null)
@@ -739,7 +748,12 @@ app.MapPost("/api/agents/{path}/validate-query", async (string path, HttpRequest
 
     try
     {
-        var result = await connection.SendCommandAsync("validate_query", body, TimeSpan.FromSeconds(30));
+        var validateQueryPayload = AddFieldsToPayload(body, new
+        {
+            sqlStatementBefore = "SET NOEXEC ON",
+            sqlStatementAfter = "SET NOEXEC OFF"
+        });
+        var result = await connection.SendCommandAsync("validate_query", validateQueryPayload, TimeSpan.FromSeconds(30));
 
         using var doc = JsonDocument.Parse(result);
         var message = doc.RootElement.TryGetProperty("message", out var msgEl) ? msgEl.GetString() : null;
@@ -817,7 +831,19 @@ app.MapPost("/api/agents/{path}/preview-query", async (string path, HttpRequest 
         if (string.IsNullOrWhiteSpace(uniqueId) || !IsDigitsOnly(uniqueId))
             return Results.BadRequest(new { success = false, message = "User unique ID is missing." });
 
-        var requestBody = AddUniqueIdToPayload(body, uniqueId);
+        string queryText = "";
+        try
+        {
+            using var bodyDoc = JsonDocument.Parse(body);
+            queryText = bodyDoc.RootElement.TryGetProperty("queryText", out var qtEl) ? qtEl.GetString() ?? "" : "";
+        }
+        catch { }
+
+        var requestBody = AddFieldsToPayload(body, new
+        {
+            uniqueId,
+            sqlStatement = $"SELECT TOP 200 * FROM ({queryText}) AS _q"
+        });
         var result = await connection.SendCommandAsync("preview_query", requestBody, TimeSpan.FromSeconds(60));
         _ = clientTableService.AppendEventAsync(partitionKey, "preview_query", "Preview query completed");
         return Results.Content(result, "application/json");
@@ -973,7 +999,12 @@ app.MapPost("/api/agents/{path}/dry-run", async (string path, HttpContext httpCo
         var sqlColumnTypes = new List<string>();
         try
         {
-            var fetchTypesPayload = JsonSerializer.Serialize(new { rowKey, schema, tableName });
+            var fetchTypesPayload = JsonSerializer.Serialize(new
+            {
+                rowKey, schema, tableName,
+                sqlStatement = "SELECT COLUMN_NAME, DATA_TYPE FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = @schema AND TABLE_NAME = @tableName ORDER BY ORDINAL_POSITION",
+                sqlParams = new Dictionary<string, string> { ["@schema"] = schema, ["@tableName"] = tableName }
+            });
             var fetchTypesResult = await connection.SendCommandAsync("fetch_sql_types", fetchTypesPayload, TimeSpan.FromSeconds(120));
             using var fetchTypesDoc = JsonDocument.Parse(fetchTypesResult);
             var fetchTypesRoot = fetchTypesDoc.RootElement;
@@ -1434,7 +1465,11 @@ app.MapPost("/api/agents/{path}/full-run", async (string path, HttpContext httpC
             return;
         }
 
-        var exportPayload = JsonSerializer.Serialize(new { rowKey, schema, tableName, uniqueId });
+        var exportPayload = JsonSerializer.Serialize(new
+        {
+            rowKey, schema, tableName, uniqueId,
+            sqlStatement = $"SELECT * FROM [{schema}].[{tableName}]"
+        });
         var exportResult = await connection.SendCommandAsync("export_table", exportPayload, TimeSpan.FromSeconds(600));
 
         using var exportDoc = JsonDocument.Parse(exportResult);
@@ -1859,7 +1894,7 @@ app.MapGet("/agents/{path}", (string path, AgentRegistry registry, IWebHostEnvir
 
 bool IsDigitsOnly(string value) => value.All(char.IsDigit);
 
-string AddUniqueIdToPayload(string body, string uniqueId)
+string AddFieldsToPayload(string body, object fields)
 {
     JsonNode? payloadNode;
     try
@@ -1868,13 +1903,21 @@ string AddUniqueIdToPayload(string body, string uniqueId)
     }
     catch (JsonException ex)
     {
-        throw new InvalidOperationException($"Invalid preview request payload: {ex.Message}", ex);
+        throw new InvalidOperationException($"Invalid request payload: {ex.Message}", ex);
     }
 
     if (payloadNode is not JsonObject payloadObject)
-        throw new InvalidOperationException("Invalid preview request payload.");
+        throw new InvalidOperationException("Invalid request payload.");
 
-    payloadObject["uniqueId"] = uniqueId;
+    var fieldsJson = JsonSerializer.SerializeToNode(fields);
+    if (fieldsJson is JsonObject fieldsObject)
+    {
+        foreach (var prop in fieldsObject)
+        {
+            payloadObject[prop.Key] = prop.Value?.DeepClone();
+        }
+    }
+
     return payloadObject.ToJsonString();
 }
 

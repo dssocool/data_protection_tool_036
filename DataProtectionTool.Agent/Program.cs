@@ -335,6 +335,7 @@ static async Task HandleListTablesAsync(
 
         using var paramsDoc = JsonDocument.Parse(dataJson);
         var rowKey = paramsDoc.RootElement.GetProperty("rowKey").GetString() ?? "";
+        var sqlStatement = paramsDoc.RootElement.GetProperty("sqlStatement").GetString() ?? "";
 
         Console.WriteLine($"[Agent] Listing tables for connection {rowKey}...");
 
@@ -343,10 +344,7 @@ static async Task HandleListTablesAsync(
             {
                 var result = new List<object>();
                 await using var cmd = sqlConn.CreateCommand();
-                cmd.CommandText = @"SELECT TABLE_SCHEMA, TABLE_NAME 
-                    FROM INFORMATION_SCHEMA.TABLES 
-                    WHERE TABLE_TYPE = 'BASE TABLE' 
-                    ORDER BY TABLE_SCHEMA, TABLE_NAME";
+                cmd.CommandText = sqlStatement;
 
                 await using var reader = await cmd.ExecuteReaderAsync();
                 while (await reader.ReadAsync())
@@ -423,6 +421,7 @@ static async Task HandleFetchSqlTypesAsync(
         var rowKey = paramsDoc.RootElement.GetProperty("rowKey").GetString() ?? "";
         var schema = paramsDoc.RootElement.GetProperty("schema").GetString() ?? "";
         var tableName = paramsDoc.RootElement.GetProperty("tableName").GetString() ?? "";
+        var sqlStatement = paramsDoc.RootElement.GetProperty("sqlStatement").GetString() ?? "";
 
         Console.WriteLine($"[Agent] Fetching SQL types for [{schema}].[{tableName}] on connection {rowKey}...");
 
@@ -431,12 +430,16 @@ static async Task HandleFetchSqlTypesAsync(
             {
                 var result = new List<object>();
                 await using var cmd = sqlConn.CreateCommand();
-                cmd.CommandText = @"SELECT COLUMN_NAME, DATA_TYPE
-                    FROM INFORMATION_SCHEMA.COLUMNS
-                    WHERE TABLE_SCHEMA = @schema AND TABLE_NAME = @tableName
-                    ORDER BY ORDINAL_POSITION";
-                cmd.Parameters.AddWithValue("@schema", schema);
-                cmd.Parameters.AddWithValue("@tableName", tableName);
+                cmd.CommandText = sqlStatement;
+
+                if (paramsDoc.RootElement.TryGetProperty("sqlParams", out var sqlParamsEl) &&
+                    sqlParamsEl.ValueKind == JsonValueKind.Object)
+                {
+                    foreach (var param in sqlParamsEl.EnumerateObject())
+                    {
+                        cmd.Parameters.AddWithValue(param.Name, param.Value.GetString() ?? "");
+                    }
+                }
 
                 await using var reader = await cmd.ExecuteReaderAsync();
                 while (await reader.ReadAsync())
@@ -511,6 +514,7 @@ static async Task HandleListSchemasAsync(
 
         using var paramsDoc = JsonDocument.Parse(dataJson);
         var rowKey = paramsDoc.RootElement.GetProperty("rowKey").GetString() ?? "";
+        var sqlStatement = paramsDoc.RootElement.GetProperty("sqlStatement").GetString() ?? "";
 
         Console.WriteLine($"[Agent] Listing schemas for connection {rowKey}...");
 
@@ -519,10 +523,7 @@ static async Task HandleListSchemasAsync(
             {
                 var result = new List<string>();
                 await using var cmd = sqlConn.CreateCommand();
-                cmd.CommandText = @"SELECT DISTINCT TABLE_SCHEMA
-                    FROM INFORMATION_SCHEMA.TABLES
-                    WHERE TABLE_TYPE = 'BASE TABLE'
-                    ORDER BY TABLE_SCHEMA";
+                cmd.CommandText = sqlStatement;
 
                 await using var reader = await cmd.ExecuteReaderAsync();
                 while (await reader.ReadAsync())
@@ -596,6 +597,7 @@ static async Task HandleExportTableAsync(
         var schema = paramsDoc.RootElement.GetProperty("schema").GetString() ?? "";
         var tableName = paramsDoc.RootElement.GetProperty("tableName").GetString() ?? "";
         var uniqueId = paramsDoc.RootElement.GetProperty("uniqueId").GetString() ?? "";
+        var sqlStatement = paramsDoc.RootElement.GetProperty("sqlStatement").GetString() ?? "";
 
         if (string.IsNullOrWhiteSpace(uniqueId))
             throw new InvalidOperationException("Missing uniqueId in export request.");
@@ -606,7 +608,7 @@ static async Task HandleExportTableAsync(
             async (sqlConn) =>
             {
                 await using var cmd = sqlConn.CreateCommand();
-                cmd.CommandText = $"SELECT * FROM [{schema}].[{tableName}]";
+                cmd.CommandText = sqlStatement;
                 cmd.CommandTimeout = 0;
 
                 await using var reader = await cmd.ExecuteReaderAsync();
@@ -849,6 +851,7 @@ static async Task HandlePreviewTableAsync(
         var schema = paramsDoc.RootElement.GetProperty("schema").GetString() ?? "";
         var tableName = paramsDoc.RootElement.GetProperty("tableName").GetString() ?? "";
         var uniqueId = paramsDoc.RootElement.GetProperty("uniqueId").GetString() ?? "";
+        var sqlStatement = paramsDoc.RootElement.GetProperty("sqlStatement").GetString() ?? "";
 
         if (string.IsNullOrWhiteSpace(uniqueId))
             throw new InvalidOperationException("Missing uniqueId in preview request.");
@@ -859,7 +862,7 @@ static async Task HandlePreviewTableAsync(
             async (sqlConn) =>
             {
                 await using var cmd = sqlConn.CreateCommand();
-                cmd.CommandText = $"SELECT * FROM [{schema}].[{tableName}] TABLESAMPLE (200 ROWS)";
+                cmd.CommandText = sqlStatement;
 
                 await using var reader = await cmd.ExecuteReaderAsync();
                 return await StreamReaderToParquetBlobs(reader, call, agentId, oid, tid, uniqueId, sasManager);
@@ -927,15 +930,17 @@ static async Task HandleValidateQueryAsync(
         using var paramsDoc = JsonDocument.Parse(dataJson);
         var connectionRowKey = paramsDoc.RootElement.GetProperty("connectionRowKey").GetString() ?? "";
         var queryText = paramsDoc.RootElement.GetProperty("queryText").GetString() ?? "";
+        var sqlStatementBefore = paramsDoc.RootElement.GetProperty("sqlStatementBefore").GetString() ?? "";
+        var sqlStatementAfter = paramsDoc.RootElement.GetProperty("sqlStatementAfter").GetString() ?? "";
 
         Console.WriteLine($"[Agent] Validating query for connection {connectionRowKey}...");
 
         var message = await connManager.ExecuteWithRetryAsync(connectionRowKey, call, agentId, oid, tid,
             async (sqlConn) =>
             {
-                await using var cmdOn = sqlConn.CreateCommand();
-                cmdOn.CommandText = "SET NOEXEC ON";
-                await cmdOn.ExecuteNonQueryAsync();
+                await using var cmdBefore = sqlConn.CreateCommand();
+                cmdBefore.CommandText = sqlStatementBefore;
+                await cmdBefore.ExecuteNonQueryAsync();
 
                 try
                 {
@@ -946,9 +951,9 @@ static async Task HandleValidateQueryAsync(
                 }
                 finally
                 {
-                    await using var cmdOff = sqlConn.CreateCommand();
-                    cmdOff.CommandText = "SET NOEXEC OFF";
-                    await cmdOff.ExecuteNonQueryAsync();
+                    await using var cmdAfter = sqlConn.CreateCommand();
+                    cmdAfter.CommandText = sqlStatementAfter;
+                    await cmdAfter.ExecuteNonQueryAsync();
                 }
             });
 
@@ -1013,8 +1018,8 @@ static async Task HandlePreviewQueryAsync(
 
         using var paramsDoc = JsonDocument.Parse(dataJson);
         var connectionRowKey = paramsDoc.RootElement.GetProperty("connectionRowKey").GetString() ?? "";
-        var queryText = paramsDoc.RootElement.GetProperty("queryText").GetString() ?? "";
         var uniqueId = paramsDoc.RootElement.GetProperty("uniqueId").GetString() ?? "";
+        var sqlStatement = paramsDoc.RootElement.GetProperty("sqlStatement").GetString() ?? "";
 
         if (string.IsNullOrWhiteSpace(uniqueId))
             throw new InvalidOperationException("Missing uniqueId in preview request.");
@@ -1025,7 +1030,7 @@ static async Task HandlePreviewQueryAsync(
             async (sqlConn) =>
             {
                 await using var cmd = sqlConn.CreateCommand();
-                cmd.CommandText = $"SELECT TOP 200 * FROM ({queryText}) AS _q";
+                cmd.CommandText = sqlStatement;
 
                 await using var reader = await cmd.ExecuteReaderAsync();
                 return await StreamReaderToParquetBlobs(reader, call, agentId, oid, tid, uniqueId, sasManager);
