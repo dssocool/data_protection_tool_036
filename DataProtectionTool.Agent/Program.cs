@@ -91,71 +91,57 @@ while (!cts.Token.IsCancellationRequested)
         await call.RequestStream.WriteAsync(registerMessage, cts.Token);
         Console.WriteLine("Sent registration message with oid/tid.");
 
+        var handlers = new Dictionary<string, Action<ServerMessage>>
+        {
+            ["registration_url"] = msg =>
+                Console.WriteLine($"Agent registered. URL: {msg.Payload}"),
+            ["connections_list"] = msg =>
+            {
+                connectionManager.LoadConnectionDetails(msg.Payload);
+                Console.WriteLine("[Agent] Loaded connection details from ControlCenter.");
+            },
+            ["ack"] = _ => { },
+            ["validate_sql"] = msg =>
+                _ = RunCommandAsync(call, agentId, oid, tid, msg.Payload, "validate_sql_result", HandleValidateSqlCore),
+            ["execute_sql"] = msg =>
+                _ = RunCommandAsync(call, agentId, oid, tid, msg.Payload, "execute_sql_result",
+                    (cid, root) => HandleExecuteSqlCore(cid, root, call, agentId, oid, tid, connectionManager)),
+            ["preview_table"] = msg =>
+                _ = RunCommandAsync(call, agentId, oid, tid, msg.Payload, "preview_table_result",
+                    (cid, root) => HandlePreviewTableCore(cid, root, call, agentId, oid, tid, connectionManager, sasTokenManager)),
+            ["validate_query"] = msg =>
+                _ = RunCommandAsync(call, agentId, oid, tid, msg.Payload, "validate_query_result",
+                    (cid, root) => HandleValidateQueryCore(cid, root, call, agentId, oid, tid, connectionManager)),
+            ["preview_query"] = msg =>
+                _ = RunCommandAsync(call, agentId, oid, tid, msg.Payload, "preview_query_result",
+                    (cid, root) => HandlePreviewQueryCore(cid, root, call, agentId, oid, tid, connectionManager, sasTokenManager)),
+            ["http_request"] = msg =>
+                _ = RunCommandAsync(call, agentId, oid, tid, msg.Payload, "http_request_result", HandleHttpRequestCore),
+            ["export_table"] = msg =>
+                _ = RunCommandAsync(call, agentId, oid, tid, msg.Payload, "export_table_result",
+                    (cid, root) => HandleExportTableCore(cid, root, call, agentId, oid, tid, connectionManager, sasTokenManager)),
+            ["load_masked_to_table"] = msg =>
+                _ = RunCommandAsync(call, agentId, oid, tid, msg.Payload, "load_masked_to_table_result",
+                    (cid, root) => HandleLoadMaskedToTableCore(cid, root, call, agentId, oid, tid, connectionManager, sasTokenManager)),
+            ["connection_details_result"] = msg =>
+                connectionManager.HandleConnectionDetailsResponse(msg.Payload),
+            ["sas_token_result"] = msg =>
+                sasTokenManager.HandleSasTokenResponse(msg.Payload),
+        };
+
         var receiveTask = Task.Run(async () =>
         {
             while (await call.ResponseStream.MoveNext(cts.Token))
             {
                 var response = call.ResponseStream.Current;
 
-                if (response.Type == "registration_url")
+                if (handlers.TryGetValue(response.Type, out var handler))
                 {
-                    Console.WriteLine($"Agent registered. URL: {response.Payload}");
-                    continue;
+                    handler(response);
                 }
-
-                if (response.Type == "connections_list")
+                else
                 {
-                    connectionManager.LoadConnectionDetails(response.Payload);
-                    Console.WriteLine("[Agent] Loaded connection details from ControlCenter.");
-                    continue;
-                }
-
-                if (response.Type == "ack")
-                {
-                    continue;
-                }
-
-                Console.WriteLine($"[Server] type={response.Type}, payload={response.Payload}");
-
-                if (response.Type == "validate_sql")
-                {
-                    _ = HandleValidateSqlAsync(call, agentId, oid, tid, response.Payload);
-                }
-                else if (response.Type == "execute_sql")
-                {
-                    _ = HandleExecuteSqlAsync(call, agentId, oid, tid, response.Payload, connectionManager);
-                }
-                else if (response.Type == "preview_table")
-                {
-                    _ = HandlePreviewTableAsync(call, agentId, oid, tid, response.Payload, connectionManager, sasTokenManager);
-                }
-                else if (response.Type == "validate_query")
-                {
-                    _ = HandleValidateQueryAsync(call, agentId, oid, tid, response.Payload, connectionManager);
-                }
-                else if (response.Type == "preview_query")
-                {
-                    _ = HandlePreviewQueryAsync(call, agentId, oid, tid, response.Payload, connectionManager, sasTokenManager);
-                }
-                else if (response.Type == "http_request")
-                {
-                    _ = HandleHttpRequestAsync(call, agentId, oid, tid, response.Payload);
-                }
-                else if (response.Type == "export_table")
-                {
-                    _ = HandleExportTableAsync(call, agentId, oid, tid, response.Payload, connectionManager, sasTokenManager);
-                }
-                else if (response.Type == "load_masked_to_table")
-                {
-                    _ = HandleLoadMaskedToTableAsync(call, agentId, oid, tid, response.Payload, connectionManager, sasTokenManager);
-                }
-                else if (response.Type == "connection_details_result")
-                {
-                    connectionManager.HandleConnectionDetailsResponse(response.Payload);
-                }
-                else if (response.Type == "sas_token_result")
-                {
-                    sasTokenManager.HandleSasTokenResponse(response.Payload);
+                    Console.WriteLine($"[Server] Unknown type={response.Type}, payload={response.Payload}");
                 }
             }
         });
@@ -215,9 +201,22 @@ while (!cts.Token.IsCancellationRequested)
 connectionManager.Dispose();
 Console.WriteLine("Agent disconnected.");
 
-static async Task HandleValidateSqlAsync(
+static Task SendResultAsync(
     AsyncDuplexStreamingCall<AgentMessage, ServerMessage> call,
-    string agentId, string oid, string tid, string payload)
+    string agentId, string oid, string tid,
+    string type, string payload)
+{
+    return call.RequestStream.WriteAsync(new AgentMessage
+    {
+        AgentId = agentId, Type = type, Payload = payload, Oid = oid, Tid = tid
+    });
+}
+
+static async Task RunCommandAsync(
+    AsyncDuplexStreamingCall<AgentMessage, ServerMessage> call,
+    string agentId, string oid, string tid,
+    string payload, string resultType,
+    Func<string, JsonElement, Task<object>> coreLogic)
 {
     string correlationId = "";
     try
@@ -227,787 +226,410 @@ static async Task HandleValidateSqlAsync(
         var dataJson = envelope.RootElement.GetProperty("data").GetString() ?? "{}";
 
         using var paramsDoc = JsonDocument.Parse(dataJson);
-        var root = paramsDoc.RootElement;
+        var result = await coreLogic(correlationId, paramsDoc.RootElement);
+        var resultPayload = JsonSerializer.Serialize(result);
 
-        var serverName = root.GetProperty("serverName").GetString() ?? "";
-        var databaseName = root.TryGetProperty("databaseName", out var dbEl) ? dbEl.GetString() ?? "" : "";
-        var encrypt = root.TryGetProperty("encrypt", out var encEl) ? encEl.GetString() ?? "Mandatory" : "Mandatory";
-        var trustCert = root.TryGetProperty("trustServerCertificate", out var tcEl) && tcEl.GetBoolean();
-        var authentication = root.TryGetProperty("authentication", out var authEl)
-            ? authEl.GetString() ?? "Microsoft Entra Integrated"
-            : "Microsoft Entra Integrated";
+        await SendResultAsync(call, agentId, oid, tid, resultType, resultPayload);
+    }
+    catch (Exception ex)
+    {
+        Console.Error.WriteLine($"[Agent] {resultType} failed: {ex.Message}");
+        var errorPayload = JsonSerializer.Serialize(new { correlationId, success = false, message = ex.Message });
+        try { await SendResultAsync(call, agentId, oid, tid, resultType, errorPayload); }
+        catch (Exception writeEx) { Console.Error.WriteLine($"[Agent] Failed to send error result: {writeEx.Message}"); }
+    }
+}
 
-        var csb = new SqlConnectionStringBuilder
+static async Task<object> HandleValidateSqlCore(string correlationId, JsonElement root)
+{
+    var serverName = root.GetProperty("serverName").GetString() ?? "";
+    var databaseName = root.TryGetProperty("databaseName", out var dbEl) ? dbEl.GetString() ?? "" : "";
+    var encrypt = root.TryGetProperty("encrypt", out var encEl) ? encEl.GetString() ?? "Mandatory" : "Mandatory";
+    var trustCert = root.TryGetProperty("trustServerCertificate", out var tcEl) && tcEl.GetBoolean();
+    var authentication = root.TryGetProperty("authentication", out var authEl)
+        ? authEl.GetString() ?? "Microsoft Entra Integrated"
+        : "Microsoft Entra Integrated";
+
+    var csb = new SqlConnectionStringBuilder
+    {
+        DataSource = serverName,
+        Encrypt = encrypt == "Mandatory" ? SqlConnectionEncryptOption.Mandatory
+                : encrypt == "Strict" ? SqlConnectionEncryptOption.Strict
+                : SqlConnectionEncryptOption.Optional,
+        TrustServerCertificate = trustCert,
+    };
+
+    if (!string.IsNullOrEmpty(databaseName))
+        csb.InitialCatalog = databaseName;
+
+    if (authentication == "Microsoft Entra Integrated")
+    {
+        csb.Authentication = SqlAuthenticationMethod.ActiveDirectoryIntegrated;
+    }
+    else
+    {
+        var userName = root.TryGetProperty("userName", out var uEl) ? uEl.GetString() ?? "" : "";
+        var password = root.TryGetProperty("password", out var pEl) ? pEl.GetString() ?? "" : "";
+        csb.UserID = userName;
+        csb.Password = password;
+    }
+
+    Console.WriteLine($"[Agent] Testing SQL connection to {serverName}...");
+
+    await using var conn = new SqlConnection(csb.ConnectionString);
+    await conn.OpenAsync();
+
+    Console.WriteLine("[Agent] SQL connection test succeeded.");
+    return new { correlationId, success = true, message = $"Connection successful. Server version: {conn.ServerVersion}" };
+}
+
+static async Task<object> HandleExecuteSqlCore(
+    string correlationId, JsonElement root,
+    AsyncDuplexStreamingCall<AgentMessage, ServerMessage> call,
+    string agentId, string oid, string tid,
+    SqlConnectionManager connManager)
+{
+    var rowKey = root.GetProperty("rowKey").GetString() ?? "";
+    var sqlStatement = root.GetProperty("sqlStatement").GetString() ?? "";
+
+    Console.WriteLine($"[Agent] Executing SQL on connection {rowKey}...");
+
+    var rows = await connManager.ExecuteWithRetryAsync(rowKey, call, agentId, oid, tid,
+        async (sqlConn) =>
         {
-            DataSource = serverName,
-            Encrypt = encrypt == "Mandatory" ? SqlConnectionEncryptOption.Mandatory
-                    : encrypt == "Strict" ? SqlConnectionEncryptOption.Strict
-                    : SqlConnectionEncryptOption.Optional,
-            TrustServerCertificate = trustCert,
-        };
+            var result = new List<Dictionary<string, object?>>();
+            await using var cmd = sqlConn.CreateCommand();
+            cmd.CommandText = sqlStatement;
 
-        if (!string.IsNullOrEmpty(databaseName))
-            csb.InitialCatalog = databaseName;
+            if (root.TryGetProperty("sqlParams", out var sqlParamsEl) &&
+                sqlParamsEl.ValueKind == JsonValueKind.Object)
+            {
+                foreach (var param in sqlParamsEl.EnumerateObject())
+                {
+                    cmd.Parameters.AddWithValue(param.Name, param.Value.GetString() ?? "");
+                }
+            }
 
-        if (authentication == "Microsoft Entra Integrated")
+            await using var reader = await cmd.ExecuteReaderAsync();
+            while (await reader.ReadAsync())
+            {
+                var row = new Dictionary<string, object?>();
+                for (int i = 0; i < reader.FieldCount; i++)
+                {
+                    row[reader.GetName(i)] = reader.IsDBNull(i) ? null : reader.GetValue(i);
+                }
+                result.Add(row);
+            }
+            return result;
+        });
+
+    Console.WriteLine($"[Agent] Executed SQL, returned {rows.Count} rows for connection {rowKey}.");
+    return new { correlationId, success = true, rows };
+}
+
+static async Task<object> HandleExportTableCore(
+    string correlationId, JsonElement root,
+    AsyncDuplexStreamingCall<AgentMessage, ServerMessage> call,
+    string agentId, string oid, string tid,
+    SqlConnectionManager connManager, SasTokenManager sasManager)
+{
+    var rowKey = root.GetProperty("rowKey").GetString() ?? "";
+    var schema = root.GetProperty("schema").GetString() ?? "";
+    var tableName = root.GetProperty("tableName").GetString() ?? "";
+    var uniqueId = root.GetProperty("uniqueId").GetString() ?? "";
+    var sqlStatement = root.GetProperty("sqlStatement").GetString() ?? "";
+
+    if (string.IsNullOrWhiteSpace(uniqueId))
+        throw new InvalidOperationException("Missing uniqueId in export request.");
+
+    Console.WriteLine($"[Agent] Exporting full table [{schema}].[{tableName}] for connection {rowKey}...");
+
+    var filenames = await connManager.ExecuteWithRetryAsync(rowKey, call, agentId, oid, tid,
+        async (sqlConn) =>
         {
-            csb.Authentication = SqlAuthenticationMethod.ActiveDirectoryIntegrated;
+            await using var cmd = sqlConn.CreateCommand();
+            cmd.CommandText = sqlStatement;
+            cmd.CommandTimeout = 0;
+
+            await using var reader = await cmd.ExecuteReaderAsync();
+            return await StreamReaderToParquetBlobs(reader, call, agentId, oid, tid, uniqueId, sasManager);
+        });
+
+    Console.WriteLine($"[Agent] Exported {filenames.Count} Parquet file(s) for [{schema}].[{tableName}]");
+    return new { correlationId, success = true, filenames };
+}
+
+static async Task<object> HandleLoadMaskedToTableCore(
+    string correlationId, JsonElement root,
+    AsyncDuplexStreamingCall<AgentMessage, ServerMessage> call,
+    string agentId, string oid, string tid,
+    SqlConnectionManager connManager, SasTokenManager sasManager)
+{
+    var destRowKey = root.GetProperty("destRowKey").GetString() ?? "";
+    var destSchema = root.GetProperty("destSchema").GetString() ?? "";
+    var tableName = root.GetProperty("tableName").GetString() ?? "";
+    var blobFilename = root.GetProperty("blobFilename").GetString() ?? "";
+    var createTable = root.TryGetProperty("createTable", out var ctEl) && ctEl.GetBoolean();
+    var truncate = root.TryGetProperty("truncate", out var trEl) && trEl.GetBoolean();
+
+    Console.WriteLine($"[Agent] Loading masked file {blobFilename} -> [{destSchema}].[{tableName}] (create={createTable}, truncate={truncate})");
+
+    var sasInfo = await sasManager.RequestSasTokenAsync(call, agentId, oid, tid);
+    var blobUri = new Uri($"{sasInfo.BlobEndpoint}/{sasInfo.Container}/{blobFilename}?{sasInfo.SasToken}");
+    var blobClient = new BlobClient(blobUri);
+
+    var tempFile = Path.GetTempFileName();
+    try
+    {
+        await blobClient.DownloadToAsync(tempFile);
+
+        using var parquetReader = await ParquetReader.CreateAsync(tempFile);
+
+        var parquetFields = parquetReader.Schema.GetDataFields();
+        var columnNames = parquetFields.Select(f => f.Name).ToArray();
+
+        string[] sqlTypes;
+        if (parquetReader.CustomMetadata != null &&
+            parquetReader.CustomMetadata.TryGetValue("sql_types", out var sqlTypesJson))
+        {
+            sqlTypes = JsonSerializer.Deserialize<string[]>(sqlTypesJson) ?? columnNames.Select(_ => "nvarchar(max)").ToArray();
         }
         else
         {
-            var userName = root.TryGetProperty("userName", out var uEl) ? uEl.GetString() ?? "" : "";
-            var password = root.TryGetProperty("password", out var pEl) ? pEl.GetString() ?? "" : "";
-            csb.UserID = userName;
-            csb.Password = password;
+            sqlTypes = columnNames.Select(_ => "nvarchar(max)").ToArray();
         }
 
-        Console.WriteLine($"[Agent] Testing SQL connection to {serverName}...");
-
-        await using var conn = new SqlConnection(csb.ConnectionString);
-        await conn.OpenAsync();
-
-        var resultPayload = JsonSerializer.Serialize(new
-        {
-            correlationId,
-            success = true,
-            message = $"Connection successful. Server version: {conn.ServerVersion}"
-        });
-
-        await call.RequestStream.WriteAsync(new AgentMessage
-        {
-            AgentId = agentId,
-            Type = "validate_sql_result",
-            Payload = resultPayload,
-            Oid = oid,
-            Tid = tid
-        });
-
-        Console.WriteLine("[Agent] SQL connection test succeeded.");
-    }
-    catch (Exception ex)
-    {
-        Console.Error.WriteLine($"[Agent] SQL connection test failed: {ex.Message}");
-
-        var resultPayload = JsonSerializer.Serialize(new
-        {
-            correlationId,
-            success = false,
-            message = $"Connection failed: {ex.Message}"
-        });
-
-        try
-        {
-            await call.RequestStream.WriteAsync(new AgentMessage
-            {
-                AgentId = agentId,
-                Type = "validate_sql_result",
-                Payload = resultPayload,
-                Oid = oid,
-                Tid = tid
-            });
-        }
-        catch (Exception writeEx)
-        {
-            Console.Error.WriteLine($"[Agent] Failed to send error result: {writeEx.Message}");
-        }
-    }
-}
-
-static async Task HandleExecuteSqlAsync(
-    AsyncDuplexStreamingCall<AgentMessage, ServerMessage> call,
-    string agentId, string oid, string tid, string payload,
-    SqlConnectionManager connManager)
-{
-    string correlationId = "";
-    try
-    {
-        using var envelope = JsonDocument.Parse(payload);
-        correlationId = envelope.RootElement.GetProperty("correlationId").GetString() ?? "";
-        var dataJson = envelope.RootElement.GetProperty("data").GetString() ?? "{}";
-
-        using var paramsDoc = JsonDocument.Parse(dataJson);
-        var rowKey = paramsDoc.RootElement.GetProperty("rowKey").GetString() ?? "";
-        var sqlStatement = paramsDoc.RootElement.GetProperty("sqlStatement").GetString() ?? "";
-
-        Console.WriteLine($"[Agent] Executing SQL on connection {rowKey}...");
-
-        var rows = await connManager.ExecuteWithRetryAsync(rowKey, call, agentId, oid, tid,
+        await connManager.ExecuteWithRetryAsync(destRowKey, call, agentId, oid, tid,
             async (sqlConn) =>
             {
-                var result = new List<Dictionary<string, object?>>();
-                await using var cmd = sqlConn.CreateCommand();
-                cmd.CommandText = sqlStatement;
-
-                if (paramsDoc.RootElement.TryGetProperty("sqlParams", out var sqlParamsEl) &&
-                    sqlParamsEl.ValueKind == JsonValueKind.Object)
+                if (createTable)
                 {
-                    foreach (var param in sqlParamsEl.EnumerateObject())
-                    {
-                        cmd.Parameters.AddWithValue(param.Name, param.Value.GetString() ?? "");
-                    }
-                }
-
-                await using var reader = await cmd.ExecuteReaderAsync();
-                while (await reader.ReadAsync())
-                {
-                    var row = new Dictionary<string, object?>();
-                    for (int i = 0; i < reader.FieldCount; i++)
-                    {
-                        row[reader.GetName(i)] = reader.IsDBNull(i) ? null : reader.GetValue(i);
-                    }
-                    result.Add(row);
-                }
-                return result;
-            });
-
-        var resultPayload = JsonSerializer.Serialize(new
-        {
-            correlationId,
-            success = true,
-            rows
-        });
-
-        await call.RequestStream.WriteAsync(new AgentMessage
-        {
-            AgentId = agentId,
-            Type = "execute_sql_result",
-            Payload = resultPayload,
-            Oid = oid,
-            Tid = tid
-        });
-
-        Console.WriteLine($"[Agent] Executed SQL, returned {rows.Count} rows for connection {rowKey}.");
-    }
-    catch (Exception ex)
-    {
-        Console.Error.WriteLine($"[Agent] Execute SQL failed: {ex.Message}");
-
-        var resultPayload = JsonSerializer.Serialize(new
-        {
-            correlationId,
-            success = false,
-            message = $"Execute SQL failed: {ex.Message}"
-        });
-
-        try
-        {
-            await call.RequestStream.WriteAsync(new AgentMessage
-            {
-                AgentId = agentId,
-                Type = "execute_sql_result",
-                Payload = resultPayload,
-                Oid = oid,
-                Tid = tid
-            });
-        }
-        catch (Exception writeEx)
-        {
-            Console.Error.WriteLine($"[Agent] Failed to send error result: {writeEx.Message}");
-        }
-    }
-}
-
-static async Task HandleExportTableAsync(
-    AsyncDuplexStreamingCall<AgentMessage, ServerMessage> call,
-    string agentId, string oid, string tid, string payload,
-    SqlConnectionManager connManager, SasTokenManager sasManager)
-{
-    string correlationId = "";
-    try
-    {
-        using var envelope = JsonDocument.Parse(payload);
-        correlationId = envelope.RootElement.GetProperty("correlationId").GetString() ?? "";
-        var dataJson = envelope.RootElement.GetProperty("data").GetString() ?? "{}";
-
-        using var paramsDoc = JsonDocument.Parse(dataJson);
-        var rowKey = paramsDoc.RootElement.GetProperty("rowKey").GetString() ?? "";
-        var schema = paramsDoc.RootElement.GetProperty("schema").GetString() ?? "";
-        var tableName = paramsDoc.RootElement.GetProperty("tableName").GetString() ?? "";
-        var uniqueId = paramsDoc.RootElement.GetProperty("uniqueId").GetString() ?? "";
-        var sqlStatement = paramsDoc.RootElement.GetProperty("sqlStatement").GetString() ?? "";
-
-        if (string.IsNullOrWhiteSpace(uniqueId))
-            throw new InvalidOperationException("Missing uniqueId in export request.");
-
-        Console.WriteLine($"[Agent] Exporting full table [{schema}].[{tableName}] for connection {rowKey}...");
-
-        var filenames = await connManager.ExecuteWithRetryAsync(rowKey, call, agentId, oid, tid,
-            async (sqlConn) =>
-            {
-                await using var cmd = sqlConn.CreateCommand();
-                cmd.CommandText = sqlStatement;
-                cmd.CommandTimeout = 0;
-
-                await using var reader = await cmd.ExecuteReaderAsync();
-                return await StreamReaderToParquetBlobs(reader, call, agentId, oid, tid, uniqueId, sasManager);
-            });
-
-        Console.WriteLine($"[Agent] Exported {filenames.Count} Parquet file(s) for [{schema}].[{tableName}]");
-
-        var resultPayload = JsonSerializer.Serialize(new
-        {
-            correlationId,
-            success = true,
-            filenames
-        });
-
-        await call.RequestStream.WriteAsync(new AgentMessage
-        {
-            AgentId = agentId,
-            Type = "export_table_result",
-            Payload = resultPayload,
-            Oid = oid,
-            Tid = tid
-        });
-    }
-    catch (Exception ex)
-    {
-        Console.Error.WriteLine($"[Agent] Export table failed: {ex.Message}");
-
-        var resultPayload = JsonSerializer.Serialize(new
-        {
-            correlationId,
-            success = false,
-            message = $"Export failed: {ex.Message}"
-        });
-
-        try
-        {
-            await call.RequestStream.WriteAsync(new AgentMessage
-            {
-                AgentId = agentId,
-                Type = "export_table_result",
-                Payload = resultPayload,
-                Oid = oid,
-                Tid = tid
-            });
-        }
-        catch (Exception writeEx)
-        {
-            Console.Error.WriteLine($"[Agent] Failed to send error result: {writeEx.Message}");
-        }
-    }
-}
-
-static async Task HandleLoadMaskedToTableAsync(
-    AsyncDuplexStreamingCall<AgentMessage, ServerMessage> call,
-    string agentId, string oid, string tid, string payload,
-    SqlConnectionManager connManager, SasTokenManager sasManager)
-{
-    string correlationId = "";
-    try
-    {
-        using var envelope = JsonDocument.Parse(payload);
-        correlationId = envelope.RootElement.GetProperty("correlationId").GetString() ?? "";
-        var dataJson = envelope.RootElement.GetProperty("data").GetString() ?? "{}";
-
-        using var paramsDoc = JsonDocument.Parse(dataJson);
-        var destRowKey = paramsDoc.RootElement.GetProperty("destRowKey").GetString() ?? "";
-        var destSchema = paramsDoc.RootElement.GetProperty("destSchema").GetString() ?? "";
-        var tableName = paramsDoc.RootElement.GetProperty("tableName").GetString() ?? "";
-        var blobFilename = paramsDoc.RootElement.GetProperty("blobFilename").GetString() ?? "";
-        var createTable = paramsDoc.RootElement.TryGetProperty("createTable", out var ctEl) && ctEl.GetBoolean();
-        var truncate = paramsDoc.RootElement.TryGetProperty("truncate", out var trEl) && trEl.GetBoolean();
-
-        Console.WriteLine($"[Agent] Loading masked file {blobFilename} -> [{destSchema}].[{tableName}] (create={createTable}, truncate={truncate})");
-
-        var sasInfo = await sasManager.RequestSasTokenAsync(call, agentId, oid, tid);
-        var blobUri = new Uri($"{sasInfo.BlobEndpoint}/{sasInfo.Container}/{blobFilename}?{sasInfo.SasToken}");
-        var blobClient = new BlobClient(blobUri);
-
-        var tempFile = Path.GetTempFileName();
-        try
-        {
-            await blobClient.DownloadToAsync(tempFile);
-
-            using var parquetReader = await ParquetReader.CreateAsync(tempFile);
-
-            var parquetFields = parquetReader.Schema.GetDataFields();
-            var columnNames = parquetFields.Select(f => f.Name).ToArray();
-
-            string[] sqlTypes;
-            if (parquetReader.CustomMetadata != null &&
-                parquetReader.CustomMetadata.TryGetValue("sql_types", out var sqlTypesJson))
-            {
-                sqlTypes = JsonSerializer.Deserialize<string[]>(sqlTypesJson) ?? columnNames.Select(_ => "nvarchar(max)").ToArray();
-            }
-            else
-            {
-                sqlTypes = columnNames.Select(_ => "nvarchar(max)").ToArray();
-            }
-
-            await connManager.ExecuteWithRetryAsync(destRowKey, call, agentId, oid, tid,
-                async (sqlConn) =>
-                {
-                    if (createTable)
-                    {
-                        var columnDefs = new StringBuilder();
-                        for (int i = 0; i < columnNames.Length; i++)
-                        {
-                            if (i > 0) columnDefs.Append(", ");
-                            columnDefs.Append($"[{columnNames[i]}] {sqlTypes[i]} NULL");
-                        }
-
-                        var createSql = $@"IF OBJECT_ID('[{destSchema}].[{tableName}]', 'U') IS NULL
-                            CREATE TABLE [{destSchema}].[{tableName}] ({columnDefs})";
-                        await using var createCmd = sqlConn.CreateCommand();
-                        createCmd.CommandText = createSql;
-                        await createCmd.ExecuteNonQueryAsync();
-                        Console.WriteLine($"[Agent] Ensured table [{destSchema}].[{tableName}] exists.");
-                    }
-
-                    if (truncate)
-                    {
-                        try
-                        {
-                            await using var truncCmd = sqlConn.CreateCommand();
-                            truncCmd.CommandText = $"TRUNCATE TABLE [{destSchema}].[{tableName}]";
-                            await truncCmd.ExecuteNonQueryAsync();
-                        }
-                        catch (SqlException)
-                        {
-                            await using var delCmd = sqlConn.CreateCommand();
-                            delCmd.CommandText = $"DELETE FROM [{destSchema}].[{tableName}]";
-                            await delCmd.ExecuteNonQueryAsync();
-                        }
-                        Console.WriteLine($"[Agent] Truncated [{destSchema}].[{tableName}].");
-                    }
-
-                    using var bulkCopy = new SqlBulkCopy(sqlConn)
-                    {
-                        DestinationTableName = $"[{destSchema}].[{tableName}]",
-                        BulkCopyTimeout = 0
-                    };
-
+                    var columnDefs = new StringBuilder();
                     for (int i = 0; i < columnNames.Length; i++)
-                        bulkCopy.ColumnMappings.Add(columnNames[i], columnNames[i]);
-
-                    for (int g = 0; g < parquetReader.RowGroupCount; g++)
                     {
-                        using var rowGroupReader = parquetReader.OpenRowGroupReader(g);
-                        var columns = new DataColumn[columnNames.Length];
-                        for (int i = 0; i < columnNames.Length; i++)
-                            columns[i] = await rowGroupReader.ReadColumnAsync(parquetFields[i]);
-
-                        var rowCount = columns[0].Data.Length;
-                        var dataTable = new System.Data.DataTable();
-                        for (int i = 0; i < columnNames.Length; i++)
-                            dataTable.Columns.Add(columnNames[i], typeof(string));
-
-                        for (int r = 0; r < rowCount; r++)
-                        {
-                            var row = dataTable.NewRow();
-                            for (int c = 0; c < columnNames.Length; c++)
-                            {
-                                var val = columns[c].Data.GetValue(r);
-                                row[c] = val ?? DBNull.Value;
-                            }
-                            dataTable.Rows.Add(row);
-                        }
-
-                        await bulkCopy.WriteToServerAsync(dataTable);
-                        Console.WriteLine($"[Agent] Bulk-copied {rowCount} row(s) from row group {g + 1}/{parquetReader.RowGroupCount}");
+                        if (i > 0) columnDefs.Append(", ");
+                        columnDefs.Append($"[{columnNames[i]}] {sqlTypes[i]} NULL");
                     }
 
-                    return true;
-                });
+                    var createSql = $@"IF OBJECT_ID('[{destSchema}].[{tableName}]', 'U') IS NULL
+                            CREATE TABLE [{destSchema}].[{tableName}] ({columnDefs})";
+                    await using var createCmd = sqlConn.CreateCommand();
+                    createCmd.CommandText = createSql;
+                    await createCmd.ExecuteNonQueryAsync();
+                    Console.WriteLine($"[Agent] Ensured table [{destSchema}].[{tableName}] exists.");
+                }
 
-            var resultPayload = JsonSerializer.Serialize(new
-            {
-                correlationId,
-                success = true
-            });
+                if (truncate)
+                {
+                    try
+                    {
+                        await using var truncCmd = sqlConn.CreateCommand();
+                        truncCmd.CommandText = $"TRUNCATE TABLE [{destSchema}].[{tableName}]";
+                        await truncCmd.ExecuteNonQueryAsync();
+                    }
+                    catch (SqlException)
+                    {
+                        await using var delCmd = sqlConn.CreateCommand();
+                        delCmd.CommandText = $"DELETE FROM [{destSchema}].[{tableName}]";
+                        await delCmd.ExecuteNonQueryAsync();
+                    }
+                    Console.WriteLine($"[Agent] Truncated [{destSchema}].[{tableName}].");
+                }
 
-            await call.RequestStream.WriteAsync(new AgentMessage
-            {
-                AgentId = agentId,
-                Type = "load_masked_to_table_result",
-                Payload = resultPayload,
-                Oid = oid,
-                Tid = tid
+                using var bulkCopy = new SqlBulkCopy(sqlConn)
+                {
+                    DestinationTableName = $"[{destSchema}].[{tableName}]",
+                    BulkCopyTimeout = 0
+                };
+
+                for (int i = 0; i < columnNames.Length; i++)
+                    bulkCopy.ColumnMappings.Add(columnNames[i], columnNames[i]);
+
+                for (int g = 0; g < parquetReader.RowGroupCount; g++)
+                {
+                    using var rowGroupReader = parquetReader.OpenRowGroupReader(g);
+                    var columns = new DataColumn[columnNames.Length];
+                    for (int i = 0; i < columnNames.Length; i++)
+                        columns[i] = await rowGroupReader.ReadColumnAsync(parquetFields[i]);
+
+                    var rowCount = columns[0].Data.Length;
+                    var dataTable = new System.Data.DataTable();
+                    for (int i = 0; i < columnNames.Length; i++)
+                        dataTable.Columns.Add(columnNames[i], typeof(string));
+
+                    for (int r = 0; r < rowCount; r++)
+                    {
+                        var row = dataTable.NewRow();
+                        for (int c = 0; c < columnNames.Length; c++)
+                        {
+                            var val = columns[c].Data.GetValue(r);
+                            row[c] = val ?? DBNull.Value;
+                        }
+                        dataTable.Rows.Add(row);
+                    }
+
+                    await bulkCopy.WriteToServerAsync(dataTable);
+                    Console.WriteLine($"[Agent] Bulk-copied {rowCount} row(s) from row group {g + 1}/{parquetReader.RowGroupCount}");
+                }
+
+                return true;
             });
-        }
-        finally
-        {
-            try { File.Delete(tempFile); } catch { }
-        }
     }
-    catch (Exception ex)
+    finally
     {
-        Console.Error.WriteLine($"[Agent] Load masked to table failed: {ex.Message}");
-
-        var resultPayload = JsonSerializer.Serialize(new
-        {
-            correlationId,
-            success = false,
-            message = $"Load masked to table failed: {ex.Message}"
-        });
-
-        try
-        {
-            await call.RequestStream.WriteAsync(new AgentMessage
-            {
-                AgentId = agentId,
-                Type = "load_masked_to_table_result",
-                Payload = resultPayload,
-                Oid = oid,
-                Tid = tid
-            });
-        }
-        catch (Exception writeEx)
-        {
-            Console.Error.WriteLine($"[Agent] Failed to send error result: {writeEx.Message}");
-        }
+        try { File.Delete(tempFile); } catch { }
     }
+
+    return new { correlationId, success = true };
 }
 
-static async Task HandlePreviewTableAsync(
+static async Task<object> HandlePreviewTableCore(
+    string correlationId, JsonElement root,
     AsyncDuplexStreamingCall<AgentMessage, ServerMessage> call,
-    string agentId, string oid, string tid, string payload,
+    string agentId, string oid, string tid,
     SqlConnectionManager connManager, SasTokenManager sasManager)
 {
-    string correlationId = "";
-    try
-    {
-        using var envelope = JsonDocument.Parse(payload);
-        correlationId = envelope.RootElement.GetProperty("correlationId").GetString() ?? "";
-        var dataJson = envelope.RootElement.GetProperty("data").GetString() ?? "{}";
+    var rowKey = root.GetProperty("rowKey").GetString() ?? "";
+    var schema = root.GetProperty("schema").GetString() ?? "";
+    var tableName = root.GetProperty("tableName").GetString() ?? "";
+    var uniqueId = root.GetProperty("uniqueId").GetString() ?? "";
+    var sqlStatement = root.GetProperty("sqlStatement").GetString() ?? "";
 
-        using var paramsDoc = JsonDocument.Parse(dataJson);
-        var rowKey = paramsDoc.RootElement.GetProperty("rowKey").GetString() ?? "";
-        var schema = paramsDoc.RootElement.GetProperty("schema").GetString() ?? "";
-        var tableName = paramsDoc.RootElement.GetProperty("tableName").GetString() ?? "";
-        var uniqueId = paramsDoc.RootElement.GetProperty("uniqueId").GetString() ?? "";
-        var sqlStatement = paramsDoc.RootElement.GetProperty("sqlStatement").GetString() ?? "";
+    if (string.IsNullOrWhiteSpace(uniqueId))
+        throw new InvalidOperationException("Missing uniqueId in preview request.");
 
-        if (string.IsNullOrWhiteSpace(uniqueId))
-            throw new InvalidOperationException("Missing uniqueId in preview request.");
+    Console.WriteLine($"[Agent] Previewing table [{schema}].[{tableName}] for connection {rowKey}...");
 
-        Console.WriteLine($"[Agent] Previewing table [{schema}].[{tableName}] for connection {rowKey}...");
-
-        var filenames = await connManager.ExecuteWithRetryAsync(rowKey, call, agentId, oid, tid,
-            async (sqlConn) =>
-            {
-                await using var cmd = sqlConn.CreateCommand();
-                cmd.CommandText = sqlStatement;
-
-                await using var reader = await cmd.ExecuteReaderAsync();
-                return await StreamReaderToParquetBlobs(reader, call, agentId, oid, tid, uniqueId, sasManager);
-            });
-
-        Console.WriteLine($"[Agent] Uploaded {filenames.Count} preview Parquet file(s) for [{schema}].[{tableName}]");
-
-        var resultPayload = JsonSerializer.Serialize(new
+    var filenames = await connManager.ExecuteWithRetryAsync(rowKey, call, agentId, oid, tid,
+        async (sqlConn) =>
         {
-            correlationId,
-            success = true,
-            filenames
+            await using var cmd = sqlConn.CreateCommand();
+            cmd.CommandText = sqlStatement;
+
+            await using var reader = await cmd.ExecuteReaderAsync();
+            return await StreamReaderToParquetBlobs(reader, call, agentId, oid, tid, uniqueId, sasManager);
         });
 
-        await call.RequestStream.WriteAsync(new AgentMessage
-        {
-            AgentId = agentId,
-            Type = "preview_table_result",
-            Payload = resultPayload,
-            Oid = oid,
-            Tid = tid
-        });
-    }
-    catch (Exception ex)
-    {
-        Console.Error.WriteLine($"[Agent] Preview table failed: {ex.Message}");
-
-        var resultPayload = JsonSerializer.Serialize(new
-        {
-            correlationId,
-            success = false,
-            message = $"Preview failed: {ex.Message}"
-        });
-
-        try
-        {
-            await call.RequestStream.WriteAsync(new AgentMessage
-            {
-                AgentId = agentId,
-                Type = "preview_table_result",
-                Payload = resultPayload,
-                Oid = oid,
-                Tid = tid
-            });
-        }
-        catch (Exception writeEx)
-        {
-            Console.Error.WriteLine($"[Agent] Failed to send error result: {writeEx.Message}");
-        }
-    }
+    Console.WriteLine($"[Agent] Uploaded {filenames.Count} preview Parquet file(s) for [{schema}].[{tableName}]");
+    return new { correlationId, success = true, filenames };
 }
 
-static async Task HandleValidateQueryAsync(
+static async Task<object> HandleValidateQueryCore(
+    string correlationId, JsonElement root,
     AsyncDuplexStreamingCall<AgentMessage, ServerMessage> call,
-    string agentId, string oid, string tid, string payload,
+    string agentId, string oid, string tid,
     SqlConnectionManager connManager)
 {
-    string correlationId = "";
-    try
-    {
-        using var envelope = JsonDocument.Parse(payload);
-        correlationId = envelope.RootElement.GetProperty("correlationId").GetString() ?? "";
-        var dataJson = envelope.RootElement.GetProperty("data").GetString() ?? "{}";
+    var connectionRowKey = root.GetProperty("connectionRowKey").GetString() ?? "";
+    var queryText = root.GetProperty("queryText").GetString() ?? "";
+    var sqlStatementBefore = root.GetProperty("sqlStatementBefore").GetString() ?? "";
+    var sqlStatementAfter = root.GetProperty("sqlStatementAfter").GetString() ?? "";
 
-        using var paramsDoc = JsonDocument.Parse(dataJson);
-        var connectionRowKey = paramsDoc.RootElement.GetProperty("connectionRowKey").GetString() ?? "";
-        var queryText = paramsDoc.RootElement.GetProperty("queryText").GetString() ?? "";
-        var sqlStatementBefore = paramsDoc.RootElement.GetProperty("sqlStatementBefore").GetString() ?? "";
-        var sqlStatementAfter = paramsDoc.RootElement.GetProperty("sqlStatementAfter").GetString() ?? "";
+    Console.WriteLine($"[Agent] Validating query for connection {connectionRowKey}...");
 
-        Console.WriteLine($"[Agent] Validating query for connection {connectionRowKey}...");
+    var message = await connManager.ExecuteWithRetryAsync(connectionRowKey, call, agentId, oid, tid,
+        async (sqlConn) =>
+        {
+            await using var cmdBefore = sqlConn.CreateCommand();
+            cmdBefore.CommandText = sqlStatementBefore;
+            await cmdBefore.ExecuteNonQueryAsync();
 
-        var message = await connManager.ExecuteWithRetryAsync(connectionRowKey, call, agentId, oid, tid,
-            async (sqlConn) =>
+            try
             {
-                await using var cmdBefore = sqlConn.CreateCommand();
-                cmdBefore.CommandText = sqlStatementBefore;
-                await cmdBefore.ExecuteNonQueryAsync();
-
-                try
-                {
-                    await using var cmdQuery = sqlConn.CreateCommand();
-                    cmdQuery.CommandText = queryText;
-                    await cmdQuery.ExecuteNonQueryAsync();
-                    return "Query syntax is valid.";
-                }
-                finally
-                {
-                    await using var cmdAfter = sqlConn.CreateCommand();
-                    cmdAfter.CommandText = sqlStatementAfter;
-                    await cmdAfter.ExecuteNonQueryAsync();
-                }
-            });
-
-        var resultPayload = JsonSerializer.Serialize(new
-        {
-            correlationId,
-            success = true,
-            message
-        });
-
-        await call.RequestStream.WriteAsync(new AgentMessage
-        {
-            AgentId = agentId,
-            Type = "validate_query_result",
-            Payload = resultPayload,
-            Oid = oid,
-            Tid = tid
-        });
-
-        Console.WriteLine("[Agent] Query validation succeeded.");
-    }
-    catch (Exception ex)
-    {
-        Console.Error.WriteLine($"[Agent] Query validation failed: {ex.Message}");
-
-        var resultPayload = JsonSerializer.Serialize(new
-        {
-            correlationId,
-            success = false,
-            message = $"Query validation failed: {ex.Message}"
-        });
-
-        try
-        {
-            await call.RequestStream.WriteAsync(new AgentMessage
+                await using var cmdQuery = sqlConn.CreateCommand();
+                cmdQuery.CommandText = queryText;
+                await cmdQuery.ExecuteNonQueryAsync();
+                return "Query syntax is valid.";
+            }
+            finally
             {
-                AgentId = agentId,
-                Type = "validate_query_result",
-                Payload = resultPayload,
-                Oid = oid,
-                Tid = tid
-            });
-        }
-        catch (Exception writeEx)
-        {
-            Console.Error.WriteLine($"[Agent] Failed to send error result: {writeEx.Message}");
-        }
-    }
+                await using var cmdAfter = sqlConn.CreateCommand();
+                cmdAfter.CommandText = sqlStatementAfter;
+                await cmdAfter.ExecuteNonQueryAsync();
+            }
+        });
+
+    Console.WriteLine("[Agent] Query validation succeeded.");
+    return new { correlationId, success = true, message };
 }
 
-static async Task HandlePreviewQueryAsync(
+static async Task<object> HandlePreviewQueryCore(
+    string correlationId, JsonElement root,
     AsyncDuplexStreamingCall<AgentMessage, ServerMessage> call,
-    string agentId, string oid, string tid, string payload,
+    string agentId, string oid, string tid,
     SqlConnectionManager connManager, SasTokenManager sasManager)
 {
-    string correlationId = "";
-    try
-    {
-        using var envelope = JsonDocument.Parse(payload);
-        correlationId = envelope.RootElement.GetProperty("correlationId").GetString() ?? "";
-        var dataJson = envelope.RootElement.GetProperty("data").GetString() ?? "{}";
+    var connectionRowKey = root.GetProperty("connectionRowKey").GetString() ?? "";
+    var uniqueId = root.GetProperty("uniqueId").GetString() ?? "";
+    var sqlStatement = root.GetProperty("sqlStatement").GetString() ?? "";
 
-        using var paramsDoc = JsonDocument.Parse(dataJson);
-        var connectionRowKey = paramsDoc.RootElement.GetProperty("connectionRowKey").GetString() ?? "";
-        var uniqueId = paramsDoc.RootElement.GetProperty("uniqueId").GetString() ?? "";
-        var sqlStatement = paramsDoc.RootElement.GetProperty("sqlStatement").GetString() ?? "";
+    if (string.IsNullOrWhiteSpace(uniqueId))
+        throw new InvalidOperationException("Missing uniqueId in preview request.");
 
-        if (string.IsNullOrWhiteSpace(uniqueId))
-            throw new InvalidOperationException("Missing uniqueId in preview request.");
+    Console.WriteLine($"[Agent] Previewing query for connection {connectionRowKey}...");
 
-        Console.WriteLine($"[Agent] Previewing query for connection {connectionRowKey}...");
-
-        var filenames = await connManager.ExecuteWithRetryAsync(connectionRowKey, call, agentId, oid, tid,
-            async (sqlConn) =>
-            {
-                await using var cmd = sqlConn.CreateCommand();
-                cmd.CommandText = sqlStatement;
-
-                await using var reader = await cmd.ExecuteReaderAsync();
-                return await StreamReaderToParquetBlobs(reader, call, agentId, oid, tid, uniqueId, sasManager);
-            });
-
-        Console.WriteLine($"[Agent] Uploaded {filenames.Count} query preview Parquet file(s)");
-
-        var resultPayload = JsonSerializer.Serialize(new
+    var filenames = await connManager.ExecuteWithRetryAsync(connectionRowKey, call, agentId, oid, tid,
+        async (sqlConn) =>
         {
-            correlationId,
-            success = true,
-            filenames
+            await using var cmd = sqlConn.CreateCommand();
+            cmd.CommandText = sqlStatement;
+
+            await using var reader = await cmd.ExecuteReaderAsync();
+            return await StreamReaderToParquetBlobs(reader, call, agentId, oid, tid, uniqueId, sasManager);
         });
 
-        await call.RequestStream.WriteAsync(new AgentMessage
-        {
-            AgentId = agentId,
-            Type = "preview_query_result",
-            Payload = resultPayload,
-            Oid = oid,
-            Tid = tid
-        });
-    }
-    catch (Exception ex)
-    {
-        Console.Error.WriteLine($"[Agent] Preview query failed: {ex.Message}");
-
-        var resultPayload = JsonSerializer.Serialize(new
-        {
-            correlationId,
-            success = false,
-            message = $"Preview query failed: {ex.Message}"
-        });
-
-        try
-        {
-            await call.RequestStream.WriteAsync(new AgentMessage
-            {
-                AgentId = agentId,
-                Type = "preview_query_result",
-                Payload = resultPayload,
-                Oid = oid,
-                Tid = tid
-            });
-        }
-        catch (Exception writeEx)
-        {
-            Console.Error.WriteLine($"[Agent] Failed to send error result: {writeEx.Message}");
-        }
-    }
+    Console.WriteLine($"[Agent] Uploaded {filenames.Count} query preview Parquet file(s)");
+    return new { correlationId, success = true, filenames };
 }
 
-static async Task HandleHttpRequestAsync(
-    AsyncDuplexStreamingCall<AgentMessage, ServerMessage> call,
-    string agentId, string oid, string tid, string payload)
+static async Task<object> HandleHttpRequestCore(string correlationId, JsonElement root)
 {
-    string correlationId = "";
-    try
+    var method = root.GetProperty("method").GetString() ?? "GET";
+    var url = root.GetProperty("url").GetString() ?? "";
+    var bodyContent = root.TryGetProperty("body", out var bodyEl) ? bodyEl.GetString() : null;
+
+    Console.WriteLine($"[Agent] Relaying HTTP {method} {url}...");
+
+    using var httpClient = new HttpClient { Timeout = TimeSpan.FromSeconds(100) };
+    var requestMessage = new HttpRequestMessage(new HttpMethod(method), url);
+
+    if (root.TryGetProperty("headers", out var headersEl) && headersEl.ValueKind == JsonValueKind.Object)
     {
-        using var envelope = JsonDocument.Parse(payload);
-        correlationId = envelope.RootElement.GetProperty("correlationId").GetString() ?? "";
-        var dataJson = envelope.RootElement.GetProperty("data").GetString() ?? "{}";
-
-        using var paramsDoc = JsonDocument.Parse(dataJson);
-        var root = paramsDoc.RootElement;
-
-        var method = root.GetProperty("method").GetString() ?? "GET";
-        var url = root.GetProperty("url").GetString() ?? "";
-        var bodyContent = root.TryGetProperty("body", out var bodyEl) ? bodyEl.GetString() : null;
-
-        Console.WriteLine($"[Agent] Relaying HTTP {method} {url}...");
-
-        using var httpClient = new HttpClient { Timeout = TimeSpan.FromSeconds(100) };
-        var requestMessage = new HttpRequestMessage(new HttpMethod(method), url);
-
-        if (root.TryGetProperty("headers", out var headersEl) && headersEl.ValueKind == JsonValueKind.Object)
+        foreach (var header in headersEl.EnumerateObject())
         {
-            foreach (var header in headersEl.EnumerateObject())
+            var headerValue = header.Value.GetString() ?? "";
+            if (!requestMessage.Headers.TryAddWithoutValidation(header.Name, headerValue))
             {
-                var headerValue = header.Value.GetString() ?? "";
-                if (!requestMessage.Headers.TryAddWithoutValidation(header.Name, headerValue))
-                {
-                    requestMessage.Content ??= new StringContent(bodyContent ?? "");
-                    requestMessage.Content.Headers.Remove(header.Name);
-                    requestMessage.Content.Headers.TryAddWithoutValidation(header.Name, headerValue);
-                }
+                requestMessage.Content ??= new StringContent(bodyContent ?? "");
+                requestMessage.Content.Headers.Remove(header.Name);
+                requestMessage.Content.Headers.TryAddWithoutValidation(header.Name, headerValue);
             }
         }
-
-        if (bodyContent != null && requestMessage.Content == null)
-        {
-            requestMessage.Content = new StringContent(bodyContent, Encoding.UTF8);
-        }
-
-        using var response = await httpClient.SendAsync(requestMessage);
-        var responseBody = await response.Content.ReadAsStringAsync();
-
-        var responseHeaders = new Dictionary<string, string>();
-        foreach (var h in response.Headers)
-            responseHeaders[h.Key] = string.Join(", ", h.Value);
-        foreach (var h in response.Content.Headers)
-            responseHeaders[h.Key] = string.Join(", ", h.Value);
-
-        var resultPayload = JsonSerializer.Serialize(new
-        {
-            correlationId,
-            success = true,
-            statusCode = (int)response.StatusCode,
-            headers = responseHeaders,
-            body = responseBody
-        });
-
-        await call.RequestStream.WriteAsync(new AgentMessage
-        {
-            AgentId = agentId,
-            Type = "http_request_result",
-            Payload = resultPayload,
-            Oid = oid,
-            Tid = tid
-        });
-
-        Console.WriteLine($"[Agent] HTTP relay completed: {(int)response.StatusCode} {response.StatusCode}");
     }
-    catch (Exception ex)
+
+    if (bodyContent != null && requestMessage.Content == null)
     {
-        Console.Error.WriteLine($"[Agent] HTTP relay failed: {ex.Message}");
-
-        var resultPayload = JsonSerializer.Serialize(new
-        {
-            correlationId,
-            success = false,
-            message = $"HTTP request failed: {ex.Message}"
-        });
-
-        try
-        {
-            await call.RequestStream.WriteAsync(new AgentMessage
-            {
-                AgentId = agentId,
-                Type = "http_request_result",
-                Payload = resultPayload,
-                Oid = oid,
-                Tid = tid
-            });
-        }
-        catch (Exception writeEx)
-        {
-            Console.Error.WriteLine($"[Agent] Failed to send error result: {writeEx.Message}");
-        }
+        requestMessage.Content = new StringContent(bodyContent, Encoding.UTF8);
     }
+
+    using var response = await httpClient.SendAsync(requestMessage);
+    var responseBody = await response.Content.ReadAsStringAsync();
+
+    var responseHeaders = new Dictionary<string, string>();
+    foreach (var h in response.Headers)
+        responseHeaders[h.Key] = string.Join(", ", h.Value);
+    foreach (var h in response.Content.Headers)
+        responseHeaders[h.Key] = string.Join(", ", h.Value);
+
+    Console.WriteLine($"[Agent] HTTP relay completed: {(int)response.StatusCode} {response.StatusCode}");
+    return new
+    {
+        correlationId,
+        success = true,
+        statusCode = (int)response.StatusCode,
+        headers = responseHeaders,
+        body = responseBody
+    };
 }
 
 const int PreviewBatchSize = 10_000;
