@@ -97,6 +97,10 @@ export default function App() {
     }
   }, []);
 
+  const addLocalEvent = useCallback((evt: StatusEvent) => {
+    setStatusEvents(prev => [...prev, evt]);
+  }, []);
+
   useEffect(() => {
     fetchEvents();
     eventsTimerRef.current = setInterval(fetchEvents, 10000);
@@ -163,11 +167,16 @@ export default function App() {
     const agentPath = getAgentPath();
     if (!agentPath) return;
 
-    await fetch(`/api/agents/${agentPath}/save-connection`, {
+    const res = await fetch(`/api/agents/${agentPath}/save-connection`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(data),
     });
+
+    if (res.ok) {
+      const result = await res.json();
+      if (result.event) addLocalEvent(result.event);
+    }
 
     setShowSqlModal(false);
     fetchConnections();
@@ -208,6 +217,7 @@ export default function App() {
 
       if (tablesRes.ok) {
         const result = await tablesRes.json();
+        if (result.event) addLocalEvent(result.event);
         if (result.success && result.tables) {
           setConnectionTables((prev) => ({ ...prev, [rowKey]: result.tables }));
         } else {
@@ -245,6 +255,7 @@ export default function App() {
 
       if (tablesRes.ok) {
         const result = await tablesRes.json();
+        if (result.event) addLocalEvent(result.event);
         if (result.success && result.tables) {
           setConnectionTables((prev) => ({ ...prev, [rowKey]: result.tables }));
         } else {
@@ -542,6 +553,7 @@ export default function App() {
       }
 
       const result = await res.json();
+      if (result.event) addLocalEvent(result.event);
       if (!result.success) {
         setPreviewError(result.message ?? "Preview failed.");
         return;
@@ -578,6 +590,7 @@ export default function App() {
     }
 
     const result = await res.json();
+    if (result.event) addLocalEvent(result.event);
     return {
       success: result.success ?? false,
       message: result.message ?? result.status ?? "Unknown result",
@@ -606,6 +619,7 @@ export default function App() {
     }
 
     const result = await res.json();
+    if (result.event) addLocalEvent(result.event);
     return {
       success: result.success ?? false,
       message: result.message ?? "Unknown result",
@@ -624,6 +638,7 @@ export default function App() {
 
     if (res.ok) {
       const result = await res.json();
+      if (result.event) addLocalEvent(result.event);
       if (result.success) {
         setShowQueryModal(false);
         const queriesRes = await fetch(
@@ -676,6 +691,7 @@ export default function App() {
         }
 
         const result = await res.json();
+        if (result.event) addLocalEvent(result.event);
         if (!result.success) {
           setPreviewError(result.message ?? "Preview failed.");
           return;
@@ -725,6 +741,7 @@ export default function App() {
         }
 
         const result = await res.json();
+        if (result.event) addLocalEvent(result.event);
         if (!result.success) {
           setPreviewError(result.message ?? "Reload preview failed.");
           return;
@@ -800,6 +817,7 @@ export default function App() {
         }
 
         const previewResult = await previewRes.json();
+        if (previewResult.event) addLocalEvent(previewResult.event);
         if (!previewResult.success) {
           setPreviewError(previewResult.message ?? "Preview failed.");
           setPreviewLoading(false);
@@ -905,7 +923,9 @@ export default function App() {
               else if (line.startsWith("data: ")) eventData = line.slice(6);
             }
 
-            if (eventType === "status") {
+            if (eventType === "event") {
+              try { addLocalEvent(JSON.parse(eventData)); } catch { /* ignore parse errors */ }
+            } else if (eventType === "status") {
               if (isViewingTable(rowKey, schema, tableName)) {
                 updateDryRunStatus(eventData);
               } else {
@@ -1110,7 +1130,9 @@ export default function App() {
             else if (line.startsWith("data: ")) eventData = line.slice(6);
           }
 
-          if (eventType === "status") {
+          if (eventType === "event") {
+            try { addLocalEvent(JSON.parse(eventData)); } catch { /* ignore parse errors */ }
+          } else if (eventType === "status") {
             setPreviewError(eventData);
           } else if (eventType === "complete") {
             completed = true;
