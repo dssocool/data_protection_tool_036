@@ -93,7 +93,22 @@ export default function App() {
         setStatusEvents(prev => {
           const tracked = prev.filter(e => Array.isArray(e.steps) && e.steps.length > 0);
           if (tracked.length === 0) return data;
-          return [...data, ...tracked];
+
+          const inProgress = tracked.filter(e => e.steps!.some(s => s.status === "running"));
+          const completed = tracked.filter(e => !e.steps!.some(s => s.status === "running"));
+
+          const merged = data.map(serverEvt => {
+            const match = completed.find(
+              t => t.type === serverEvt.type && t.summary === serverEvt.summary,
+            );
+            return match ?? serverEvt;
+          });
+
+          const unmatched = completed.filter(
+            t => !data.some(s => s.type === t.type && s.summary === t.summary),
+          );
+
+          return [...merged, ...unmatched, ...inProgress];
         });
       }
     } catch {
