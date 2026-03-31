@@ -10,6 +10,7 @@ message AgentMessage {
   string payload = 3;
   string oid = 4;
   string tid = 5;
+  string user_name = 6;
 }
 
 message ServerMessage {

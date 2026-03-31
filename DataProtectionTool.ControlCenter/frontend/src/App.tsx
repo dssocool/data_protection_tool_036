@@ -65,6 +65,7 @@ export default function App() {
   const [showEventDialog, setShowEventDialog] = useState(false);
   const [agentOid, setAgentOid] = useState("");
   const [agentTid, setAgentTid] = useState("");
+  const [agentUserName, setAgentUserName] = useState("");
   const [userUniqueId, setUserUniqueId] = useState<string | null>(null);
   const [fullRunTarget, setFullRunTarget] = useState<{ rowKey: string; schema: string; tableName: string } | null>(null);
   const [columnRules, setColumnRules] = useState<Record<string, unknown>[]>([]);
@@ -156,6 +157,7 @@ export default function App() {
         if (data) {
           setAgentOid(data.oid ?? "");
           setAgentTid(data.tid ?? "");
+          setAgentUserName(data.userName ?? "");
         }
       })
       .catch(() => {});
@@ -1283,108 +1285,111 @@ export default function App() {
         onViewFlows={handleViewFlows}
         oid={agentOid}
         tid={agentTid}
+        userName={agentUserName}
         uniqueId={userUniqueId}
       />
       <main className="app-content">
-        {leftPanel === "connections" && (
-          <ConnectionsPanel
-            connections={connections}
-            connectionTables={connectionTables}
-            connectionQueries={connectionQueries}
-            loadingTables={loadingTables}
-            dryRunningTables={dryRunningTables}
-            selectedTable={selectedTable}
-            selectedQuery={selectedQuery}
-            onExpandConnection={handleExpandConnection}
-            onTableClick={handleTableClick}
-            onQueryClick={handleQueryClick}
-            onReloadPreview={handleReloadPreview}
-            onRefreshConnection={handleRefreshConnection}
-            onDryRun={handleDryRun}
-            onFullRun={handleFullRunOpen}
-            onClose={() => setLeftPanel(null)}
-            onSwitchPanel={setLeftPanel}
-            onWidthChange={setConnectionsPanelWidth}
-          />
-        )}
-        {leftPanel === "flows" && (
+        {leftPanel === "flows" ? (
           <FlowsPanel
             agentPath={getAgentPath() ?? ""}
             onClose={() => setLeftPanel(null)}
             onSwitchPanel={setLeftPanel}
-            onWidthChange={setConnectionsPanelWidth}
           />
-        )}
-        {(selectedTable || selectedQuery) && (
-          <DataPreviewPanel
-            loading={previewLoading}
-            error={previewError}
-            data={previewData}
-            originalData={originalData}
-            dryRuns={dryRuns}
-            activeTab={activePreviewTab}
-            diffTab={diffTab}
-            columnRules={columnRules}
-            columnRuleAlgorithms={columnRuleAlgorithms}
-            columnRuleDomains={columnRuleDomains}
-            columnRuleFrameworks={columnRuleFrameworks}
-            columnRulesLoading={columnRulesLoading}
-            allDomains={allDomains}
-            allAlgorithms={allAlgorithms}
-            allFrameworks={allFrameworks}
-            onTabChange={setActivePreviewTab}
-            onTabClose={(tab) => {
-              if (diffTab && tab === diffTab.name) {
-                setDiffTab(null);
-                setActivePreviewTab("Sample");
-              } else if (tab !== "Sample") {
-                setDryRuns((prev) => prev.filter((dr) => dr.label !== tab));
-                if (diffTab && (diffTab.leftTab === tab || diffTab.rightTab === tab)) {
-                  setDiffTab(null);
-                }
-                if (activePreviewTab === tab) {
-                  setActivePreviewTab("Sample");
-                }
-              } else {
-                if (dryRuns.length > 0) {
-                  setActivePreviewTab(dryRuns[0].label);
-                } else {
-                  setSelectedTable(null);
-                  setSelectedQuery(null);
-                  setPreviewData(null);
-                  setOriginalData(null);
-                  setPreviewError(null);
-                  setDiffTab(null);
-                  setActivePreviewTab("Sample");
-                }
-              }
-              if (selectedTable) {
-                const key = tableKey(selectedTable.rowKey, selectedTable.schema, selectedTable.tableName);
-                const cached = tableCacheRef.current.get(key);
-                if (cached) {
-                  const updatedDryRuns = cached.dryRuns.filter((dr) => dr.label !== tab);
-                  const updatedDiffTab = (cached.diffTab && (tab === cached.diffTab.name || tab === cached.diffTab.leftTab || tab === cached.diffTab.rightTab))
-                    ? null : cached.diffTab;
-                  const updatedActiveTab = cached.activePreviewTab === tab ? "Sample" : cached.activePreviewTab;
-                  tableCacheRef.current.set(key, {
-                    ...cached,
-                    dryRuns: updatedDryRuns,
-                    diffTab: updatedDiffTab,
-                    activePreviewTab: updatedActiveTab,
-                  });
-                }
-              }
-            }}
-            onDiffSelect={(leftTab, rightTab) => {
-              const name = `${leftTab} vs ${rightTab}`;
-              setDiffTab({ name, leftTab, rightTab });
-              setActivePreviewTab(name);
-            }}
-            onSaveColumnRule={handleSaveColumnRule}
-            mismatchedColumns={mismatchedColumns}
-            onMismatchedColumnsChange={setMismatchedColumns}
-            panelLeft={leftPanel ? connectionsPanelWidth + 16 : 0}
-          />
+        ) : (
+          <>
+            {leftPanel === "connections" && (
+              <ConnectionsPanel
+                connections={connections}
+                connectionTables={connectionTables}
+                connectionQueries={connectionQueries}
+                loadingTables={loadingTables}
+                dryRunningTables={dryRunningTables}
+                selectedTable={selectedTable}
+                selectedQuery={selectedQuery}
+                onExpandConnection={handleExpandConnection}
+                onTableClick={handleTableClick}
+                onQueryClick={handleQueryClick}
+                onReloadPreview={handleReloadPreview}
+                onRefreshConnection={handleRefreshConnection}
+                onDryRun={handleDryRun}
+                onFullRun={handleFullRunOpen}
+                onClose={() => setLeftPanel(null)}
+                onSwitchPanel={setLeftPanel}
+                onWidthChange={setConnectionsPanelWidth}
+              />
+            )}
+            {(selectedTable || selectedQuery) && (
+              <DataPreviewPanel
+                loading={previewLoading}
+                error={previewError}
+                data={previewData}
+                originalData={originalData}
+                dryRuns={dryRuns}
+                activeTab={activePreviewTab}
+                diffTab={diffTab}
+                columnRules={columnRules}
+                columnRuleAlgorithms={columnRuleAlgorithms}
+                columnRuleDomains={columnRuleDomains}
+                columnRuleFrameworks={columnRuleFrameworks}
+                columnRulesLoading={columnRulesLoading}
+                allDomains={allDomains}
+                allAlgorithms={allAlgorithms}
+                allFrameworks={allFrameworks}
+                onTabChange={setActivePreviewTab}
+                onTabClose={(tab) => {
+                  if (diffTab && tab === diffTab.name) {
+                    setDiffTab(null);
+                    setActivePreviewTab("Sample");
+                  } else if (tab !== "Sample") {
+                    setDryRuns((prev) => prev.filter((dr) => dr.label !== tab));
+                    if (diffTab && (diffTab.leftTab === tab || diffTab.rightTab === tab)) {
+                      setDiffTab(null);
+                    }
+                    if (activePreviewTab === tab) {
+                      setActivePreviewTab("Sample");
+                    }
+                  } else {
+                    if (dryRuns.length > 0) {
+                      setActivePreviewTab(dryRuns[0].label);
+                    } else {
+                      setSelectedTable(null);
+                      setSelectedQuery(null);
+                      setPreviewData(null);
+                      setOriginalData(null);
+                      setPreviewError(null);
+                      setDiffTab(null);
+                      setActivePreviewTab("Sample");
+                    }
+                  }
+                  if (selectedTable) {
+                    const key = tableKey(selectedTable.rowKey, selectedTable.schema, selectedTable.tableName);
+                    const cached = tableCacheRef.current.get(key);
+                    if (cached) {
+                      const updatedDryRuns = cached.dryRuns.filter((dr) => dr.label !== tab);
+                      const updatedDiffTab = (cached.diffTab && (tab === cached.diffTab.name || tab === cached.diffTab.leftTab || tab === cached.diffTab.rightTab))
+                        ? null : cached.diffTab;
+                      const updatedActiveTab = cached.activePreviewTab === tab ? "Sample" : cached.activePreviewTab;
+                      tableCacheRef.current.set(key, {
+                        ...cached,
+                        dryRuns: updatedDryRuns,
+                        diffTab: updatedDiffTab,
+                        activePreviewTab: updatedActiveTab,
+                      });
+                    }
+                  }
+                }}
+                onDiffSelect={(leftTab, rightTab) => {
+                  const name = `${leftTab} vs ${rightTab}`;
+                  setDiffTab({ name, leftTab, rightTab });
+                  setActivePreviewTab(name);
+                }}
+                onSaveColumnRule={handleSaveColumnRule}
+                mismatchedColumns={mismatchedColumns}
+                onMismatchedColumnsChange={setMismatchedColumns}
+                panelLeft={leftPanel ? connectionsPanelWidth + 16 : 0}
+              />
+            )}
+          </>
         )}
       </main>
       <StatusBar

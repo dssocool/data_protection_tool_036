@@ -13,6 +13,7 @@ public class ClientEntity : ITableEntity
     public string Oid { get; set; } = "";
     public string Tid { get; set; } = "";
     public string AgentId { get; set; } = "";
+    public string UserName { get; set; } = "";
     public DateTime FirstConnectedAt { get; set; }
     public DateTime LastConnectedAt { get; set; }
 

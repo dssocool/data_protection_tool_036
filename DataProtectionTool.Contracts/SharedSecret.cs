@@ -6,4 +6,5 @@ public static class SharedSecret
     public const string MetadataKey = "x-shared-secret";
     public const string OidMetadataKey = "x-agent-oid";
     public const string TidMetadataKey = "x-agent-tid";
+    public const string UserNameMetadataKey = "x-agent-username";
 }

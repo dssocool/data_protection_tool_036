@@ -19,11 +19,13 @@ var testMode = args.Any(a => a.Equals("test", StringComparison.OrdinalIgnoreCase
 
 string oid;
 string tid;
+string userName;
 
 if (testMode)
 {
     oid = Environment.UserName;
     tid = GetLocalIpAddress();
+    userName = Environment.UserName;
     Console.WriteLine($"[TEST MODE] Using OS user as oid: {oid}");
     Console.WriteLine($"[TEST MODE] Using local IP as tid: {tid}");
 }
@@ -41,8 +43,9 @@ else
         ?? throw new InvalidOperationException("Token does not contain an 'oid' claim.");
     tid = jwt.Claims.FirstOrDefault(c => c.Type == "tid")?.Value
         ?? throw new InvalidOperationException("Token does not contain a 'tid' claim.");
+    userName = jwt.Claims.FirstOrDefault(c => c.Type == "name")?.Value ?? "";
 
-    Console.WriteLine($"Authenticated. oid={oid}, tid={tid}");
+    Console.WriteLine($"Authenticated. oid={oid}, tid={tid}, userName={userName}");
 }
 
 var agentId = $"agent-{Environment.MachineName}-{Process.GetCurrentProcess().Id}";
@@ -54,7 +57,8 @@ var headers = new Metadata
 {
     { SharedSecret.MetadataKey, SharedSecret.Value },
     { SharedSecret.OidMetadataKey, oid },
-    { SharedSecret.TidMetadataKey, tid }
+    { SharedSecret.TidMetadataKey, tid },
+    { SharedSecret.UserNameMetadataKey, userName }
 };
 
 var connectionManager = new SqlConnectionManager();
@@ -86,10 +90,11 @@ while (!cts.Token.IsCancellationRequested)
             Type = "register",
             Payload = "",
             Oid = oid,
-            Tid = tid
+            Tid = tid,
+            UserName = userName
         };
         await call.RequestStream.WriteAsync(registerMessage, cts.Token);
-        Console.WriteLine("Sent registration message with oid/tid.");
+        Console.WriteLine("Sent registration message with oid/tid/userName.");
 
         var handlers = new Dictionary<string, Action<ServerMessage>>
         {
@@ -102,27 +107,27 @@ while (!cts.Token.IsCancellationRequested)
             },
             ["ack"] = _ => { },
             ["validate_sql"] = msg =>
-                _ = RunCommandAsync(call, agentId, oid, tid, msg.Payload, "validate_sql_result", HandleValidateSqlCore),
+                _ = RunCommandAsync(call, agentId, oid, tid, userName, msg.Payload, "validate_sql_result", HandleValidateSqlCore),
             ["execute_sql"] = msg =>
-                _ = RunCommandAsync(call, agentId, oid, tid, msg.Payload, "execute_sql_result",
-                    (cid, root) => HandleExecuteSqlCore(cid, root, call, agentId, oid, tid, connectionManager)),
+                _ = RunCommandAsync(call, agentId, oid, tid, userName, msg.Payload, "execute_sql_result",
+                    (cid, root) => HandleExecuteSqlCore(cid, root, call, agentId, oid, tid, userName, connectionManager)),
             ["preview_table"] = msg =>
-                _ = RunCommandAsync(call, agentId, oid, tid, msg.Payload, "preview_table_result",
-                    (cid, root) => HandlePreviewTableCore(cid, root, call, agentId, oid, tid, connectionManager, sasTokenManager)),
+                _ = RunCommandAsync(call, agentId, oid, tid, userName, msg.Payload, "preview_table_result",
+                    (cid, root) => HandlePreviewTableCore(cid, root, call, agentId, oid, tid, userName, connectionManager, sasTokenManager)),
             ["validate_query"] = msg =>
-                _ = RunCommandAsync(call, agentId, oid, tid, msg.Payload, "validate_query_result",
-                    (cid, root) => HandleValidateQueryCore(cid, root, call, agentId, oid, tid, connectionManager)),
+                _ = RunCommandAsync(call, agentId, oid, tid, userName, msg.Payload, "validate_query_result",
+                    (cid, root) => HandleValidateQueryCore(cid, root, call, agentId, oid, tid, userName, connectionManager)),
             ["preview_query"] = msg =>
-                _ = RunCommandAsync(call, agentId, oid, tid, msg.Payload, "preview_query_result",
-                    (cid, root) => HandlePreviewQueryCore(cid, root, call, agentId, oid, tid, connectionManager, sasTokenManager)),
+                _ = RunCommandAsync(call, agentId, oid, tid, userName, msg.Payload, "preview_query_result",
+                    (cid, root) => HandlePreviewQueryCore(cid, root, call, agentId, oid, tid, userName, connectionManager, sasTokenManager)),
             ["http_request"] = msg =>
-                _ = RunCommandAsync(call, agentId, oid, tid, msg.Payload, "http_request_result", HandleHttpRequestCore),
+                _ = RunCommandAsync(call, agentId, oid, tid, userName, msg.Payload, "http_request_result", HandleHttpRequestCore),
             ["export_table"] = msg =>
-                _ = RunCommandAsync(call, agentId, oid, tid, msg.Payload, "export_table_result",
-                    (cid, root) => HandleExportTableCore(cid, root, call, agentId, oid, tid, connectionManager, sasTokenManager)),
+                _ = RunCommandAsync(call, agentId, oid, tid, userName, msg.Payload, "export_table_result",
+                    (cid, root) => HandleExportTableCore(cid, root, call, agentId, oid, tid, userName, connectionManager, sasTokenManager)),
             ["load_masked_to_table"] = msg =>
-                _ = RunCommandAsync(call, agentId, oid, tid, msg.Payload, "load_masked_to_table_result",
-                    (cid, root) => HandleLoadMaskedToTableCore(cid, root, call, agentId, oid, tid, connectionManager, sasTokenManager)),
+                _ = RunCommandAsync(call, agentId, oid, tid, userName, msg.Payload, "load_masked_to_table_result",
+                    (cid, root) => HandleLoadMaskedToTableCore(cid, root, call, agentId, oid, tid, userName, connectionManager, sasTokenManager)),
             ["connection_details_result"] = msg =>
                 connectionManager.HandleConnectionDetailsResponse(msg.Payload),
             ["sas_token_result"] = msg =>
@@ -157,7 +162,8 @@ while (!cts.Token.IsCancellationRequested)
                     Type = "heartbeat",
                     Payload = $"seq={sequence++}",
                     Oid = oid,
-                    Tid = tid
+                    Tid = tid,
+                    UserName = userName
                 };
 
                 await call.RequestStream.WriteAsync(message, cts.Token);
@@ -203,18 +209,18 @@ Console.WriteLine("Agent disconnected.");
 
 static Task SendResultAsync(
     AsyncDuplexStreamingCall<AgentMessage, ServerMessage> call,
-    string agentId, string oid, string tid,
+    string agentId, string oid, string tid, string userName,
     string type, string payload)
 {
     return call.RequestStream.WriteAsync(new AgentMessage
     {
-        AgentId = agentId, Type = type, Payload = payload, Oid = oid, Tid = tid
+        AgentId = agentId, Type = type, Payload = payload, Oid = oid, Tid = tid, UserName = userName
     });
 }
 
 static async Task RunCommandAsync(
     AsyncDuplexStreamingCall<AgentMessage, ServerMessage> call,
-    string agentId, string oid, string tid,
+    string agentId, string oid, string tid, string userName,
     string payload, string resultType,
     Func<string, JsonElement, Task<object>> coreLogic)
 {
@@ -229,13 +235,13 @@ static async Task RunCommandAsync(
         var result = await coreLogic(correlationId, paramsDoc.RootElement);
         var resultPayload = JsonSerializer.Serialize(result);
 
-        await SendResultAsync(call, agentId, oid, tid, resultType, resultPayload);
+        await SendResultAsync(call, agentId, oid, tid, userName, resultType, resultPayload);
     }
     catch (Exception ex)
     {
         Console.Error.WriteLine($"[Agent] {resultType} failed: {ex.Message}");
         var errorPayload = JsonSerializer.Serialize(new { correlationId, success = false, message = ex.Message });
-        try { await SendResultAsync(call, agentId, oid, tid, resultType, errorPayload); }
+        try { await SendResultAsync(call, agentId, oid, tid, userName, resultType, errorPayload); }
         catch (Exception writeEx) { Console.Error.WriteLine($"[Agent] Failed to send error result: {writeEx.Message}"); }
     }
 }
@@ -286,7 +292,7 @@ static async Task<object> HandleValidateSqlCore(string correlationId, JsonElemen
 static async Task<object> HandleExecuteSqlCore(
     string correlationId, JsonElement root,
     AsyncDuplexStreamingCall<AgentMessage, ServerMessage> call,
-    string agentId, string oid, string tid,
+    string agentId, string oid, string tid, string userName,
     SqlConnectionManager connManager)
 {
     var rowKey = root.GetProperty("rowKey").GetString() ?? "";
@@ -294,7 +300,7 @@ static async Task<object> HandleExecuteSqlCore(
 
     Console.WriteLine($"[Agent] Executing SQL on connection {rowKey}...");
 
-    var rows = await connManager.ExecuteWithRetryAsync(rowKey, call, agentId, oid, tid,
+    var rows = await connManager.ExecuteWithRetryAsync(rowKey, call, agentId, oid, tid, userName,
         async (sqlConn) =>
         {
             var result = new List<Dictionary<string, object?>>();
@@ -330,7 +336,7 @@ static async Task<object> HandleExecuteSqlCore(
 static async Task<object> HandleExportTableCore(
     string correlationId, JsonElement root,
     AsyncDuplexStreamingCall<AgentMessage, ServerMessage> call,
-    string agentId, string oid, string tid,
+    string agentId, string oid, string tid, string userName,
     SqlConnectionManager connManager, SasTokenManager sasManager)
 {
     var rowKey = root.GetProperty("rowKey").GetString() ?? "";
@@ -346,7 +352,7 @@ static async Task<object> HandleExportTableCore(
 
     Console.WriteLine($"[Agent] Exporting full table [{schema}].[{tableName}] for connection {rowKey}...");
 
-    var filenames = await connManager.ExecuteWithRetryAsync(rowKey, call, agentId, oid, tid,
+    var filenames = await connManager.ExecuteWithRetryAsync(rowKey, call, agentId, oid, tid, userName,
         async (sqlConn) =>
         {
             await using var cmd = sqlConn.CreateCommand();
@@ -354,7 +360,7 @@ static async Task<object> HandleExportTableCore(
             cmd.CommandTimeout = 0;
 
             await using var reader = await cmd.ExecuteReaderAsync();
-            return await StreamReaderToParquetBlobs(reader, call, agentId, oid, tid, uniqueId, sasManager, filePrefix, containerName);
+            return await StreamReaderToParquetBlobs(reader, call, agentId, oid, tid, userName, uniqueId, sasManager, filePrefix, containerName);
         });
 
     Console.WriteLine($"[Agent] Exported {filenames.Count} Parquet file(s) for [{schema}].[{tableName}]");
@@ -364,7 +370,7 @@ static async Task<object> HandleExportTableCore(
 static async Task<object> HandleLoadMaskedToTableCore(
     string correlationId, JsonElement root,
     AsyncDuplexStreamingCall<AgentMessage, ServerMessage> call,
-    string agentId, string oid, string tid,
+    string agentId, string oid, string tid, string userName,
     SqlConnectionManager connManager, SasTokenManager sasManager)
 {
     var destRowKey = root.GetProperty("destRowKey").GetString() ?? "";
@@ -377,7 +383,7 @@ static async Task<object> HandleLoadMaskedToTableCore(
 
     Console.WriteLine($"[Agent] Loading masked file {blobFilename} -> [{destSchema}].[{tableName}] (create={createTable}, truncate={truncate})");
 
-    var sasInfo = await sasManager.RequestSasTokenAsync(call, agentId, oid, tid, containerName);
+    var sasInfo = await sasManager.RequestSasTokenAsync(call, agentId, oid, tid, userName, containerName);
     var blobUri = new Uri($"{sasInfo.BlobEndpoint}/{sasInfo.Container}/{blobFilename}?{sasInfo.SasToken}");
     var blobClient = new BlobClient(blobUri);
 
@@ -402,7 +408,7 @@ static async Task<object> HandleLoadMaskedToTableCore(
             sqlTypes = columnNames.Select(_ => "nvarchar(max)").ToArray();
         }
 
-        await connManager.ExecuteWithRetryAsync(destRowKey, call, agentId, oid, tid,
+        await connManager.ExecuteWithRetryAsync(destRowKey, call, agentId, oid, tid, userName,
             async (sqlConn) =>
             {
                 if (createTable)
@@ -489,7 +495,7 @@ static async Task<object> HandleLoadMaskedToTableCore(
 static async Task<object> HandlePreviewTableCore(
     string correlationId, JsonElement root,
     AsyncDuplexStreamingCall<AgentMessage, ServerMessage> call,
-    string agentId, string oid, string tid,
+    string agentId, string oid, string tid, string userName,
     SqlConnectionManager connManager, SasTokenManager sasManager)
 {
     var rowKey = root.GetProperty("rowKey").GetString() ?? "";
@@ -503,14 +509,14 @@ static async Task<object> HandlePreviewTableCore(
 
     Console.WriteLine($"[Agent] Previewing table [{schema}].[{tableName}] for connection {rowKey}...");
 
-    var filenames = await connManager.ExecuteWithRetryAsync(rowKey, call, agentId, oid, tid,
+    var filenames = await connManager.ExecuteWithRetryAsync(rowKey, call, agentId, oid, tid, userName,
         async (sqlConn) =>
         {
             await using var cmd = sqlConn.CreateCommand();
             cmd.CommandText = sqlStatement;
 
             await using var reader = await cmd.ExecuteReaderAsync();
-            return await StreamReaderToParquetBlobs(reader, call, agentId, oid, tid, uniqueId, sasManager);
+            return await StreamReaderToParquetBlobs(reader, call, agentId, oid, tid, userName, uniqueId, sasManager);
         });
 
     Console.WriteLine($"[Agent] Uploaded {filenames.Count} preview Parquet file(s) for [{schema}].[{tableName}]");
@@ -520,7 +526,7 @@ static async Task<object> HandlePreviewTableCore(
 static async Task<object> HandleValidateQueryCore(
     string correlationId, JsonElement root,
     AsyncDuplexStreamingCall<AgentMessage, ServerMessage> call,
-    string agentId, string oid, string tid,
+    string agentId, string oid, string tid, string userName,
     SqlConnectionManager connManager)
 {
     var connectionRowKey = root.GetProperty("connectionRowKey").GetString() ?? "";
@@ -530,7 +536,7 @@ static async Task<object> HandleValidateQueryCore(
 
     Console.WriteLine($"[Agent] Validating query for connection {connectionRowKey}...");
 
-    var message = await connManager.ExecuteWithRetryAsync(connectionRowKey, call, agentId, oid, tid,
+    var message = await connManager.ExecuteWithRetryAsync(connectionRowKey, call, agentId, oid, tid, userName,
         async (sqlConn) =>
         {
             await using var cmdBefore = sqlConn.CreateCommand();
@@ -559,7 +565,7 @@ static async Task<object> HandleValidateQueryCore(
 static async Task<object> HandlePreviewQueryCore(
     string correlationId, JsonElement root,
     AsyncDuplexStreamingCall<AgentMessage, ServerMessage> call,
-    string agentId, string oid, string tid,
+    string agentId, string oid, string tid, string userName,
     SqlConnectionManager connManager, SasTokenManager sasManager)
 {
     var connectionRowKey = root.GetProperty("connectionRowKey").GetString() ?? "";
@@ -571,14 +577,14 @@ static async Task<object> HandlePreviewQueryCore(
 
     Console.WriteLine($"[Agent] Previewing query for connection {connectionRowKey}...");
 
-    var filenames = await connManager.ExecuteWithRetryAsync(connectionRowKey, call, agentId, oid, tid,
+    var filenames = await connManager.ExecuteWithRetryAsync(connectionRowKey, call, agentId, oid, tid, userName,
         async (sqlConn) =>
         {
             await using var cmd = sqlConn.CreateCommand();
             cmd.CommandText = sqlStatement;
 
             await using var reader = await cmd.ExecuteReaderAsync();
-            return await StreamReaderToParquetBlobs(reader, call, agentId, oid, tid, uniqueId, sasManager);
+            return await StreamReaderToParquetBlobs(reader, call, agentId, oid, tid, userName, uniqueId, sasManager);
         });
 
     Console.WriteLine($"[Agent] Uploaded {filenames.Count} query preview Parquet file(s)");
@@ -691,7 +697,7 @@ const int PreviewBatchSize = 10_000;
 static async Task<List<string>> StreamReaderToParquetBlobs(
     SqlDataReader reader,
     AsyncDuplexStreamingCall<AgentMessage, ServerMessage> call,
-    string agentId, string oid, string tid, string uniqueId,
+    string agentId, string oid, string tid, string userName, string uniqueId,
     SasTokenManager sasManager, string filePrefix = "preview",
     string? containerName = null)
 {
@@ -713,7 +719,7 @@ static async Task<List<string>> StreamReaderToParquetBlobs(
     };
 
     var parquetSchema = new ParquetSchema(dataFields);
-    var sasInfo = await sasManager.RequestSasTokenAsync(call, agentId, oid, tid, containerName);
+    var sasInfo = await sasManager.RequestSasTokenAsync(call, agentId, oid, tid, userName, containerName);
     var filenames = new List<string>();
     var previewRequestUuid = Guid.NewGuid().ToString("N");
     var fileSequence = 1;
@@ -917,7 +923,7 @@ class SqlConnectionManager : IDisposable
     public async Task<T> ExecuteWithRetryAsync<T>(
         string rowKey,
         AsyncDuplexStreamingCall<AgentMessage, ServerMessage> call,
-        string agentId, string oid, string tid,
+        string agentId, string oid, string tid, string userName,
         Func<SqlConnection, Task<T>> operation)
     {
         try
@@ -933,7 +939,7 @@ class SqlConnectionManager : IDisposable
 
             try
             {
-                await RefreshConnectionDetailsAsync(rowKey, call, agentId, oid, tid);
+                await RefreshConnectionDetailsAsync(rowKey, call, agentId, oid, tid, userName);
             }
             catch (Exception refetchEx)
             {
@@ -948,7 +954,7 @@ class SqlConnectionManager : IDisposable
     private async Task RefreshConnectionDetailsAsync(
         string rowKey,
         AsyncDuplexStreamingCall<AgentMessage, ServerMessage> call,
-        string agentId, string oid, string tid)
+        string agentId, string oid, string tid, string userName)
     {
         var correlationId = Guid.NewGuid().ToString("N");
         var tcs = new TaskCompletionSource<ConnectionDetails>(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -963,7 +969,8 @@ class SqlConnectionManager : IDisposable
                 Type = "get_connection_details",
                 Payload = requestPayload,
                 Oid = oid,
-                Tid = tid
+                Tid = tid,
+                UserName = userName
             });
 
             using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(15));
@@ -1053,7 +1060,7 @@ class SasTokenManager
 
     public async Task<SasTokenInfo> RequestSasTokenAsync(
         AsyncDuplexStreamingCall<AgentMessage, ServerMessage> call,
-        string agentId, string oid, string tid,
+        string agentId, string oid, string tid, string userName,
         string? containerName = null)
     {
         var correlationId = Guid.NewGuid().ToString("N");
@@ -1071,7 +1078,8 @@ class SasTokenManager
                 Type = "request_sas_token",
                 Payload = requestPayload,
                 Oid = oid,
-                Tid = tid
+                Tid = tid,
+                UserName = userName
             });
 
             using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(15));

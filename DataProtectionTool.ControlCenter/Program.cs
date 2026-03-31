@@ -147,7 +147,8 @@ app.MapGet("/api/agents/{path}", (string path, AgentRegistry registry) =>
         oid = info.Oid,
         tid = info.Tid,
         agentId = info.AgentId,
-        connectedAt = info.ConnectedAt.ToString("O")
+        connectedAt = info.ConnectedAt.ToString("O"),
+        userName = info.UserName
     });
 });
 
@@ -2104,6 +2105,45 @@ app.MapGet("/api/agents/{path}/flows", async (string path, AgentRegistry registr
     });
 
     return Results.Ok(result);
+});
+
+app.MapPost("/api/agents/{path}/delete-flows", async (string path, HttpRequest request, AgentRegistry registry, ClientTableService clientTableService) =>
+{
+    if (!registry.TryGet(path, out var info) || info is null)
+        return Results.NotFound(new { error = "Agent not found." });
+
+    string body;
+    using (var reader = new StreamReader(request.Body))
+        body = await reader.ReadToEndAsync();
+
+    try
+    {
+        using var doc = JsonDocument.Parse(body);
+        var root = doc.RootElement;
+
+        var rowKeys = new List<string>();
+        if (root.TryGetProperty("rowKeys", out var rk) && rk.ValueKind == JsonValueKind.Array)
+        {
+            foreach (var item in rk.EnumerateArray())
+            {
+                var val = item.GetString();
+                if (!string.IsNullOrEmpty(val))
+                    rowKeys.Add(val);
+            }
+        }
+
+        if (rowKeys.Count == 0)
+            return Results.Ok(new { success = false, message = "No rowKeys provided." });
+
+        var partitionKey = ClientEntity.BuildPartitionKey(info.Oid, info.Tid);
+        var deleted = await clientTableService.DeleteFlowsAsync(partitionKey, rowKeys);
+
+        return Results.Ok(new { success = true, deleted });
+    }
+    catch (Exception ex)
+    {
+        return Results.Ok(new { success = false, message = $"Failed to delete flows: {ex.Message}" });
+    }
 });
 
 app.MapGet("/agents/{path}", (string path, AgentRegistry registry, IWebHostEnvironment env) =>

@@ -4,7 +4,7 @@ using DataProtectionTool.Contracts;
 
 namespace DataProtectionTool.ControlCenter.Services;
 
-public record AgentInfo(string Oid, string Tid, string AgentId, DateTime ConnectedAt);
+public record AgentInfo(string Oid, string Tid, string AgentId, DateTime ConnectedAt, string UserName = "");
 
 public class AgentConnection
 {

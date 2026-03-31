@@ -1,24 +1,35 @@
-.flows-panel {
-  position: absolute;
-  top: 16px;
-  left: 16px;
-  bottom: 16px;
-  background: #fff;
-  border-radius: 8px;
-  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.12), 0 1px 4px rgba(0, 0, 0, 0.08);
+.flows-panel-full {
+  position: relative;
+  width: 100%;
+  height: 100%;
   display: flex;
   flex-direction: column;
-  overflow: hidden;
-  z-index: 10;
+  background: #fff;
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
 }
+
+/* ── Header ────────────────────────────────────────────── */
 
 .flows-panel-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 12px 10px 10px 18px;
-  border-bottom: 1px solid #e8e8e8;
+  padding: 10px 16px;
+  border-bottom: 1px solid #e4e4e4;
+  gap: 12px;
+  flex-shrink: 0;
+}
+
+.flows-panel-header-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.flows-panel-header-right {
+  display: flex;
+  align-items: center;
+  gap: 10px;
 }
 
 .panel-switch-icons {
@@ -78,66 +89,239 @@
   background: #eee;
 }
 
-.flows-panel-resize {
-  position: absolute;
-  top: 0;
-  right: -3px;
-  width: 6px;
-  height: 100%;
-  cursor: col-resize;
-  z-index: 20;
+/* ── Search ────────────────────────────────────────────── */
+
+.flows-search-wrapper {
+  position: relative;
+  display: flex;
+  align-items: center;
 }
 
-.flows-panel-resize:hover {
-  background: rgba(0, 120, 212, 0.15);
+.flows-search-icon {
+  position: absolute;
+  left: 8px;
+  color: #999;
+  pointer-events: none;
+}
+
+.flows-search-input {
+  height: 30px;
+  width: 240px;
+  padding: 0 10px 0 28px;
+  border: 1px solid #d0d0d0;
+  border-radius: 6px;
+  font-size: 13px;
+  color: #333;
+  background: #fafafa;
+  outline: none;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+
+.flows-search-input::placeholder {
+  color: #aaa;
+}
+
+.flows-search-input:focus {
+  border-color: #0078d4;
+  box-shadow: 0 0 0 2px rgba(0, 120, 212, 0.12);
+  background: #fff;
+}
+
+/* ── Action dropdown ───────────────────────────────────── */
+
+.flows-action-dropdown {
+  position: relative;
+}
+
+.flows-action-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 30px;
+  padding: 0 12px;
+  font-size: 13px;
+  color: #333;
+  background: #fff;
+  border: 1px solid #d0d0d0;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background 0.12s, border-color 0.12s;
+  white-space: nowrap;
+}
+
+.flows-action-btn:hover:not(:disabled) {
+  background: #f5f5f5;
+  border-color: #bbb;
+}
+
+.flows-action-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.flows-action-menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  min-width: 140px;
+  background: #fff;
+  border: 1px solid #ddd;
+  border-radius: 6px;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.12);
+  z-index: 100;
+  overflow: hidden;
+}
+
+.flows-action-menu-item {
+  display: block;
+  width: 100%;
+  padding: 8px 14px;
+  font-size: 13px;
+  color: #333;
+  background: none;
+  border: none;
+  text-align: left;
+  cursor: pointer;
+  transition: background 0.1s;
+}
+
+.flows-action-menu-item:hover {
+  background: #f3f3f3;
+}
+
+.flows-action-menu-item-danger {
+  color: #c03;
+}
+
+.flows-action-menu-item-danger:hover {
+  background: #fef0f0;
+}
+
+/* ── Table container ───────────────────────────────────── */
+
+.flows-table-container {
+  flex: 1;
+  overflow: auto;
 }
 
 .flows-panel-empty {
-  padding: 18px;
+  padding: 32px 24px;
   margin: 0;
   color: #999;
   font-size: 13px;
 }
 
-.flows-list {
-  margin: 0;
-  padding: 6px 4px 6px 0;
-  overflow-y: auto;
-  flex: 1;
-}
+/* ── Table ─────────────────────────────────────────────── */
 
-.flow-item {
-  display: flex;
-  align-items: stretch;
-  gap: 8px;
-  padding: 8px 18px;
-  cursor: default;
-  transition: background 0.12s;
-}
-
-.flow-item:hover {
-  background: #f5f7fa;
-}
-
-.flow-item-arrow {
-  flex-shrink: 0;
-  width: 14px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: #aaa;
-}
-
-.flow-item-text {
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
-}
-
-.flow-item-line {
+.flows-table {
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: fixed;
   font-size: 13px;
+}
+
+.flows-table thead {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+}
+
+.flows-th-checkbox,
+.flows-td-checkbox {
+  width: 40px;
+  min-width: 40px;
+  max-width: 40px;
+  text-align: center;
+  padding: 0;
+}
+
+.flows-th-checkbox {
+  background: #f5f6f8;
+  border-bottom: 2px solid #ddd;
+  padding: 8px 0;
+}
+
+.flows-td-checkbox {
+  padding: 6px 0;
+}
+
+.flows-th {
+  position: relative;
+  background: #f5f6f8;
+  border-bottom: 2px solid #ddd;
+  padding: 8px 12px;
+  text-align: left;
+  font-weight: 600;
+  color: #444;
+  cursor: pointer;
+  user-select: none;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.flows-th:hover {
+  background: #eceef1;
+}
+
+.flows-th-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.flows-sort-arrow {
+  font-size: 10px;
+  color: #0078d4;
+}
+
+.flows-col-resize {
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 5px;
+  height: 100%;
+  cursor: col-resize;
+  z-index: 10;
+}
+
+.flows-col-resize:hover {
+  background: rgba(0, 120, 212, 0.2);
+}
+
+/* ── Table body ────────────────────────────────────────── */
+
+.flows-table tbody tr {
+  transition: background 0.08s;
+}
+
+.flows-table tbody tr:nth-child(even) {
+  background: #fafbfc;
+}
+
+.flows-table tbody tr:hover {
+  background: #edf4fc;
+}
+
+.flows-table tbody tr.flows-row-selected {
+  background: #e3eefa;
+}
+
+.flows-table tbody td {
+  padding: 7px 12px;
   color: #333;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  border-bottom: 1px solid #f0f0f0;
+}
+
+/* ── Checkbox styling ──────────────────────────────────── */
+
+.flows-th-checkbox input[type="checkbox"],
+.flows-td-checkbox input[type="checkbox"] {
+  width: 15px;
+  height: 15px;
+  cursor: pointer;
+  accent-color: #0078d4;
 }

@@ -38,7 +38,7 @@ public class ClientTableService
         }
     }
 
-    public async Task<ClientEntity> CreateOrUpdateClientAsync(string oid, string tid, string agentId)
+    public async Task<ClientEntity> CreateOrUpdateClientAsync(string oid, string tid, string agentId, string userName = "")
     {
         EnsureTableExists();
         var partitionKey = ClientEntity.BuildPartitionKey(oid, tid);
@@ -48,6 +48,8 @@ public class ClientTableService
             var existing = await _tableClient.GetEntityAsync<ClientEntity>(partitionKey, "profile");
             existing.Value.AgentId = agentId;
             existing.Value.LastConnectedAt = DateTime.UtcNow;
+            if (!string.IsNullOrEmpty(userName))
+                existing.Value.UserName = userName;
             await _tableClient.UpdateEntityAsync(existing.Value, existing.Value.ETag);
             _logger.LogInformation(
                 "Updated existing client — oid={Oid}, tid={Tid}", oid, tid);
@@ -62,6 +64,7 @@ public class ClientTableService
                 Oid = oid,
                 Tid = tid,
                 AgentId = agentId,
+                UserName = userName,
                 FirstConnectedAt = DateTime.UtcNow,
                 LastConnectedAt = DateTime.UtcNow
             };
@@ -437,5 +440,25 @@ public class ClientTableService
         }
 
         return flows;
+    }
+
+    public async Task<int> DeleteFlowsAsync(string partitionKey, IEnumerable<string> rowKeys)
+    {
+        EnsureTableExists();
+        var deleted = 0;
+        foreach (var rowKey in rowKeys)
+        {
+            try
+            {
+                await _tableClient.DeleteEntityAsync(partitionKey, rowKey);
+                deleted++;
+                _logger.LogInformation("Deleted flow — partitionKey={PK}, rowKey={RK}", partitionKey, rowKey);
+            }
+            catch (Azure.RequestFailedException ex) when (ex.Status == 404)
+            {
+                _logger.LogWarning("Flow not found for deletion — partitionKey={PK}, rowKey={RK}", partitionKey, rowKey);
+            }
+        }
+        return deleted;
     }
 }

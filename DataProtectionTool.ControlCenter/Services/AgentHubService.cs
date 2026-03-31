@@ -51,16 +51,19 @@ public class AgentHubService : AgentHub.AgentHubBase
 
             var oid = firstMessage.Oid;
             var tid = firstMessage.Tid;
+            var userName = firstMessage.UserName;
 
             if (string.IsNullOrEmpty(oid))
                 oid = context.RequestHeaders.GetValue(SharedSecret.OidMetadataKey) ?? "";
             if (string.IsNullOrEmpty(tid))
                 tid = context.RequestHeaders.GetValue(SharedSecret.TidMetadataKey) ?? "";
+            if (string.IsNullOrEmpty(userName))
+                userName = context.RequestHeaders.GetValue(SharedSecret.UserNameMetadataKey) ?? "";
 
-            var agentInfo = new AgentInfo(oid, tid, firstMessage.AgentId, DateTime.UtcNow);
+            var agentInfo = new AgentInfo(oid, tid, firstMessage.AgentId, DateTime.UtcNow, userName);
             registeredPath = _registry.Register(agentInfo, responseStream);
 
-            await _clientTableService.CreateOrUpdateClientAsync(oid, tid, firstMessage.AgentId);
+            await _clientTableService.CreateOrUpdateClientAsync(oid, tid, firstMessage.AgentId, userName);
 
             var partitionKeyForEvents = Models.ClientEntity.BuildPartitionKey(oid, tid);
             _ = _clientTableService.AppendEventAsync(partitionKeyForEvents, "agent_connected",

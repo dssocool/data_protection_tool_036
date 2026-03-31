@@ -8,6 +8,7 @@ interface MenuBarProps {
   onViewFlows: () => void;
   oid: string;
   tid: string;
+  userName: string;
   uniqueId: string | null;
 }
 
@@ -18,6 +19,7 @@ export default function MenuBar({
   onViewFlows,
   oid,
   tid,
+  userName,
   uniqueId,
 }: MenuBarProps) {
   const [openMenu, setOpenMenu] = useState<string | null>(null);
@@ -112,13 +114,18 @@ export default function MenuBar({
           <button
             className={`menu-user-button ${showProfile ? "active" : ""}`}
             onClick={() => setShowProfile((v) => !v)}
-            title={`${oid} | ${tid}`}
+            title={userName || `${oid} | ${tid}`}
           >
-            {oid.length > 8 ? oid.slice(0, 8) + "…" : oid}
-            {tid ? ` | ${tid.length > 8 ? tid.slice(0, 8) + "…" : tid}` : ""}
+            {userName || (oid.length > 8 ? oid.slice(0, 8) + "…" : oid)}
           </button>
           {showProfile && (
             <div className="user-profile-popout">
+              {userName && (
+                <div className="user-profile-row">
+                  <span className="user-profile-label">Name</span>
+                  <span className="user-profile-value">{userName}</span>
+                </div>
+              )}
               <div className="user-profile-row">
                 <span className="user-profile-label">OID</span>
                 <span className="user-profile-value">{oid}</span>
