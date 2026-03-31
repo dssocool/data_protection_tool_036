@@ -65,6 +65,12 @@ var dataEngineConfig = builder.Configuration.GetSection("DataEngine").Get<DataEn
     ?? throw new InvalidOperationException("DataEngine section is not configured in appsettings.");
 builder.Services.AddSingleton(dataEngineConfig);
 
+builder.Services.AddHttpClient<EngineApiClient>(client =>
+{
+    client.Timeout = TimeSpan.FromSeconds(120);
+});
+builder.Services.AddSingleton<EngineMetadataService>();
+
 var app = builder.Build();
 var previewFilenameRegex = new Regex(
     "^(?:dryrun_[0-9a-fA-F]{32}_)?preview_(\\d+)_([0-9a-fA-F]{32})(?:_([2-9]\\d*))?\\.parquet$",
@@ -849,7 +855,8 @@ app.MapGet("/api/agents/{path}/queries", async (string path, string connectionRo
 
 app.MapPost("/api/agents/{path}/dry-run", async (string path, HttpContext httpContext, AgentRegistry registry,
     ClientTableService clientTableService, DataEngineConfig dataEngineConfig,
-    BlobServiceClient blobClient, BlobStorageConfig blobConfig) =>
+    BlobServiceClient blobClient, BlobStorageConfig blobConfig,
+    EngineApiClient engineApi, EngineMetadataService metadataService) =>
 {
     var response = httpContext.Response;
     var request = httpContext.Request;
@@ -1012,28 +1019,20 @@ app.MapPost("/api/agents/{path}/dry-run", async (string path, HttpContext httpCo
 
         if (string.IsNullOrEmpty(fileFormatId))
         {
-            var commandPayload = JsonSerializer.Serialize(new
+            var containerClient = blobClient.GetBlobContainerClient(blobConfig.Container);
+            var blobRef = containerClient.GetBlobClient(previewFilenames[0]);
+            using var downloadStream = new MemoryStream();
+            await blobRef.DownloadToAsync(downloadStream);
+            var fileBytes = downloadStream.ToArray();
+
+            var (formatSuccess, newFileFormatId, _) = await engineApi.CreateFileFormatAsync(fileBytes, previewFilenames[0]);
+            if (!formatSuccess)
             {
-                engineUrl = dataEngineConfig.EngineUrl,
-                authToken = dataEngineConfig.AuthorizationToken,
-                blobFilename = previewFilenames[0],
-                fileFormatType = "PARQUET"
-            });
-
-            var agentResult = await connection.SendCommandAsync("create_file_format", commandPayload, TimeSpan.FromSeconds(120));
-
-            using var resultDoc = JsonDocument.Parse(agentResult);
-            var resultRoot = resultDoc.RootElement;
-
-            if (!(resultRoot.TryGetProperty("success", out var successEl) && successEl.GetBoolean()))
-            {
-                var message = resultRoot.TryGetProperty("message", out var msgEl) ? msgEl.GetString() : "File format creation failed.";
-                await WriteSseError(message ?? "File format creation failed.");
+                await WriteSseError("File format creation failed.");
                 return;
             }
 
-            fileFormatId = resultRoot.TryGetProperty("fileFormatId", out var ffiEl)
-                ? ffiEl.GetString() ?? "" : "";
+            fileFormatId = newFileFormatId;
 
             if (!string.IsNullOrEmpty(fileFormatId) && dataItemForFormat != null)
             {
@@ -1045,28 +1044,13 @@ app.MapPost("/api/agents/{path}/dry-run", async (string path, HttpContext httpCo
         await WriteSseEvent("status", "Creating file ruleset...");
         var dryRunUuid = Guid.NewGuid().ToString("N");
         var rulesetName = $"ruleset_{dryRunUuid}";
-        var rulesetPayload = JsonSerializer.Serialize(new
+
+        var (rulesetSuccess, fileRulesetId, _) = await engineApi.CreateFileRulesetAsync(rulesetName, dataEngineConfig.ConnectorId);
+        if (!rulesetSuccess)
         {
-            engineUrl = dataEngineConfig.EngineUrl,
-            authToken = dataEngineConfig.AuthorizationToken,
-            rulesetName,
-            fileConnectorId = dataEngineConfig.ConnectorId
-        });
-
-        var rulesetResult = await connection.SendCommandAsync("create_file_ruleset", rulesetPayload, TimeSpan.FromSeconds(120));
-
-        using var rulesetDoc = JsonDocument.Parse(rulesetResult);
-        var rulesetRoot = rulesetDoc.RootElement;
-
-        if (!(rulesetRoot.TryGetProperty("success", out var rulesetSuccessEl) && rulesetSuccessEl.GetBoolean()))
-        {
-            var rulesetMsg = rulesetRoot.TryGetProperty("message", out var rmEl) ? rmEl.GetString() : "File ruleset creation failed.";
-            await WriteSseError(rulesetMsg ?? "File ruleset creation failed.");
+            await WriteSseError("File ruleset creation failed.");
             return;
         }
-
-        var fileRulesetId = rulesetRoot.TryGetProperty("fileRulesetId", out var friEl)
-            ? friEl.GetString() ?? "" : "";
 
         // Step 3: Create file metadata for each preview file
         var fileMetadataIds = new List<string>();
@@ -1075,34 +1059,17 @@ app.MapPost("/api/agents/{path}/dry-run", async (string path, HttpContext httpCo
             var previewFile = previewFilenames[fi];
             await WriteSseEvent("status", $"Creating file metadata... ({fi + 1} of {previewFilenames.Count})");
 
-            var metadataPayload = JsonSerializer.Serialize(new
+            var (metaSuccess, fileMetadataId, _) = await engineApi.CreateFileMetadataAsync(previewFile, fileRulesetId, fileFormatId);
+            if (!metaSuccess)
             {
-                engineUrl = dataEngineConfig.EngineUrl,
-                authToken = dataEngineConfig.AuthorizationToken,
-                fileName = previewFile,
-                rulesetId = fileRulesetId,
-                fileFormatId,
-                fileType = "PARQUET"
-            });
-
-            var metadataResult = await connection.SendCommandAsync("create_file_metadata", metadataPayload, TimeSpan.FromSeconds(120));
-
-            using var metadataDoc = JsonDocument.Parse(metadataResult);
-            var metadataRoot = metadataDoc.RootElement;
-
-            if (!(metadataRoot.TryGetProperty("success", out var metaSuccessEl) && metaSuccessEl.GetBoolean()))
-            {
-                var metaMsg = metadataRoot.TryGetProperty("message", out var mmEl) ? mmEl.GetString() : $"File metadata creation failed for {previewFile}.";
-                await WriteSseError(metaMsg ?? $"File metadata creation failed for {previewFile}.");
+                await WriteSseError($"File metadata creation failed for {previewFile}.");
                 return;
             }
 
-            var fileMetadataId = metadataRoot.TryGetProperty("fileMetadataId", out var fmiEl)
-                ? fmiEl.GetString() ?? "" : "";
             fileMetadataIds.Add(fileMetadataId);
         }
 
-        var engineBaseUrl = $"{dataEngineConfig.EngineUrl.TrimEnd('/')}/masking/api/v5.1.44";
+        var engineBaseUrl = engineApi.BaseUrl;
 
         async Task<JsonDocument> RelayEngineHttpAsync(string method, string relativeUrl, object? requestBody = null)
         {
@@ -1228,71 +1195,59 @@ app.MapPost("/api/agents/{path}/dry-run", async (string path, HttpContext httpCo
             for (var i = 0; i < previewHeaders.Count; i++)
                 sqlTypeByColumn[previewHeaders[i]] = previewColumnTypes[i];
 
-            var columnRulesPayload = JsonSerializer.Serialize(new
-            {
-                fileFormatId,
-                engineUrl = dataEngineConfig.EngineUrl,
-                authToken = dataEngineConfig.AuthorizationToken
-            });
-
             try
             {
-                var columnRulesResult = await connection.SendCommandAsync("get_column_rules", columnRulesPayload, TimeSpan.FromSeconds(120));
-                using var crDoc = JsonDocument.Parse(columnRulesResult);
-                var crSuccess = crDoc.RootElement.TryGetProperty("success", out var crSuccessEl) && crSuccessEl.GetBoolean();
+                await metadataService.EnsureLoadedAsync();
+                var columnRules = await engineApi.FetchColumnRulesAsync(fileFormatId);
+                var enriched = engineApi.EnrichColumnRules(columnRules, metadataService.Algorithms, metadataService.Domains, metadataService.Frameworks);
 
-                if (crSuccess
-                    && crDoc.RootElement.TryGetProperty("responseList", out var crListEl) && crListEl.ValueKind == JsonValueKind.Array
-                    && crDoc.RootElement.TryGetProperty("algorithms", out var crAlgsEl) && crAlgsEl.ValueKind == JsonValueKind.Array)
+                var algMaskTypes = new Dictionary<string, string>();
+                foreach (var alg in enriched.Algorithms)
                 {
-                    var algMaskTypes = new Dictionary<string, string>();
-                    foreach (var alg in crAlgsEl.EnumerateArray())
-                    {
-                        var aName = alg.TryGetProperty("algorithmName", out var anEl) ? anEl.GetString() ?? "" : "";
-                        var aMaskType = alg.TryGetProperty("maskType", out var mtEl) ? mtEl.GetString() ?? "" : "";
-                        if (!string.IsNullOrEmpty(aName))
-                            algMaskTypes[aName] = aMaskType;
-                    }
-
-                    var fixedCount = 0;
-                    foreach (var rule in crListEl.EnumerateArray())
-                    {
-                        var fieldName = rule.TryGetProperty("fieldName", out var fnEl) ? fnEl.GetString() ?? "" : "";
-                        var algName = rule.TryGetProperty("algorithmName", out var anEl) ? anEl.GetString() ?? "" : "";
-                        var metadataId = rule.TryGetProperty("fileFieldMetadataId", out var idEl) ? idEl.ToString() : "";
-                        var isMasked = !rule.TryGetProperty("isMasked", out var imEl) || imEl.ValueKind != JsonValueKind.False;
-
-                        if (string.IsNullOrEmpty(fieldName) || string.IsNullOrEmpty(algName)
-                            || string.IsNullOrEmpty(metadataId) || !isMasked)
-                            continue;
-
-                        if (!sqlTypeByColumn.TryGetValue(fieldName, out var sqlType))
-                            continue;
-
-                        var allowedTypes = GetAllowedAlgorithmTypes(sqlType);
-
-                        if (!algMaskTypes.TryGetValue(algName, out var maskType))
-                            continue;
-
-                        if (allowedTypes.Contains(maskType))
-                            continue;
-
-                        await WriteSseEvent("status", $"Fixing type mismatch: {fieldName} ({sqlType}) — algorithm type {maskType} not allowed...");
-                        using var fixResp = await RelayEngineHttpAsync("PUT", $"file-field-metadata/{metadataId}", new
-                        {
-                            algorithmName = "",
-                            domainName = "",
-                            isMasked = false,
-                            isProfilerWritable = false
-                        });
-                        fixedCount++;
-                    }
-
-                    if (fixedCount > 0)
-                        await WriteSseEvent("status", $"Fixed {fixedCount} column rule(s) with incompatible algorithm types.");
-                    else
-                        await WriteSseEvent("status", "All column rules have compatible algorithm types.");
+                    var aName = alg.TryGetProperty("algorithmName", out var anEl) ? anEl.GetString() ?? "" : "";
+                    var aMaskType = alg.TryGetProperty("maskType", out var mtEl) ? mtEl.GetString() ?? "" : "";
+                    if (!string.IsNullOrEmpty(aName))
+                        algMaskTypes[aName] = aMaskType;
                 }
+
+                var fixedCount = 0;
+                foreach (var rule in enriched.Rules)
+                {
+                    var fieldName = rule.TryGetProperty("fieldName", out var fnEl) ? fnEl.GetString() ?? "" : "";
+                    var algName = rule.TryGetProperty("algorithmName", out var anEl) ? anEl.GetString() ?? "" : "";
+                    var metadataId = rule.TryGetProperty("fileFieldMetadataId", out var idEl) ? idEl.ToString() : "";
+                    var isMasked = !rule.TryGetProperty("isMasked", out var imEl) || imEl.ValueKind != JsonValueKind.False;
+
+                    if (string.IsNullOrEmpty(fieldName) || string.IsNullOrEmpty(algName)
+                        || string.IsNullOrEmpty(metadataId) || !isMasked)
+                        continue;
+
+                    if (!sqlTypeByColumn.TryGetValue(fieldName, out var sqlType))
+                        continue;
+
+                    var allowedTypes = GetAllowedAlgorithmTypes(sqlType);
+
+                    if (!algMaskTypes.TryGetValue(algName, out var maskType))
+                        continue;
+
+                    if (allowedTypes.Contains(maskType))
+                        continue;
+
+                    await WriteSseEvent("status", $"Fixing type mismatch: {fieldName} ({sqlType}) — algorithm type {maskType} not allowed...");
+                    using var fixResp = await RelayEngineHttpAsync("PUT", $"file-field-metadata/{metadataId}", new
+                    {
+                        algorithmName = "",
+                        domainName = "",
+                        isMasked = false,
+                        isProfilerWritable = false
+                    });
+                    fixedCount++;
+                }
+
+                if (fixedCount > 0)
+                    await WriteSseEvent("status", $"Fixed {fixedCount} column rule(s) with incompatible algorithm types.");
+                else
+                    await WriteSseEvent("status", "All column rules have compatible algorithm types.");
             }
             catch (Exception ex)
             {
@@ -1390,7 +1345,8 @@ app.MapPost("/api/agents/{path}/dry-run", async (string path, HttpContext httpCo
 });
 
 app.MapPost("/api/agents/{path}/full-run", async (string path, HttpContext httpContext, AgentRegistry registry,
-    ClientTableService clientTableService, DataEngineConfig dataEngineConfig) =>
+    ClientTableService clientTableService, DataEngineConfig dataEngineConfig,
+    EngineApiClient engineApi) =>
 {
     var response = httpContext.Response;
     var request = httpContext.Request;
@@ -1514,28 +1470,14 @@ app.MapPost("/api/agents/{path}/full-run", async (string path, HttpContext httpC
         // Step 2: Create file ruleset
         await WriteSseEvent("status", "Creating file ruleset...");
         var fullRunUuid = Guid.NewGuid().ToString("N");
-        var rulesetPayload = JsonSerializer.Serialize(new
+
+        var (rulesetSuccess, fileRulesetId, _) = await engineApi.CreateFileRulesetAsync(
+            $"fullrun_ruleset_{fullRunUuid}", dataEngineConfig.ConnectorId);
+        if (!rulesetSuccess)
         {
-            engineUrl = dataEngineConfig.EngineUrl,
-            authToken = dataEngineConfig.AuthorizationToken,
-            rulesetName = $"fullrun_ruleset_{fullRunUuid}",
-            fileConnectorId = dataEngineConfig.ConnectorId
-        });
-
-        var rulesetResult = await connection.SendCommandAsync("create_file_ruleset", rulesetPayload, TimeSpan.FromSeconds(120));
-
-        using var rulesetDoc = JsonDocument.Parse(rulesetResult);
-        var rulesetRoot = rulesetDoc.RootElement;
-
-        if (!(rulesetRoot.TryGetProperty("success", out var rulesetSuccessEl) && rulesetSuccessEl.GetBoolean()))
-        {
-            var rulesetMsg = rulesetRoot.TryGetProperty("message", out var rmEl) ? rmEl.GetString() : "File ruleset creation failed.";
-            await WriteSseError(rulesetMsg ?? "File ruleset creation failed.");
+            await WriteSseError("File ruleset creation failed.");
             return;
         }
-
-        var fileRulesetId = rulesetRoot.TryGetProperty("fileRulesetId", out var friEl)
-            ? friEl.GetString() ?? "" : "";
 
         // Step 3: Create file metadata for each exported file
         var fileMetadataIds = new List<string>();
@@ -1544,34 +1486,17 @@ app.MapPost("/api/agents/{path}/full-run", async (string path, HttpContext httpC
             var exportFile = exportFilenames[fi];
             await WriteSseEvent("status", $"Creating file metadata... ({fi + 1} of {exportFilenames.Count})");
 
-            var metadataPayload = JsonSerializer.Serialize(new
+            var (metaSuccess, fileMetadataId, _) = await engineApi.CreateFileMetadataAsync(exportFile, fileRulesetId, fileFormatId);
+            if (!metaSuccess)
             {
-                engineUrl = dataEngineConfig.EngineUrl,
-                authToken = dataEngineConfig.AuthorizationToken,
-                fileName = exportFile,
-                rulesetId = fileRulesetId,
-                fileFormatId,
-                fileType = "PARQUET"
-            });
-
-            var metadataResult = await connection.SendCommandAsync("create_file_metadata", metadataPayload, TimeSpan.FromSeconds(120));
-
-            using var metadataDoc = JsonDocument.Parse(metadataResult);
-            var metadataRoot = metadataDoc.RootElement;
-
-            if (!(metadataRoot.TryGetProperty("success", out var metaSuccessEl) && metaSuccessEl.GetBoolean()))
-            {
-                var metaMsg = metadataRoot.TryGetProperty("message", out var mmEl) ? mmEl.GetString() : $"File metadata creation failed for {exportFile}.";
-                await WriteSseError(metaMsg ?? $"File metadata creation failed for {exportFile}.");
+                await WriteSseError($"File metadata creation failed for {exportFile}.");
                 return;
             }
 
-            var fileMetadataId = metadataRoot.TryGetProperty("fileMetadataId", out var fmiEl)
-                ? fmiEl.GetString() ?? "" : "";
             fileMetadataIds.Add(fileMetadataId);
         }
 
-        var engineBaseUrl = $"{dataEngineConfig.EngineUrl.TrimEnd('/')}/masking/api/v5.1.44";
+        var engineBaseUrl = engineApi.BaseUrl;
 
         async Task<JsonDocument> RelayEngineHttpAsync(string method, string relativeUrl, object? requestBody = null)
         {
@@ -1748,52 +1673,28 @@ app.MapPost("/api/agents/{path}/http-request", async (string path, HttpRequest r
     }
 });
 
-app.MapGet("/api/agents/{path}/column-rules", async (string path, string? fileFormatId, AgentRegistry registry, DataEngineConfig dataEngineConfig) =>
+app.MapGet("/api/agents/{path}/column-rules", async (string path, string? fileFormatId, AgentRegistry registry, EngineApiClient engineApi, EngineMetadataService metadataService) =>
 {
-    if (!registry.TryGetConnection(path, out var connection) || connection is null)
-        return Results.NotFound(new { error = "Agent not found or not connected." });
+    if (!registry.TryGet(path, out _))
+        return Results.NotFound(new { error = "Agent not found." });
 
     if (string.IsNullOrWhiteSpace(fileFormatId))
         return Results.Ok(new { success = false, message = "fileFormatId is required." });
 
-    var commandPayload = JsonSerializer.Serialize(new
-    {
-        fileFormatId,
-        engineUrl = dataEngineConfig.EngineUrl,
-        authToken = dataEngineConfig.AuthorizationToken
-    });
-
     try
     {
-        var result = await connection.SendCommandAsync("get_column_rules", commandPayload, TimeSpan.FromSeconds(120));
-        using var doc = JsonDocument.Parse(result);
-
-        var success = doc.RootElement.TryGetProperty("success", out var successEl) && successEl.GetBoolean();
-        if (!success)
-        {
-            var msg = doc.RootElement.TryGetProperty("message", out var msgEl) ? msgEl.GetString() ?? "Unknown error" : "Unknown error";
-            return Results.Ok(new { success = false, message = msg });
-        }
-
-        object[] ExtractArray(string propName)
-        {
-            if (doc.RootElement.TryGetProperty(propName, out var el) && el.ValueKind == JsonValueKind.Array)
-                return el.EnumerateArray().Select(e => JsonSerializer.Deserialize<object>(e.GetRawText())!).ToArray();
-            return Array.Empty<object>();
-        }
+        await metadataService.EnsureLoadedAsync();
+        var rules = await engineApi.FetchColumnRulesAsync(fileFormatId);
+        var enriched = engineApi.EnrichColumnRules(rules, metadataService.Algorithms, metadataService.Domains, metadataService.Frameworks);
 
         return Results.Ok(new
         {
             success = true,
-            responseList = ExtractArray("responseList"),
-            algorithms = ExtractArray("algorithms"),
-            domains = ExtractArray("domains"),
-            frameworks = ExtractArray("frameworks")
+            responseList = enriched.Rules.Select(e => JsonSerializer.Deserialize<object>(e.GetRawText())).ToArray(),
+            algorithms = enriched.Algorithms.Select(e => JsonSerializer.Deserialize<object>(e.GetRawText())).ToArray(),
+            domains = enriched.Domains.Select(e => JsonSerializer.Deserialize<object>(e.GetRawText())).ToArray(),
+            frameworks = enriched.Frameworks.Select(e => JsonSerializer.Deserialize<object>(e.GetRawText())).ToArray()
         });
-    }
-    catch (TimeoutException)
-    {
-        return Results.Ok(new { success = false, message = "Agent did not respond within 120 seconds." });
     }
     catch (Exception ex)
     {
@@ -1852,46 +1753,22 @@ app.MapPut("/api/agents/{path}/column-rule/{fileFieldMetadataId}", async (string
     }
 });
 
-app.MapGet("/api/agents/{path}/engine-metadata", async (string path, AgentRegistry registry, DataEngineConfig dataEngineConfig) =>
+app.MapGet("/api/agents/{path}/engine-metadata", async (string path, AgentRegistry registry, EngineMetadataService metadataService) =>
 {
-    if (!registry.TryGetConnection(path, out var connection) || connection is null)
-        return Results.NotFound(new { error = "Agent not found or not connected." });
+    if (!registry.TryGet(path, out _))
+        return Results.NotFound(new { error = "Agent not found." });
 
     try
     {
-        var commandPayload = JsonSerializer.Serialize(new
-        {
-            engineUrl = dataEngineConfig.EngineUrl,
-            authToken = dataEngineConfig.AuthorizationToken
-        });
-        var result = await connection.SendCommandAsync("get_engine_metadata", commandPayload, TimeSpan.FromSeconds(120));
-        using var doc = JsonDocument.Parse(result);
-
-        var success = doc.RootElement.TryGetProperty("success", out var successEl) && successEl.GetBoolean();
-        if (!success)
-        {
-            var msg = doc.RootElement.TryGetProperty("message", out var msgEl) ? msgEl.GetString() ?? "Unknown error" : "Unknown error";
-            return Results.Ok(new { success = false, message = msg });
-        }
-
-        object[] ExtractArray(string propName)
-        {
-            if (doc.RootElement.TryGetProperty(propName, out var el) && el.ValueKind == JsonValueKind.Array)
-                return el.EnumerateArray().Select(e => JsonSerializer.Deserialize<object>(e.GetRawText())!).ToArray();
-            return Array.Empty<object>();
-        }
+        await metadataService.EnsureLoadedAsync();
 
         return Results.Ok(new
         {
             success = true,
-            algorithms = ExtractArray("algorithms"),
-            domains = ExtractArray("domains"),
-            frameworks = ExtractArray("frameworks")
+            algorithms = metadataService.Algorithms?.Select(e => JsonSerializer.Deserialize<object>(e.GetRawText())).ToArray() ?? Array.Empty<object?>(),
+            domains = metadataService.Domains?.Select(e => JsonSerializer.Deserialize<object>(e.GetRawText())).ToArray() ?? Array.Empty<object?>(),
+            frameworks = metadataService.Frameworks?.Select(e => JsonSerializer.Deserialize<object>(e.GetRawText())).ToArray() ?? Array.Empty<object?>()
         });
-    }
-    catch (TimeoutException)
-    {
-        return Results.Ok(new { success = false, message = "Agent did not respond within 120 seconds." });
     }
     catch (Exception ex)
     {
