@@ -66,6 +66,10 @@ function formatTime(iso: string): string {
   }
 }
 
+function isExpandableType(type: string): boolean {
+  return type === "dp_preview" || type === "dp_run";
+}
+
 function hasSteps(evt: StatusEvent): boolean {
   return Array.isArray(evt.steps) && evt.steps.length > 0;
 }
@@ -191,6 +195,13 @@ export default function EventDialog({ events, onClose }: EventDialogProps) {
                       </span>
                       <span className="event-item-time">{formatTime(evt.timestamp)}</span>
                       <span className="event-item-type">{formatBadgeLabel(evt.type)}</span>
+                      {isExpandableType(evt.type) && stepsPresent && (
+                        <span className={`event-item-expand-indicator${isExpanded ? " event-item-expand-indicator-open" : ""}`}>
+                          <svg width="10" height="10" viewBox="0 0 10 10">
+                            <path d="M3 2 L7 5 L3 8" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+                          </svg>
+                        </span>
+                      )}
                     </div>
                     <div className="event-item-row2">
                       <span className="event-item-summary">{evt.summary}</span>
