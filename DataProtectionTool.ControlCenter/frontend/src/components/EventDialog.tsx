@@ -105,12 +105,15 @@ export default function EventDialog({ events, onClose }: EventDialogProps) {
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, [onClose]);
 
-  const reversed = [...events].reverse();
+  const sorted = useMemo(
+    () => [...events].sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()),
+    [events]
+  );
 
   const filtered = useMemo(() => {
-    if (!searchQuery.trim()) return reversed;
-    return reversed.filter((evt) => eventMatchesSearch(evt, searchQuery.trim()));
-  }, [reversed, searchQuery]);
+    if (!searchQuery.trim()) return sorted;
+    return sorted.filter((evt) => eventMatchesSearch(evt, searchQuery.trim()));
+  }, [sorted, searchQuery]);
 
   const autoExpandedIndices = useMemo(() => {
     if (!searchQuery.trim()) return new Set<number>();
@@ -189,13 +192,6 @@ export default function EventDialog({ events, onClose }: EventDialogProps) {
                       </span>
                       <span className="event-item-time">{formatTime(evt.timestamp)}</span>
                       <span className="event-item-type">{formatBadgeLabel(evt.type)}</span>
-                      {isExpandableType(evt.type) && stepsPresent && (
-                        <span className={`event-item-expand-indicator${isExpanded ? " event-item-expand-indicator-open" : ""}`}>
-                          <svg width="10" height="10" viewBox="0 0 10 10">
-                            <path d="M3 2 L7 5 L3 8" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
-                          </svg>
-                        </span>
-                      )}
                     </div>
                     <div className="event-item-row2">
                       <span className="event-item-summary">{evt.summary}</span>

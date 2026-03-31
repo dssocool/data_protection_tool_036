@@ -13,6 +13,7 @@ export interface FlowItem {
 
 interface FlowsPanelProps {
   agentPath: string;
+  statusEvents: StatusEvent[];
   onSwitchPanel: (panel: "connections" | "flows") => void;
   onRunFlows?: (flows: FlowItem[]) => void;
 }
@@ -81,6 +82,7 @@ function formatHistoryTime(iso: string): string {
 
 export default function FlowsPanel({
   agentPath,
+  statusEvents,
   onSwitchPanel,
   onRunFlows,
 }: FlowsPanelProps) {
@@ -95,8 +97,6 @@ export default function FlowsPanel({
   const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false);
   const [confirmRunOpen, setConfirmRunOpen] = useState(false);
   const [selectedFlowRowKey, setSelectedFlowRowKey] = useState<string | null>(null);
-  const [historyEvents, setHistoryEvents] = useState<StatusEvent[]>([]);
-  const [historyLoading, setHistoryLoading] = useState(false);
   const actionRef = useRef<HTMLDivElement>(null);
 
   const resizingCol = useRef<number | null>(null);
@@ -163,35 +163,12 @@ export default function FlowsPanel({
       : selectedFlowRowKey;
   }, [selectedFlowRowKey]);
 
-  const fetchHistory = useCallback(async () => {
-    if (!agentPath || !selectedFlowId) return;
-    setHistoryLoading(true);
-    try {
-      const res = await fetch(`/api/agents/${agentPath}/events`);
-      if (res.ok) {
-        const data: StatusEvent[] = await res.json();
-        const filtered = data.filter(
-          (e) => e.type === "dp_run" && e.flowId === selectedFlowId,
-        );
-        filtered.sort(
-          (a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime(),
-        );
-        setHistoryEvents(filtered);
-      }
-    } catch {
-      // best-effort
-    } finally {
-      setHistoryLoading(false);
-    }
-  }, [agentPath, selectedFlowId]);
-
-  useEffect(() => {
-    if (selectedFlowRowKey) {
-      fetchHistory();
-    } else {
-      setHistoryEvents([]);
-    }
-  }, [selectedFlowRowKey, fetchHistory]);
+  const historyEvents = useMemo(() => {
+    if (!selectedFlowId) return [];
+    return [...statusEvents]
+      .filter((e) => e.type === "dp_run" && e.flowId === selectedFlowId)
+      .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+  }, [statusEvents, selectedFlowId]);
 
   function handleRowClick(rowKey: string, e: React.MouseEvent) {
     const target = e.target as HTMLElement;
@@ -485,9 +462,7 @@ export default function FlowsPanel({
               </button>
             </div>
             <div className="flows-history-body">
-              {historyLoading ? (
-                <p className="flows-history-empty">Loading...</p>
-              ) : historyEvents.length === 0 ? (
+              {historyEvents.length === 0 ? (
                 <p className="flows-history-empty">No executions recorded for this flow.</p>
               ) : (
                 historyEvents.map((evt, idx) => {

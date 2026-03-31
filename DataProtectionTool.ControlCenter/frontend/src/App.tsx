@@ -1155,9 +1155,14 @@ export default function App() {
     const key = tableKey(rowKey, schema, tableName);
     setDryRunningTables((prev) => new Set(prev).add(key));
 
+    const trackedFlowId = flowRowKey
+      ? (flowRowKey.startsWith("flow_") ? flowRowKey.slice("flow_".length) : flowRowKey)
+      : undefined;
+
     const trackedEvent: StatusEvent = {
       timestamp: new Date().toISOString(),
       type: "dp_run",
+      flowId: trackedFlowId,
       summary: `DP run started: ${schema}.${tableName}`,
       detail: "",
       steps: [],
@@ -1379,6 +1384,7 @@ export default function App() {
         {leftPanel === "flows" ? (
           <FlowsPanel
             agentPath={getAgentPath() ?? ""}
+            statusEvents={statusEvents}
             onSwitchPanel={setLeftPanel}
             onRunFlows={handleRunFlows}
           />
