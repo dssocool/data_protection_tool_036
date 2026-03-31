@@ -568,7 +568,7 @@ export default function DataPreviewPanel({
             return (
               <div className="dry-run-status-view">
                 <div className="dry-run-status-spinner" />
-                <div className="dry-run-status-text">{activeDryRun.status ?? "Starting dry run..."}</div>
+                <div className="dry-run-status-text">{activeDryRun.status ?? "Starting DP preview..."}</div>
               </div>
             );
           }

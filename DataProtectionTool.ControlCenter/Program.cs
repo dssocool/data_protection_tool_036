@@ -429,13 +429,13 @@ app.MapGet("/api/agents/{path}/list-schemas", async (string path, string rowKey,
     }
 });
 
-app.MapPost("/api/agents/{path}/preview-table", async (string path, HttpRequest request, AgentRegistry registry, ClientTableService clientTableService, BlobServiceClient blobClient) =>
+app.MapPost("/api/agents/{path}/sample-table", async (string path, HttpRequest request, AgentRegistry registry, ClientTableService clientTableService, BlobServiceClient blobClient) =>
 {
     if (!registry.TryGetConnection(path, out var connection) || connection is null)
     {
-        var notFoundEvtSummary = "Preview table failed: agent not connected";
+        var notFoundEvtSummary = "Sample table failed: agent not connected";
         return Results.Ok(new { success = false, message = "Agent not found or not connected.",
-            @event = new { timestamp = DateTime.UtcNow.ToString("O"), type = "preview_table", summary = notFoundEvtSummary, detail = "" } });
+            @event = new { timestamp = DateTime.UtcNow.ToString("O"), type = "sample_table", summary = notFoundEvtSummary, detail = "" } });
     }
 
     var partitionKey = ClientEntity.BuildPartitionKey(connection.Info.Oid, connection.Info.Tid);
@@ -486,10 +486,10 @@ app.MapPost("/api/agents/{path}/preview-table", async (string path, HttpRequest 
 
             if (allBlobsExist)
             {
-                var evtSummary = $"Preview table (cached): {tableLabel}";
-                _ = clientTableService.AppendEventAsync(partitionKey, "preview_table", evtSummary);
+                var evtSummary = $"Sample table (cached): {tableLabel}";
+                _ = clientTableService.AppendEventAsync(partitionKey, "sample_table", evtSummary);
                 return Results.Ok(new { success = true, filenames = cachedFilenames, cached = true,
-                    @event = new { timestamp = DateTime.UtcNow.ToString("O"), type = "preview_table", summary = evtSummary, detail = "" } });
+                    @event = new { timestamp = DateTime.UtcNow.ToString("O"), type = "sample_table", summary = evtSummary, detail = "" } });
             }
 
             await clientTableService.UpdatePreviewFileListAsync(dataItem, "");
@@ -501,15 +501,15 @@ app.MapPost("/api/agents/{path}/preview-table", async (string path, HttpRequest 
         var uniqueId = await clientTableService.GetUserIdAsync(partitionKey);
         if (string.IsNullOrWhiteSpace(uniqueId) || !IsDigitsOnly(uniqueId))
         {
-            var missingIdEvtSummary = $"Preview table failed: {tableLabel}";
+            var missingIdEvtSummary = $"Sample table failed: {tableLabel}";
             var missingIdDetail = "User unique ID is missing.";
-            _ = clientTableService.AppendEventAsync(partitionKey, "preview_table", missingIdEvtSummary, missingIdDetail);
+            _ = clientTableService.AppendEventAsync(partitionKey, "sample_table", missingIdEvtSummary, missingIdDetail);
             return Results.Ok(new { success = false, message = missingIdDetail,
-                @event = new { timestamp = DateTime.UtcNow.ToString("O"), type = "preview_table", summary = missingIdEvtSummary, detail = missingIdDetail } });
+                @event = new { timestamp = DateTime.UtcNow.ToString("O"), type = "sample_table", summary = missingIdEvtSummary, detail = missingIdDetail } });
         }
 
         var requestBody = AddFieldsToPayload(body, new { uniqueId, sqlStatement = $"SELECT * FROM [{schema}].[{tName}] TABLESAMPLE (200 ROWS)" });
-        var result = await connection.SendCommandAsync("preview_table", requestBody, TimeSpan.FromSeconds(60));
+        var result = await connection.SendCommandAsync("sample_table", requestBody, TimeSpan.FromSeconds(60));
 
         if (dataItem != null)
         {
@@ -547,37 +547,37 @@ app.MapPost("/api/agents/{path}/preview-table", async (string path, HttpRequest 
         catch { }
 
         var previewEvtSummary = previewSuccess
-            ? $"Preview table: {tableLabel}"
-            : $"Preview table failed: {tableLabel}";
+            ? $"Sample table: {tableLabel}"
+            : $"Sample table failed: {tableLabel}";
         var previewEvtDetail = previewSuccess ? "" : failMessage;
-        _ = clientTableService.AppendEventAsync(partitionKey, "preview_table", previewEvtSummary, previewEvtDetail);
-        var evtJson = JsonSerializer.Serialize(new { timestamp = DateTime.UtcNow.ToString("O"), type = "preview_table", summary = previewEvtSummary, detail = previewEvtDetail });
+        _ = clientTableService.AppendEventAsync(partitionKey, "sample_table", previewEvtSummary, previewEvtDetail);
+        var evtJson = JsonSerializer.Serialize(new { timestamp = DateTime.UtcNow.ToString("O"), type = "sample_table", summary = previewEvtSummary, detail = previewEvtDetail });
         var injected = result.TrimEnd().TrimEnd('}') + $",\"event\":{evtJson}}}";
         return Results.Content(injected, "application/json");
     }
     catch (TimeoutException)
     {
-        var evtSummary = $"Preview table timeout: {tableLabel}";
-        _ = clientTableService.AppendEventAsync(partitionKey, "preview_table", evtSummary);
+        var evtSummary = $"Sample table timeout: {tableLabel}";
+        _ = clientTableService.AppendEventAsync(partitionKey, "sample_table", evtSummary);
         return Results.Ok(new { success = false, message = "Agent did not respond within 60 seconds.",
-            @event = new { timestamp = DateTime.UtcNow.ToString("O"), type = "preview_table", summary = evtSummary, detail = "" } });
+            @event = new { timestamp = DateTime.UtcNow.ToString("O"), type = "sample_table", summary = evtSummary, detail = "" } });
     }
     catch (Exception ex)
     {
-        var evtSummary = $"Preview table error: {ex.Message}";
-        _ = clientTableService.AppendEventAsync(partitionKey, "preview_table", evtSummary);
-        return Results.Ok(new { success = false, message = $"Preview table error: {ex.Message}",
-            @event = new { timestamp = DateTime.UtcNow.ToString("O"), type = "preview_table", summary = evtSummary, detail = "" } });
+        var evtSummary = $"Sample table error: {ex.Message}";
+        _ = clientTableService.AppendEventAsync(partitionKey, "sample_table", evtSummary);
+        return Results.Ok(new { success = false, message = $"Sample table error: {ex.Message}",
+            @event = new { timestamp = DateTime.UtcNow.ToString("O"), type = "sample_table", summary = evtSummary, detail = "" } });
     }
 });
 
-app.MapPost("/api/agents/{path}/reload-preview-table", async (string path, HttpRequest request, AgentRegistry registry, ClientTableService clientTableService, BlobServiceClient blobClient) =>
+app.MapPost("/api/agents/{path}/reload-sample-table", async (string path, HttpRequest request, AgentRegistry registry, ClientTableService clientTableService, BlobServiceClient blobClient) =>
 {
     if (!registry.TryGetConnection(path, out var connection) || connection is null)
     {
-        var notFoundEvtSummary = "Reload preview table failed: agent not connected";
+        var notFoundEvtSummary = "Reload sample table failed: agent not connected";
         return Results.Ok(new { success = false, message = "Agent not found or not connected.",
-            @event = new { timestamp = DateTime.UtcNow.ToString("O"), type = "preview_table", summary = notFoundEvtSummary, detail = "" } });
+            @event = new { timestamp = DateTime.UtcNow.ToString("O"), type = "sample_table", summary = notFoundEvtSummary, detail = "" } });
     }
 
     var partitionKey = ClientEntity.BuildPartitionKey(connection.Info.Oid, connection.Info.Tid);
@@ -596,10 +596,10 @@ app.MapPost("/api/agents/{path}/reload-preview-table", async (string path, HttpR
     }
     catch
     {
-        var invalidBodyEvtSummary = "Reload preview table failed: invalid request body";
-        _ = clientTableService.AppendEventAsync(partitionKey, "preview_table", invalidBodyEvtSummary);
+        var invalidBodyEvtSummary = "Reload sample table failed: invalid request body";
+        _ = clientTableService.AppendEventAsync(partitionKey, "sample_table", invalidBodyEvtSummary);
         return Results.Ok(new { success = false, message = "Invalid request body.",
-            @event = new { timestamp = DateTime.UtcNow.ToString("O"), type = "preview_table", summary = invalidBodyEvtSummary, detail = "" } });
+            @event = new { timestamp = DateTime.UtcNow.ToString("O"), type = "sample_table", summary = invalidBodyEvtSummary, detail = "" } });
     }
 
     var tableLabel = $"{schema}.{tName}";
@@ -615,15 +615,15 @@ app.MapPost("/api/agents/{path}/reload-preview-table", async (string path, HttpR
         var uniqueId = await clientTableService.GetUserIdAsync(partitionKey);
         if (string.IsNullOrWhiteSpace(uniqueId) || !IsDigitsOnly(uniqueId))
         {
-            var missingIdEvtSummary = $"Reload preview table failed: {tableLabel}";
+            var missingIdEvtSummary = $"Reload sample table failed: {tableLabel}";
             var missingIdDetail = "User unique ID is missing.";
-            _ = clientTableService.AppendEventAsync(partitionKey, "preview_table", missingIdEvtSummary, missingIdDetail);
+            _ = clientTableService.AppendEventAsync(partitionKey, "sample_table", missingIdEvtSummary, missingIdDetail);
             return Results.Ok(new { success = false, message = missingIdDetail,
-                @event = new { timestamp = DateTime.UtcNow.ToString("O"), type = "preview_table", summary = missingIdEvtSummary, detail = missingIdDetail } });
+                @event = new { timestamp = DateTime.UtcNow.ToString("O"), type = "sample_table", summary = missingIdEvtSummary, detail = missingIdDetail } });
         }
 
         var requestBody = AddFieldsToPayload(body, new { uniqueId, sqlStatement = $"SELECT * FROM [{schema}].[{tName}] TABLESAMPLE (200 ROWS)" });
-        var result = await connection.SendCommandAsync("preview_table", requestBody, TimeSpan.FromSeconds(60));
+        var result = await connection.SendCommandAsync("sample_table", requestBody, TimeSpan.FromSeconds(60));
 
         if (dataItem != null)
         {
@@ -661,27 +661,27 @@ app.MapPost("/api/agents/{path}/reload-preview-table", async (string path, HttpR
         catch { }
 
         var reloadEvtSummary = reloadSuccess
-            ? $"Reload preview table: {tableLabel}"
-            : $"Reload preview table failed: {tableLabel}";
+            ? $"Reload sample table: {tableLabel}"
+            : $"Reload sample table failed: {tableLabel}";
         var reloadEvtDetail = reloadSuccess ? "" : reloadFailMessage;
-        _ = clientTableService.AppendEventAsync(partitionKey, "preview_table", reloadEvtSummary, reloadEvtDetail);
-        var evtJson = JsonSerializer.Serialize(new { timestamp = DateTime.UtcNow.ToString("O"), type = "preview_table", summary = reloadEvtSummary, detail = reloadEvtDetail });
+        _ = clientTableService.AppendEventAsync(partitionKey, "sample_table", reloadEvtSummary, reloadEvtDetail);
+        var evtJson = JsonSerializer.Serialize(new { timestamp = DateTime.UtcNow.ToString("O"), type = "sample_table", summary = reloadEvtSummary, detail = reloadEvtDetail });
         var injected = result.TrimEnd().TrimEnd('}') + $",\"event\":{evtJson}}}";
         return Results.Content(injected, "application/json");
     }
     catch (TimeoutException)
     {
-        var evtSummary = $"Reload preview table timeout: {tableLabel}";
-        _ = clientTableService.AppendEventAsync(partitionKey, "preview_table", evtSummary);
+        var evtSummary = $"Reload sample table timeout: {tableLabel}";
+        _ = clientTableService.AppendEventAsync(partitionKey, "sample_table", evtSummary);
         return Results.Ok(new { success = false, message = "Agent did not respond within 60 seconds.",
-            @event = new { timestamp = DateTime.UtcNow.ToString("O"), type = "preview_table", summary = evtSummary, detail = "" } });
+            @event = new { timestamp = DateTime.UtcNow.ToString("O"), type = "sample_table", summary = evtSummary, detail = "" } });
     }
     catch (Exception ex)
     {
-        var evtSummary = $"Reload preview table error: {ex.Message}";
-        _ = clientTableService.AppendEventAsync(partitionKey, "preview_table", evtSummary);
-        return Results.Ok(new { success = false, message = $"Reload preview table error: {ex.Message}",
-            @event = new { timestamp = DateTime.UtcNow.ToString("O"), type = "preview_table", summary = evtSummary, detail = "" } });
+        var evtSummary = $"Reload sample table error: {ex.Message}";
+        _ = clientTableService.AppendEventAsync(partitionKey, "sample_table", evtSummary);
+        return Results.Ok(new { success = false, message = $"Reload sample table error: {ex.Message}",
+            @event = new { timestamp = DateTime.UtcNow.ToString("O"), type = "sample_table", summary = evtSummary, detail = "" } });
     }
 });
 
@@ -978,13 +978,13 @@ app.MapPost("/api/agents/{path}/save-query", async (string path, HttpRequest req
     }
 });
 
-app.MapPost("/api/agents/{path}/preview-query", async (string path, HttpRequest request, AgentRegistry registry, ClientTableService clientTableService) =>
+app.MapPost("/api/agents/{path}/sample-query", async (string path, HttpRequest request, AgentRegistry registry, ClientTableService clientTableService) =>
 {
     if (!registry.TryGetConnection(path, out var connection) || connection is null)
     {
-        var notFoundEvtSummary = "Preview query failed: agent not connected";
+        var notFoundEvtSummary = "Sample query failed: agent not connected";
         return Results.Ok(new { success = false, message = "Agent not found or not connected.",
-            @event = new { timestamp = DateTime.UtcNow.ToString("O"), type = "preview_query", summary = notFoundEvtSummary, detail = "" } });
+            @event = new { timestamp = DateTime.UtcNow.ToString("O"), type = "sample_query", summary = notFoundEvtSummary, detail = "" } });
     }
 
     var partitionKey = ClientEntity.BuildPartitionKey(connection.Info.Oid, connection.Info.Tid);
@@ -998,11 +998,11 @@ app.MapPost("/api/agents/{path}/preview-query", async (string path, HttpRequest 
         var uniqueId = await clientTableService.GetUserIdAsync(partitionKey);
         if (string.IsNullOrWhiteSpace(uniqueId) || !IsDigitsOnly(uniqueId))
         {
-            var missingIdEvtSummary = "Preview query failed";
+            var missingIdEvtSummary = "Sample query failed";
             var missingIdDetail = "User unique ID is missing.";
-            _ = clientTableService.AppendEventAsync(partitionKey, "preview_query", missingIdEvtSummary, missingIdDetail);
+            _ = clientTableService.AppendEventAsync(partitionKey, "sample_query", missingIdEvtSummary, missingIdDetail);
             return Results.Ok(new { success = false, message = missingIdDetail,
-                @event = new { timestamp = DateTime.UtcNow.ToString("O"), type = "preview_query", summary = missingIdEvtSummary, detail = missingIdDetail } });
+                @event = new { timestamp = DateTime.UtcNow.ToString("O"), type = "sample_query", summary = missingIdEvtSummary, detail = missingIdDetail } });
         }
 
         string queryText = "";
@@ -1018,7 +1018,7 @@ app.MapPost("/api/agents/{path}/preview-query", async (string path, HttpRequest 
             uniqueId,
             sqlStatement = $"SELECT TOP 200 * FROM ({queryText}) AS _q"
         });
-        var result = await connection.SendCommandAsync("preview_query", requestBody, TimeSpan.FromSeconds(60));
+        var result = await connection.SendCommandAsync("sample_query", requestBody, TimeSpan.FromSeconds(60));
 
         var querySuccess = true;
         var queryFailMessage = "";
@@ -1034,27 +1034,27 @@ app.MapPost("/api/agents/{path}/preview-query", async (string path, HttpRequest 
         catch { }
 
         var queryEvtSummary = querySuccess
-            ? "Preview query completed"
-            : "Preview query failed";
+            ? "Sample query completed"
+            : "Sample query failed";
         var queryEvtDetail = querySuccess ? "" : queryFailMessage;
-        _ = clientTableService.AppendEventAsync(partitionKey, "preview_query", queryEvtSummary, queryEvtDetail);
-        var evtJson = JsonSerializer.Serialize(new { timestamp = DateTime.UtcNow.ToString("O"), type = "preview_query", summary = queryEvtSummary, detail = queryEvtDetail });
+        _ = clientTableService.AppendEventAsync(partitionKey, "sample_query", queryEvtSummary, queryEvtDetail);
+        var evtJson = JsonSerializer.Serialize(new { timestamp = DateTime.UtcNow.ToString("O"), type = "sample_query", summary = queryEvtSummary, detail = queryEvtDetail });
         var injected = result.TrimEnd().TrimEnd('}') + $",\"event\":{evtJson}}}";
         return Results.Content(injected, "application/json");
     }
     catch (TimeoutException)
     {
-        var evtSummary = "Preview query: timeout";
-        _ = clientTableService.AppendEventAsync(partitionKey, "preview_query", evtSummary);
+        var evtSummary = "Sample query: timeout";
+        _ = clientTableService.AppendEventAsync(partitionKey, "sample_query", evtSummary);
         return Results.Ok(new { success = false, message = "Agent did not respond within 60 seconds.",
-            @event = new { timestamp = DateTime.UtcNow.ToString("O"), type = "preview_query", summary = evtSummary, detail = "" } });
+            @event = new { timestamp = DateTime.UtcNow.ToString("O"), type = "sample_query", summary = evtSummary, detail = "" } });
     }
     catch (Exception ex)
     {
-        var evtSummary = $"Preview query error: {ex.Message}";
-        _ = clientTableService.AppendEventAsync(partitionKey, "preview_query", evtSummary);
-        return Results.Ok(new { success = false, message = $"Preview query error: {ex.Message}",
-            @event = new { timestamp = DateTime.UtcNow.ToString("O"), type = "preview_query", summary = evtSummary, detail = "" } });
+        var evtSummary = $"Sample query error: {ex.Message}";
+        _ = clientTableService.AppendEventAsync(partitionKey, "sample_query", evtSummary);
+        return Results.Ok(new { success = false, message = $"Sample query error: {ex.Message}",
+            @event = new { timestamp = DateTime.UtcNow.ToString("O"), type = "sample_query", summary = evtSummary, detail = "" } });
     }
 });
 
@@ -1077,7 +1077,7 @@ app.MapGet("/api/agents/{path}/queries", async (string path, string connectionRo
     return Results.Ok(result);
 });
 
-app.MapPost("/api/agents/{path}/dry-run", async (string path, HttpContext httpContext, AgentRegistry registry,
+app.MapPost("/api/agents/{path}/dp-preview", async (string path, HttpContext httpContext, AgentRegistry registry,
     ClientTableService clientTableService, DataEngineConfig dataEngineConfig,
     BlobServiceClient blobClient, BlobStorageConfig blobConfig,
     EngineApiClient engineApi, EngineMetadataService metadataService) =>
@@ -1544,10 +1544,10 @@ app.MapPost("/api/agents/{path}/dry-run", async (string path, HttpContext httpCo
             maskedFilenames.Add(maskedName);
         }
 
-        var dryRunEvtSummary = $"Dry run completed: fileFormatId={fileFormatId}, fileRulesetId={fileRulesetId}, " +
+        var dryRunEvtSummary = $"DP preview completed: fileFormatId={fileFormatId}, fileRulesetId={fileRulesetId}, " +
             $"profileJobId={profileJobId} ({profileStatus}), maskingJobId={maskingJobId} ({maskingStatus})";
-        _ = clientTableService.AppendEventAsync(partitionKey, "dry_run", dryRunEvtSummary);
-        await WriteSseEvent("event", JsonSerializer.Serialize(new { timestamp = DateTime.UtcNow.ToString("O"), type = "dry_run", summary = dryRunEvtSummary, detail = "" }));
+        _ = clientTableService.AppendEventAsync(partitionKey, "dp_preview", dryRunEvtSummary);
+        await WriteSseEvent("event", JsonSerializer.Serialize(new { timestamp = DateTime.UtcNow.ToString("O"), type = "dp_preview", summary = dryRunEvtSummary, detail = "" }));
 
         var completeJson = JsonSerializer.Serialize(new
         {
@@ -1566,22 +1566,22 @@ app.MapPost("/api/agents/{path}/dry-run", async (string path, HttpContext httpCo
     }
     catch (TimeoutException)
     {
-        var evtSummary = "Dry run: timeout";
+        var evtSummary = "DP preview: timeout";
         var evtDetail = "Agent did not respond within 120 seconds.";
-        _ = clientTableService.AppendEventAsync(partitionKey, "dry_run", evtSummary, evtDetail);
-        await WriteSseEvent("event", JsonSerializer.Serialize(new { timestamp = DateTime.UtcNow.ToString("O"), type = "dry_run", summary = evtSummary, detail = evtDetail }));
+        _ = clientTableService.AppendEventAsync(partitionKey, "dp_preview", evtSummary, evtDetail);
+        await WriteSseEvent("event", JsonSerializer.Serialize(new { timestamp = DateTime.UtcNow.ToString("O"), type = "dp_preview", summary = evtSummary, detail = evtDetail }));
         await WriteSseError("Agent did not respond within 120 seconds.");
     }
     catch (Exception ex)
     {
-        var evtSummary = $"Dry run error: {ex.Message}";
-        _ = clientTableService.AppendEventAsync(partitionKey, "dry_run", evtSummary);
-        await WriteSseEvent("event", JsonSerializer.Serialize(new { timestamp = DateTime.UtcNow.ToString("O"), type = "dry_run", summary = evtSummary, detail = "" }));
-        await WriteSseError($"Dry run error: {ex.Message}");
+        var evtSummary = $"DP preview error: {ex.Message}";
+        _ = clientTableService.AppendEventAsync(partitionKey, "dp_preview", evtSummary);
+        await WriteSseEvent("event", JsonSerializer.Serialize(new { timestamp = DateTime.UtcNow.ToString("O"), type = "dp_preview", summary = evtSummary, detail = "" }));
+        await WriteSseError($"DP preview error: {ex.Message}");
     }
 });
 
-app.MapPost("/api/agents/{path}/full-run", async (string path, HttpContext httpContext, AgentRegistry registry,
+app.MapPost("/api/agents/{path}/dp-run", async (string path, HttpContext httpContext, AgentRegistry registry,
     ClientTableService clientTableService, DataEngineConfig dataEngineConfig,
     BlobServiceClient blobClient, BlobStorageConfig blobConfig,
     EngineApiClient engineApi) =>
@@ -1708,9 +1708,9 @@ app.MapPost("/api/agents/{path}/full-run", async (string path, HttpContext httpC
             return;
         }
 
-        var exportEvtSummary = $"Full run: exported {exportFilenames.Count} file(s) for {schema}.{tableName}";
-        _ = clientTableService.AppendEventAsync(partitionKey, "full_run", exportEvtSummary);
-        await WriteSseEvent("event", JsonSerializer.Serialize(new { timestamp = DateTime.UtcNow.ToString("O"), type = "full_run", summary = exportEvtSummary, detail = "" }));
+        var exportEvtSummary = $"DP run: exported {exportFilenames.Count} file(s) for {schema}.{tableName}";
+        _ = clientTableService.AppendEventAsync(partitionKey, "dp_run", exportEvtSummary);
+        await WriteSseEvent("event", JsonSerializer.Serialize(new { timestamp = DateTime.UtcNow.ToString("O"), type = "dp_run", summary = exportEvtSummary, detail = "" }));
 
         // Step 2: Create file ruleset
         await WriteSseEvent("status", "Creating file ruleset...");
@@ -1866,11 +1866,11 @@ app.MapPost("/api/agents/{path}/full-run", async (string path, HttpContext httpC
             }
         }
 
-        var fullRunEvtSummary = $"Full run completed: fileFormatId={fileFormatId}, fileRulesetId={fileRulesetId}, " +
+        var fullRunEvtSummary = $"DP run completed: fileFormatId={fileFormatId}, fileRulesetId={fileRulesetId}, " +
             $"maskingJobId={maskingJobId} ({maskingStatus}), files={exportFilenames.Count}, " +
             $"destination=[{destSchema}].{tableName}";
-        _ = clientTableService.AppendEventAsync(partitionKey, "full_run", fullRunEvtSummary);
-        await WriteSseEvent("event", JsonSerializer.Serialize(new { timestamp = DateTime.UtcNow.ToString("O"), type = "full_run", summary = fullRunEvtSummary, detail = "" }));
+        _ = clientTableService.AppendEventAsync(partitionKey, "dp_run", fullRunEvtSummary);
+        await WriteSseEvent("event", JsonSerializer.Serialize(new { timestamp = DateTime.UtcNow.ToString("O"), type = "dp_run", summary = fullRunEvtSummary, detail = "" }));
 
         var completeJson = JsonSerializer.Serialize(new
         {
@@ -1886,18 +1886,18 @@ app.MapPost("/api/agents/{path}/full-run", async (string path, HttpContext httpC
     }
     catch (TimeoutException)
     {
-        var evtSummary = "Full run: timeout";
+        var evtSummary = "DP run: timeout";
         var evtDetail = "Agent did not respond in time.";
-        _ = clientTableService.AppendEventAsync(partitionKey, "full_run", evtSummary, evtDetail);
-        await WriteSseEvent("event", JsonSerializer.Serialize(new { timestamp = DateTime.UtcNow.ToString("O"), type = "full_run", summary = evtSummary, detail = evtDetail }));
+        _ = clientTableService.AppendEventAsync(partitionKey, "dp_run", evtSummary, evtDetail);
+        await WriteSseEvent("event", JsonSerializer.Serialize(new { timestamp = DateTime.UtcNow.ToString("O"), type = "dp_run", summary = evtSummary, detail = evtDetail }));
         await WriteSseError("Agent did not respond in time.");
     }
     catch (Exception ex)
     {
-        var evtSummary = $"Full run error: {ex.Message}";
-        _ = clientTableService.AppendEventAsync(partitionKey, "full_run", evtSummary);
-        await WriteSseEvent("event", JsonSerializer.Serialize(new { timestamp = DateTime.UtcNow.ToString("O"), type = "full_run", summary = evtSummary, detail = "" }));
-        await WriteSseError($"Full run error: {ex.Message}");
+        var evtSummary = $"DP run error: {ex.Message}";
+        _ = clientTableService.AppendEventAsync(partitionKey, "dp_run", evtSummary);
+        await WriteSseEvent("event", JsonSerializer.Serialize(new { timestamp = DateTime.UtcNow.ToString("O"), type = "dp_run", summary = evtSummary, detail = "" }));
+        await WriteSseError($"DP run error: {ex.Message}");
     }
 });
 

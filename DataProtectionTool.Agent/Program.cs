@@ -111,14 +111,14 @@ while (!cts.Token.IsCancellationRequested)
             ["execute_sql"] = msg =>
                 _ = RunCommandAsync(call, agentId, oid, tid, userName, msg.Payload, "execute_sql_result",
                     (cid, root) => HandleExecuteSqlCore(cid, root, call, agentId, oid, tid, userName, connectionManager)),
-            ["preview_table"] = msg =>
-                _ = RunCommandAsync(call, agentId, oid, tid, userName, msg.Payload, "preview_table_result",
+            ["sample_table"] = msg =>
+                _ = RunCommandAsync(call, agentId, oid, tid, userName, msg.Payload, "sample_table_result",
                     (cid, root) => HandlePreviewTableCore(cid, root, call, agentId, oid, tid, userName, connectionManager, sasTokenManager)),
             ["validate_query"] = msg =>
                 _ = RunCommandAsync(call, agentId, oid, tid, userName, msg.Payload, "validate_query_result",
                     (cid, root) => HandleValidateQueryCore(cid, root, call, agentId, oid, tid, userName, connectionManager)),
-            ["preview_query"] = msg =>
-                _ = RunCommandAsync(call, agentId, oid, tid, userName, msg.Payload, "preview_query_result",
+            ["sample_query"] = msg =>
+                _ = RunCommandAsync(call, agentId, oid, tid, userName, msg.Payload, "sample_query_result",
                     (cid, root) => HandlePreviewQueryCore(cid, root, call, agentId, oid, tid, userName, connectionManager, sasTokenManager)),
             ["http_request"] = msg =>
                 _ = RunCommandAsync(call, agentId, oid, tid, userName, msg.Payload, "http_request_result", HandleHttpRequestCore),

@@ -546,7 +546,7 @@ export default function App() {
     }
 
     try {
-      const res = await fetch(`/api/agents/${agentPath}/preview-table`, {
+      const res = await fetch(`/api/agents/${agentPath}/sample-table`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ rowKey, schema, tableName }),
@@ -689,7 +689,7 @@ export default function App() {
       if (cached) {
         filenames = cached;
       } else {
-        const res = await fetch(`/api/agents/${agentPath}/preview-query`, {
+        const res = await fetch(`/api/agents/${agentPath}/sample-query`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ connectionRowKey, queryText }),
@@ -730,7 +730,7 @@ export default function App() {
       setPreviewError(null);
 
       try {
-        const res = await fetch(`/api/agents/${agentPath}/preview-table`, {
+        const res = await fetch(`/api/agents/${agentPath}/sample-table`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -814,7 +814,7 @@ export default function App() {
         setActivePreviewTab("Sample 1");
         setDiffTab(null);
 
-        const previewRes = await fetch(`/api/agents/${agentPath}/preview-table`, {
+        const previewRes = await fetch(`/api/agents/${agentPath}/sample-table`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ rowKey, schema, tableName }),
@@ -847,8 +847,8 @@ export default function App() {
 
       const currentCached = tableCacheRef.current.get(key);
       const prevDryRuns = currentCached?.dryRuns ?? dryRuns;
-      const newLabel = `Dry Run ${prevDryRuns.length + 1}`;
-      const pendingDryRun: DryRunResult = { label: newLabel, data: null, status: "Starting dry run...", inProgress: true };
+      const newLabel = `DP Preview ${prevDryRuns.length + 1}`;
+      const pendingDryRun: DryRunResult = { label: newLabel, data: null, status: "Starting DP preview...", inProgress: true };
       const updatedDryRunsWithPending = [...prevDryRuns, pendingDryRun];
 
       setDryRuns(updatedDryRunsWithPending);
@@ -902,8 +902,8 @@ export default function App() {
       const dryRunTrackedTs = new Date().toISOString();
       const dryRunTrackedEvent: StatusEvent = {
         timestamp: dryRunTrackedTs,
-        type: "dry_run",
-        summary: `Dry run started: ${schema}.${tableName}`,
+        type: "dp_preview",
+        summary: `DP preview started: ${schema}.${tableName}`,
         detail: "",
         steps: [],
       };
@@ -911,7 +911,7 @@ export default function App() {
 
       const updateDryRunTrackedSteps = (stepMsg: string, stepStatus: "running" | "done" | "error") => {
         setStatusEvents(prev => prev.map(evt => {
-          if (evt.timestamp !== dryRunTrackedTs || evt.type !== "dry_run" || !evt.steps) return evt;
+          if (evt.timestamp !== dryRunTrackedTs || evt.type !== "dp_preview" || !evt.steps) return evt;
           const steps = evt.steps.map(s => {
             if (s.status !== "running") return s;
             const closedStatus = s.message.includes("(skipped") ? "skipped" as const : "done" as const;
@@ -926,7 +926,7 @@ export default function App() {
 
       const finalizeDryRunTrackedEvent = (summary: string, lastStepStatus: "done" | "error") => {
         setStatusEvents(prev => prev.map(evt => {
-          if (evt.timestamp !== dryRunTrackedTs || evt.type !== "dry_run" || !evt.steps) return evt;
+          if (evt.timestamp !== dryRunTrackedTs || evt.type !== "dp_preview" || !evt.steps) return evt;
           const steps = evt.steps.map(s => {
             if (s.status !== "running") return s;
             if (s.message.includes("(skipped")) return { ...s, status: "skipped" as const };
@@ -937,7 +937,7 @@ export default function App() {
       };
 
       try {
-        const response = await fetch(`/api/agents/${agentPath}/dry-run`, {
+        const response = await fetch(`/api/agents/${agentPath}/dp-preview`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -948,8 +948,8 @@ export default function App() {
         });
 
         if (!response.ok) {
-          finalizeDryRunTrackedEvent(`Dry run failed: server error ${response.status}`, "error");
-          finalizeDryRunError(`Dry run request failed: server error ${response.status}`);
+          finalizeDryRunTrackedEvent(`DP preview failed: server error ${response.status}`, "error");
+          finalizeDryRunError(`DP preview request failed: server error ${response.status}`);
           return;
         }
 
@@ -978,7 +978,7 @@ export default function App() {
             if (eventType === "event") {
               try {
                 const parsed = JSON.parse(eventData);
-                finalizeDryRunTrackedEvent(parsed.summary ?? `Dry run completed: ${schema}.${tableName}`, "done");
+                finalizeDryRunTrackedEvent(parsed.summary ?? `DP preview completed: ${schema}.${tableName}`, "done");
               } catch { /* ignore parse errors */ }
             } else if (eventType === "status") {
               updateDryRunTrackedSteps(eventData, "running");
@@ -1073,7 +1073,7 @@ export default function App() {
                 setDryRunningTables((prev) => { const next = new Set(prev); next.delete(key); return next; });
               }
             } else if (eventType === "error") {
-              let errMsg = "Dry run failed.";
+              let errMsg = "DP preview failed.";
               try {
                 const parsed = JSON.parse(eventData);
                 errMsg = parsed.message ?? errMsg;
@@ -1101,11 +1101,11 @@ export default function App() {
         }
 
         if (!completed) {
-          finalizeDryRunTrackedEvent("Dry run stream ended unexpectedly.", "error");
-          finalizeDryRunError("Dry run stream ended unexpectedly.");
+          finalizeDryRunTrackedEvent("DP preview stream ended unexpectedly.", "error");
+          finalizeDryRunError("DP preview stream ended unexpectedly.");
         }
       } catch (e) {
-        const errMsg = `Dry run failed: ${e instanceof Error ? e.message : String(e)}`;
+        const errMsg = `DP preview failed: ${e instanceof Error ? e.message : String(e)}`;
         finalizeDryRunTrackedEvent(errMsg, "error");
         if (isViewingTable(rowKey, schema, tableName)) {
           finalizeDryRunError(errMsg);
@@ -1126,7 +1126,7 @@ export default function App() {
         }
       }
     } catch (e) {
-      setPreviewError(`Dry run failed: ${e instanceof Error ? e.message : String(e)}`);
+      setPreviewError(`DP preview failed: ${e instanceof Error ? e.message : String(e)}`);
       setPreviewLoading(false);
     }
   }
@@ -1156,8 +1156,8 @@ export default function App() {
 
     const trackedEvent: StatusEvent = {
       timestamp: new Date().toISOString(),
-      type: "full_run",
-      summary: `Full run started: ${schema}.${tableName}`,
+      type: "dp_run",
+      summary: `DP run started: ${schema}.${tableName}`,
       detail: "",
       steps: [],
     };
@@ -1165,7 +1165,7 @@ export default function App() {
 
     const updateTrackedSteps = (stepMsg: string, stepStatus: "running" | "done" | "error") => {
       setStatusEvents(prev => prev.map(evt => {
-        if (evt.timestamp !== trackedEvent.timestamp || evt.type !== "full_run" || !evt.steps) return evt;
+        if (evt.timestamp !== trackedEvent.timestamp || evt.type !== "dp_run" || !evt.steps) return evt;
         const steps = evt.steps.map(s => s.status === "running" ? { ...s, status: "done" as const } : s);
         if (stepStatus !== "done" || stepMsg) {
           steps.push({ timestamp: new Date().toISOString(), message: stepMsg, status: stepStatus });
@@ -1176,14 +1176,14 @@ export default function App() {
 
     const finalizeTrackedEvent = (summary: string, lastStepStatus: "done" | "error") => {
       setStatusEvents(prev => prev.map(evt => {
-        if (evt.timestamp !== trackedEvent.timestamp || evt.type !== "full_run" || !evt.steps) return evt;
+        if (evt.timestamp !== trackedEvent.timestamp || evt.type !== "dp_run" || !evt.steps) return evt;
         const steps = evt.steps.map(s => s.status === "running" ? { ...s, status: lastStepStatus } : s);
         return { ...evt, summary, steps };
       }));
     };
 
     try {
-      const response = await fetch(`/api/agents/${agentPath}/full-run`, {
+      const response = await fetch(`/api/agents/${agentPath}/dp-run`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -1196,7 +1196,7 @@ export default function App() {
       });
 
       if (!response.ok) {
-        finalizeTrackedEvent(`Full run failed: server error ${response.status}`, "error");
+        finalizeTrackedEvent(`DP run failed: server error ${response.status}`, "error");
         fetchEvents();
         return;
       }
@@ -1226,14 +1226,14 @@ export default function App() {
           if (eventType === "event") {
             try {
               const parsed = JSON.parse(eventData);
-              finalizeTrackedEvent(parsed.summary ?? `Full run completed: ${schema}.${tableName}`, "done");
+              finalizeTrackedEvent(parsed.summary ?? `DP run completed: ${schema}.${tableName}`, "done");
             } catch { /* ignore parse errors */ }
           } else if (eventType === "status") {
             updateTrackedSteps(eventData, "running");
           } else if (eventType === "complete") {
             completed = true;
           } else if (eventType === "error") {
-            let errMsg = "Full run failed.";
+            let errMsg = "DP run failed.";
             try {
               const parsed = JSON.parse(eventData);
               errMsg = parsed.message ?? errMsg;
@@ -1244,10 +1244,10 @@ export default function App() {
       }
 
       if (!completed) {
-        finalizeTrackedEvent("Full run stream ended unexpectedly.", "error");
+        finalizeTrackedEvent("DP run stream ended unexpectedly.", "error");
       }
     } catch (e) {
-      finalizeTrackedEvent(`Full run failed: ${e instanceof Error ? e.message : String(e)}`, "error");
+      finalizeTrackedEvent(`DP run failed: ${e instanceof Error ? e.message : String(e)}`, "error");
     } finally {
       setDryRunningTables((prev) => {
         const next = new Set(prev);
