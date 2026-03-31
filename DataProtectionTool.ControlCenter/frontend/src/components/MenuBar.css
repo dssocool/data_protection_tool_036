@@ -28,7 +28,7 @@
 
 .menu-top-button:hover,
 .menu-top-button.active {
-  background: #d4b8e8;
+  background: #fff;
 }
 
 /* Dropdown (first level, opens on click via React state) */
@@ -68,7 +68,7 @@
 
 .menu-item:hover > button,
 .menu-item:hover > span {
-  background: #e8e8e8;
+  background: #fff;
 }
 
 /* Arrow indicator for items with sub-menus */
