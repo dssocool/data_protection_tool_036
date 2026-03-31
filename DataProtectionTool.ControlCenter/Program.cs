@@ -1621,6 +1621,13 @@ app.MapPost("/api/agents/{path}/dp-run", async (string path, HttpContext httpCon
     response.Headers["Cache-Control"] = "no-cache";
     response.Headers["Connection"] = "keep-alive";
 
+    var flowId = "";
+    using (var preDoc = JsonDocument.Parse(body))
+    {
+        var flowRowKey = preDoc.RootElement.TryGetProperty("flowRowKey", out var frEl) ? frEl.GetString() ?? "" : "";
+        flowId = flowRowKey.StartsWith("flow_") ? flowRowKey["flow_".Length..] : flowRowKey;
+    }
+
     try
     {
         using var bodyDoc = JsonDocument.Parse(body);
@@ -1712,7 +1719,7 @@ app.MapPost("/api/agents/{path}/dp-run", async (string path, HttpContext httpCon
         }
 
         var exportEvtSummary = $"DP run: exported {exportFilenames.Count} file(s) for {schema}.{tableName}";
-        _ = clientTableService.AppendEventAsync(partitionKey, "dp_run", exportEvtSummary);
+        _ = clientTableService.AppendEventAsync(partitionKey, "dp_run", flowId, exportEvtSummary);
         await WriteSseEvent("event", JsonSerializer.Serialize(new { timestamp = DateTime.UtcNow.ToString("O"), type = "dp_run", summary = exportEvtSummary, detail = "" }));
 
         // Step 2: Create file ruleset
@@ -1872,7 +1879,7 @@ app.MapPost("/api/agents/{path}/dp-run", async (string path, HttpContext httpCon
         var fullRunEvtSummary = $"DP run completed: fileFormatId={fileFormatId}, fileRulesetId={fileRulesetId}, " +
             $"maskingJobId={maskingJobId} ({maskingStatus}), files={exportFilenames.Count}, " +
             $"destination=[{destSchema}].{tableName}";
-        _ = clientTableService.AppendEventAsync(partitionKey, "dp_run", fullRunEvtSummary);
+        _ = clientTableService.AppendEventAsync(partitionKey, "dp_run", flowId, fullRunEvtSummary);
         await WriteSseEvent("event", JsonSerializer.Serialize(new { timestamp = DateTime.UtcNow.ToString("O"), type = "dp_run", summary = fullRunEvtSummary, detail = "" }));
 
         var completeJson = JsonSerializer.Serialize(new
@@ -1891,14 +1898,14 @@ app.MapPost("/api/agents/{path}/dp-run", async (string path, HttpContext httpCon
     {
         var evtSummary = "DP run: timeout";
         var evtDetail = "Agent did not respond in time.";
-        _ = clientTableService.AppendEventAsync(partitionKey, "dp_run", evtSummary, evtDetail);
+        _ = clientTableService.AppendEventAsync(partitionKey, "dp_run", flowId, evtSummary, evtDetail);
         await WriteSseEvent("event", JsonSerializer.Serialize(new { timestamp = DateTime.UtcNow.ToString("O"), type = "dp_run", summary = evtSummary, detail = evtDetail }));
         await WriteSseError("Agent did not respond in time.");
     }
     catch (Exception ex)
     {
         var evtSummary = $"DP run error: {ex.Message}";
-        _ = clientTableService.AppendEventAsync(partitionKey, "dp_run", evtSummary);
+        _ = clientTableService.AppendEventAsync(partitionKey, "dp_run", flowId, evtSummary);
         await WriteSseEvent("event", JsonSerializer.Serialize(new { timestamp = DateTime.UtcNow.ToString("O"), type = "dp_run", summary = evtSummary, detail = "" }));
         await WriteSseError($"DP run error: {ex.Message}");
     }

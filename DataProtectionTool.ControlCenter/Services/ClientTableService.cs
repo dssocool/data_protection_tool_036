@@ -239,6 +239,19 @@ public class ClientTableService
         await _eventsTableClient.AddEntityAsync(entity);
     }
 
+    public async Task AppendEventAsync(string partitionKey, string type, string id, string summary, string detail = "")
+    {
+        EnsureEventsTableExists();
+        var now = DateTime.UtcNow;
+        var entity = new EventEntity
+        {
+            PartitionKey = partitionKey,
+            RowKey = EventEntity.BuildRowKeyWithId(type, id, now),
+            Value = JsonSerializer.Serialize(new { summary, detail })
+        };
+        await _eventsTableClient.AddEntityAsync(entity);
+    }
+
     public async Task<List<EventRecord>> GetEventsAsync(string partitionKey)
     {
         EnsureEventsTableExists();

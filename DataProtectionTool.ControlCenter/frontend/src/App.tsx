@@ -87,7 +87,7 @@ export default function App() {
   const tableCacheRef = useRef<Map<string, TablePreviewCache>>(new Map());
   const selectedTableRef = useRef(selectedTable);
   selectedTableRef.current = selectedTable;
-  const pendingSaveAndRunRef = useRef<{ destConnectionRowKey: string; destSchema: string; rowKey: string; schema: string; tableName: string } | null>(null);
+  const pendingSaveAndRunRef = useRef<{ destConnectionRowKey: string; destSchema: string; rowKey: string; schema: string; tableName: string; flowRowKey: string } | null>(null);
 
   const fetchEvents = useCallback(async () => {
     const agentPath = getAgentPath();
@@ -1141,6 +1141,7 @@ export default function App() {
     sourceRowKey?: string,
     sourceSchema?: string,
     sourceTableName?: string,
+    flowRowKey?: string,
   ) {
     const agentPath = getAgentPath();
     const target = sourceRowKey && sourceSchema && sourceTableName
@@ -1192,6 +1193,7 @@ export default function App() {
           tableName,
           destConnectionRowKey,
           destSchema,
+          flowRowKey: flowRowKey ?? "",
         }),
       });
 
@@ -1294,6 +1296,7 @@ export default function App() {
 
     const { rowKey, schema, tableName } = fullRunTarget;
 
+    let flowRowKey = "";
     try {
       const res = await fetch(`/api/agents/${agentPath}/save-flow`, {
         method: "POST",
@@ -1307,11 +1310,12 @@ export default function App() {
         const result = await res.json();
         if (result.success) {
           setUnseenFlowCount((c) => c + 1);
+          flowRowKey = result.rowKey ?? "";
         }
       }
     } catch { /* best-effort */ }
 
-    pendingSaveAndRunRef.current = { destConnectionRowKey, destSchema, rowKey, schema, tableName };
+    pendingSaveAndRunRef.current = { destConnectionRowKey, destSchema, rowKey, schema, tableName, flowRowKey };
     setFullRunMinimizing(true);
   }
 
@@ -1322,7 +1326,7 @@ export default function App() {
     const pending = pendingSaveAndRunRef.current;
     if (pending) {
       pendingSaveAndRunRef.current = null;
-      handleFullRunExecute(pending.destConnectionRowKey, pending.destSchema, pending.rowKey, pending.schema, pending.tableName);
+      handleFullRunExecute(pending.destConnectionRowKey, pending.destSchema, pending.rowKey, pending.schema, pending.tableName, pending.flowRowKey);
     } else {
       setUnseenFlowCount((c) => c + 1);
     }
@@ -1339,6 +1343,7 @@ export default function App() {
         src.connectionRowKey,
         src.schema,
         src.tableName,
+        flow.rowKey,
       );
     }
   }

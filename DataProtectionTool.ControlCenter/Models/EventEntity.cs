@@ -14,6 +14,9 @@ public class EventEntity : ITableEntity
 
     public static string BuildRowKey(string eventType, DateTime timestamp)
         => $"{eventType}_{timestamp:yyyyMMddHHmmssfff}";
+
+    public static string BuildRowKeyWithId(string eventType, string id, DateTime timestamp)
+        => $"{eventType}_{id}_{timestamp:yyyyMMddHHmmssfff}";
 }
 
 public class EventRecord
