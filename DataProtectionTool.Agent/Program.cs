@@ -338,6 +338,7 @@ static async Task<object> HandleExportTableCore(
     var tableName = root.GetProperty("tableName").GetString() ?? "";
     var uniqueId = root.GetProperty("uniqueId").GetString() ?? "";
     var sqlStatement = root.GetProperty("sqlStatement").GetString() ?? "";
+    var filePrefix = root.TryGetProperty("filePrefix", out var fpEl) ? fpEl.GetString() ?? "preview" : "preview";
 
     if (string.IsNullOrWhiteSpace(uniqueId))
         throw new InvalidOperationException("Missing uniqueId in export request.");
@@ -352,7 +353,7 @@ static async Task<object> HandleExportTableCore(
             cmd.CommandTimeout = 0;
 
             await using var reader = await cmd.ExecuteReaderAsync();
-            return await StreamReaderToParquetBlobs(reader, call, agentId, oid, tid, uniqueId, sasManager);
+            return await StreamReaderToParquetBlobs(reader, call, agentId, oid, tid, uniqueId, sasManager, filePrefix);
         });
 
     Console.WriteLine($"[Agent] Exported {filenames.Count} Parquet file(s) for [{schema}].[{tableName}]");
@@ -689,7 +690,7 @@ static async Task<List<string>> StreamReaderToParquetBlobs(
     SqlDataReader reader,
     AsyncDuplexStreamingCall<AgentMessage, ServerMessage> call,
     string agentId, string oid, string tid, string uniqueId,
-    SasTokenManager sasManager)
+    SasTokenManager sasManager, string filePrefix = "preview")
 {
     var columnCount = reader.FieldCount;
     var columnNames = new string[columnCount];
@@ -749,7 +750,7 @@ static async Task<List<string>> StreamReaderToParquetBlobs(
             }
         }
 
-        var filename = BuildPreviewFilename(uniqueId, previewRequestUuid, fileSequence);
+        var filename = BuildPreviewFilename(uniqueId, previewRequestUuid, fileSequence, filePrefix);
         var blobUri = new Uri($"{sasInfo.BlobEndpoint}/{sasInfo.Container}/{filename}?{sasInfo.SasToken}");
         var blobClient = new BlobClient(blobUri);
         ms.Position = 0;
@@ -773,7 +774,7 @@ static async Task<List<string>> StreamReaderToParquetBlobs(
             }
         }
 
-        var filename = BuildPreviewFilename(uniqueId, previewRequestUuid, fileSequence);
+        var filename = BuildPreviewFilename(uniqueId, previewRequestUuid, fileSequence, filePrefix);
         var blobUri = new Uri($"{sasInfo.BlobEndpoint}/{sasInfo.Container}/{filename}?{sasInfo.SasToken}");
         var blobClient = new BlobClient(blobUri);
         ms.Position = 0;
@@ -786,12 +787,12 @@ static async Task<List<string>> StreamReaderToParquetBlobs(
     return filenames;
 }
 
-static string BuildPreviewFilename(string uniqueId, string previewUuid, int fileSequence)
+static string BuildPreviewFilename(string uniqueId, string previewUuid, int fileSequence, string filePrefix = "preview")
 {
     if (fileSequence <= 1)
-        return $"preview_{uniqueId}_{previewUuid}.parquet";
+        return $"{filePrefix}_{uniqueId}_{previewUuid}.parquet";
 
-    return $"preview_{uniqueId}_{previewUuid}_{fileSequence}.parquet";
+    return $"{filePrefix}_{uniqueId}_{previewUuid}_{fileSequence}.parquet";
 }
 
 

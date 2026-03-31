@@ -981,6 +981,18 @@ export default function App() {
                     agentPath, completedFileFormatId,
                     origPreview?.headers, origPreview?.columnTypes,
                   );
+                  setConnectionTables((prev) => {
+                    const tables = prev[rowKey];
+                    if (!tables) return prev;
+                    return {
+                      ...prev,
+                      [rowKey]: tables.map((t) =>
+                        t.schema === schema && t.name === tableName
+                          ? { ...t, fileFormatId: completedFileFormatId }
+                          : t,
+                      ),
+                    };
+                  });
                 }
               } else {
                 const latestCached = tableCacheRef.current.get(key);

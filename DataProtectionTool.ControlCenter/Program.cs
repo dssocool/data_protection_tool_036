@@ -73,7 +73,7 @@ builder.Services.AddSingleton<EngineMetadataService>();
 
 var app = builder.Build();
 var previewFilenameRegex = new Regex(
-    "^(?:dryrun_[0-9a-fA-F]{32}_)?preview_(\\d+)_([0-9a-fA-F]{32})(?:_([2-9]\\d*))?\\.parquet$",
+    "^(?:dryrun_[0-9a-fA-F]{32}_)?(?:preview|fullrun)_(\\d+)_([0-9a-fA-F]{32})(?:_([2-9]\\d*))?\\.parquet$",
     RegexOptions.Compiled | RegexOptions.CultureInvariant);
 
 {
@@ -1479,7 +1479,8 @@ app.MapPost("/api/agents/{path}/full-run", async (string path, HttpContext httpC
         var exportPayload = JsonSerializer.Serialize(new
         {
             rowKey, schema, tableName, uniqueId,
-            sqlStatement = $"SELECT * FROM [{schema}].[{tableName}]"
+            sqlStatement = $"SELECT * FROM [{schema}].[{tableName}]",
+            filePrefix = "fullrun"
         });
         var exportResult = await connection.SendCommandAsync("export_table", exportPayload, TimeSpan.FromSeconds(600));
 
