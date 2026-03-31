@@ -90,14 +90,32 @@ export default function FlowsPanel({
   return (
     <div className="flows-panel" style={{ width }}>
       <div className="flows-panel-header">
-        <select
-          className="flows-panel-title"
-          value="flows"
-          onChange={(e) => onSwitchPanel(e.target.value as "connections" | "flows")}
-        >
-          <option value="connections">Connections</option>
-          <option value="flows">Flows</option>
-        </select>
+        <div className="panel-switch-icons">
+          <button
+            className="panel-switch-btn"
+            title="Connections"
+            aria-label="Connections"
+            onClick={() => onSwitchPanel("connections")}
+          >
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+              <circle cx="4" cy="4" r="2" stroke="currentColor" strokeWidth="1.3" />
+              <circle cx="12" cy="4" r="2" stroke="currentColor" strokeWidth="1.3" />
+              <circle cx="8" cy="12" r="2" stroke="currentColor" strokeWidth="1.3" />
+              <path d="M4 6V9L8 10M12 6V9L8 10" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+          </button>
+          <button
+            className="panel-switch-btn panel-switch-btn-active"
+            title="Flows"
+            aria-label="Flows"
+            onClick={() => onSwitchPanel("flows")}
+          >
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+              <path d="M3 4H7M3 8H10M3 12H13" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
+              <path d="M12 3L14 4L12 5" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+          </button>
+        </div>
         <button className="flows-panel-close" onClick={onClose} title="Close">
           <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
             <path d="M3 3L11 11M11 3L3 11" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />

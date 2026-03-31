@@ -21,16 +21,40 @@
   border-bottom: 1px solid #e8e8e8;
 }
 
-.connections-panel-title {
-  margin: 0;
-  font-size: 15px;
-  font-weight: 600;
-  color: #333;
+.panel-switch-icons {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.panel-switch-btn {
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: none;
   border: none;
-  background: transparent;
+  border-radius: 6px;
   cursor: pointer;
+  color: #999;
   padding: 0;
-  appearance: auto;
+  transition: color 0.15s, background 0.15s;
+}
+
+.panel-switch-btn:hover {
+  color: #555;
+  background: #f0f0f0;
+}
+
+.panel-switch-btn-active {
+  color: #333;
+  background: #e8e8e8;
+}
+
+.panel-switch-btn-active:hover {
+  color: #222;
+  background: #ddd;
 }
 
 .connections-panel-close {
