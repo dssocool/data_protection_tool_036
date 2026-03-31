@@ -76,6 +76,10 @@ var previewFilenameRegex = new Regex(
     "^(?:dryrun_[0-9a-fA-F]{32}_)?(?:preview|fullrun)_(\\d+)_([0-9a-fA-F]{32})(?:_([2-9]\\d*))?\\.parquet$",
     RegexOptions.Compiled | RegexOptions.CultureInvariant);
 
+var isAzuriteMode = blobStorageConfig.StorageAccount == "devstoreaccount1"
+    || tableConnectionString.Contains("devstoreaccount1", StringComparison.OrdinalIgnoreCase)
+    || tableConnectionString.Contains("UseDevelopmentStorage=true", StringComparison.OrdinalIgnoreCase);
+
 try
 {
     var usersTable = tableServiceClient.GetTableClient("Users");
@@ -93,13 +97,39 @@ catch (Azure.RequestFailedException ex)
     Console.Error.WriteLine($"Message     : {ex.Message}");
     Console.Error.WriteLine($"Stack Trace : {ex.StackTrace}");
     Console.Error.WriteLine($"Full Details: {ex}");
+    if (!isAzuriteMode)
+    {
+        Console.Error.WriteLine("=== Running in Azure Storage mode (not Azurite). Cannot connect to the configured storage account. Exiting. ===");
+        Environment.Exit(1);
+    }
     throw;
 }
 catch (Exception ex)
 {
     Console.Error.WriteLine("=== Storage initialization failed (unexpected error) ===");
     Console.Error.WriteLine(ex.ToString());
+    if (!isAzuriteMode)
+    {
+        Console.Error.WriteLine("=== Running in Azure Storage mode (not Azurite). Cannot connect to the configured storage account. Exiting. ===");
+        Environment.Exit(1);
+    }
     throw;
+}
+
+if (!isAzuriteMode)
+{
+    try
+    {
+        var previewContainer = blobServiceClient.GetBlobContainerClient(blobStorageConfig.PreviewContainer);
+        await previewContainer.CreateIfNotExistsAsync();
+    }
+    catch (Exception ex)
+    {
+        Console.Error.WriteLine("=== Azure Blob Storage connectivity check failed ===");
+        Console.Error.WriteLine(ex.ToString());
+        Console.Error.WriteLine("=== Running in Azure Storage mode (not Azurite). Cannot connect to the configured storage account. Exiting. ===");
+        Environment.Exit(1);
+    }
 }
 
 app.UseStaticFiles();

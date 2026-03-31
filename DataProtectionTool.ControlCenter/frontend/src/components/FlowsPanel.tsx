@@ -32,6 +32,7 @@ export default function FlowsPanel({
   const resizing = useRef(false);
   const startX = useRef(0);
   const startW = useRef(DEFAULT_WIDTH);
+  const panelRef = useRef<HTMLDivElement>(null);
 
   const fetchFlows = useCallback(async () => {
     if (!agentPath) return;
@@ -71,6 +72,20 @@ export default function FlowsPanel({
     };
   }, [onWidthChange]);
 
+  useEffect(() => {
+    if (resizing.current || loading) return;
+    const el = panelRef.current;
+    if (!el) return;
+    const prev = el.style.width;
+    el.style.width = "max-content";
+    const measured = Math.min(MAX_WIDTH, Math.max(MIN_WIDTH, el.scrollWidth));
+    el.style.width = prev;
+    if (measured !== width) {
+      setWidth(measured);
+      onWidthChange?.(measured);
+    }
+  }, [flows, loading]);
+
   function parseJson<T>(json: string): T | null {
     try { return JSON.parse(json); } catch { return null; }
   }
@@ -88,7 +103,7 @@ export default function FlowsPanel({
   }
 
   return (
-    <div className="flows-panel" style={{ width }}>
+    <div ref={panelRef} className="flows-panel" style={{ width }}>
       <div className="flows-panel-header">
         <div className="panel-switch-icons">
           <button

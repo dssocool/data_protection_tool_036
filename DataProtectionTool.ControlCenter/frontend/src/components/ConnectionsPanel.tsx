@@ -83,6 +83,7 @@ export default function ConnectionsPanel({
   const [width, setWidth] = useState(DEFAULT_WIDTH);
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
   const isResizing = useRef(false);
+  const panelRef = useRef<HTMLDivElement>(null);
 
   const handleResizeStart = useCallback((e: React.MouseEvent) => {
     e.preventDefault();
@@ -117,6 +118,20 @@ export default function ConnectionsPanel({
       document.body.style.userSelect = "";
     };
   }, []);
+
+  useEffect(() => {
+    if (isResizing.current) return;
+    const el = panelRef.current;
+    if (!el) return;
+    const prev = el.style.width;
+    el.style.width = "max-content";
+    const measured = Math.min(MAX_WIDTH, Math.max(MIN_WIDTH, el.scrollWidth));
+    el.style.width = prev;
+    if (measured !== width) {
+      setWidth(measured);
+      onWidthChange?.(measured);
+    }
+  }, [connections, connectionTables, connectionQueries, expanded]);
 
   useEffect(() => {
     if (!contextMenu) return;
@@ -168,7 +183,7 @@ export default function ConnectionsPanel({
 
   return (
     <>
-    <div className="connections-panel" style={{ width }}>
+    <div ref={panelRef} className="connections-panel" style={{ width }}>
       <div className="connections-panel-header">
         <div className="panel-switch-icons">
           <button
