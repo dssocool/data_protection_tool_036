@@ -328,6 +328,15 @@ export default function App() {
     setColumnRuleFrameworks(cached.columnRuleFrameworks);
   }
 
+  function getAllowedAlgorithmTypes(sqlType: string): string[] {
+    const numericTypes = new Set([
+      "int", "bigint", "smallint", "tinyint", "float", "real",
+      "decimal", "numeric", "money", "smallmoney", "bit",
+    ]);
+    if (numericTypes.has(sqlType.toLowerCase())) return ["BIG_DECIMAL"];
+    return ["BIG_DECIMAL", "LOCAL_DATE_TIME", "STRING", "BYTE_BUFFER", "GENERIC_DATA_ROW"];
+  }
+
   async function fetchColumnRules(
     agentPath: string,
     fileFormatId: string,
@@ -354,11 +363,49 @@ export default function App() {
               return item as Record<string, unknown>;
             });
           };
-          setColumnRules(parseArray(result.responseList));
-          setColumnRuleAlgorithms(parseArray(result.algorithms));
+          const rules = parseArray(result.responseList);
+          const algorithms = parseArray(result.algorithms);
+          setColumnRules(rules);
+          setColumnRuleAlgorithms(algorithms);
           setColumnRuleDomains(parseArray(result.domains));
           setColumnRuleFrameworks(parseArray(result.frameworks));
-          return parseArray(result.responseList);
+
+          if (previewHeaders?.length && previewColumnTypes?.length) {
+            const algMaskTypes = new Map<string, string>();
+            for (const alg of algorithms) {
+              const name = typeof alg.algorithmName === "string" ? alg.algorithmName : "";
+              const mt = typeof alg.maskType === "string" ? alg.maskType : String(alg.maskType ?? "");
+              if (name) algMaskTypes.set(name, mt);
+            }
+            const detected = new Map<string, { maskType: string; sqlType: string }>();
+            for (const rule of rules) {
+              const fieldName = typeof rule.fieldName === "string" ? rule.fieldName : "";
+              const algName = typeof rule.algorithmName === "string" ? rule.algorithmName : "";
+              const isMasked = rule.isMasked !== false;
+              if (!fieldName || !algName || !isMasked) continue;
+              const idx = previewHeaders.indexOf(fieldName);
+              if (idx < 0 || idx >= previewColumnTypes.length) continue;
+              const sqlType = previewColumnTypes[idx];
+              const maskType = algMaskTypes.get(algName);
+              if (!maskType) continue;
+              const allowed = getAllowedAlgorithmTypes(sqlType);
+              if (!allowed.includes(maskType)) {
+                detected.set(fieldName, { maskType, sqlType });
+              }
+            }
+            setMismatchedColumns(prev => {
+              const merged = new Map(prev);
+              for (const key of [...merged.keys()]) {
+                if (!detected.has(key)) merged.delete(key);
+              }
+              for (const [key, val] of detected) {
+                merged.set(key, val);
+              }
+              return merged;
+            });
+          }
+
+          return rules;
         }
       }
     } catch {
