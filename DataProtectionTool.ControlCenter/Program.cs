@@ -1719,7 +1719,7 @@ app.MapPost("/api/agents/{path}/http-request", async (string path, HttpRequest r
     }
 });
 
-app.MapGet("/api/agents/{path}/column-rules", async (string path, string? fileFormatId, string? headers, string? columnTypes, AgentRegistry registry, EngineApiClient engineApi, EngineMetadataService metadataService) =>
+app.MapGet("/api/agents/{path}/column-rules", async (string path, string? fileFormatId, AgentRegistry registry, EngineApiClient engineApi, EngineMetadataService metadataService) =>
 {
     if (!registry.TryGet(path, out _))
         return Results.NotFound(new { error = "Agent not found." });
@@ -1733,69 +1733,10 @@ app.MapGet("/api/agents/{path}/column-rules", async (string path, string? fileFo
         var rules = await engineApi.FetchColumnRulesAsync(fileFormatId);
         var enriched = engineApi.EnrichColumnRules(rules, metadataService.Algorithms, metadataService.Domains, metadataService.Frameworks);
 
-        string[]? headerList = null;
-        string[]? typeList = null;
-        try
-        {
-            if (!string.IsNullOrEmpty(headers))
-                headerList = JsonSerializer.Deserialize<string[]>(headers);
-            if (!string.IsNullOrEmpty(columnTypes))
-                typeList = JsonSerializer.Deserialize<string[]>(columnTypes);
-        }
-        catch { }
-
-        var fixedCount = 0;
-        if (headerList != null && typeList != null && headerList.Length == typeList.Length && headerList.Length > 0)
-        {
-            var sqlTypeByColumn = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-            for (var i = 0; i < headerList.Length; i++)
-                sqlTypeByColumn[headerList[i]] = typeList[i];
-
-            var algMaskTypes = new Dictionary<string, string>();
-            foreach (var alg in enriched.Algorithms)
-            {
-                var aName = alg.TryGetProperty("algorithmName", out var anEl) ? anEl.GetString() ?? "" : "";
-                var aMaskType = alg.TryGetProperty("maskType", out var mtEl) ? mtEl.GetString() ?? "" : "";
-                if (!string.IsNullOrEmpty(aName))
-                    algMaskTypes[aName] = aMaskType;
-            }
-
-            foreach (var rule in enriched.Rules)
-            {
-                var fieldName = rule.TryGetProperty("fieldName", out var fnEl) ? fnEl.GetString() ?? "" : "";
-                var algName = rule.TryGetProperty("algorithmName", out var anEl2) ? anEl2.GetString() ?? "" : "";
-                var metadataId = rule.TryGetProperty("fileFieldMetadataId", out var idEl) ? idEl.ToString() : "";
-                var isMasked = !rule.TryGetProperty("isMasked", out var imEl) || imEl.ValueKind != JsonValueKind.False;
-
-                if (string.IsNullOrEmpty(fieldName) || string.IsNullOrEmpty(algName)
-                    || string.IsNullOrEmpty(metadataId) || !isMasked)
-                    continue;
-
-                if (!sqlTypeByColumn.TryGetValue(fieldName, out var sqlType))
-                    continue;
-
-                var allowedTypes = GetAllowedAlgorithmTypes(sqlType);
-                if (!algMaskTypes.TryGetValue(algName, out var maskType))
-                    continue;
-
-                if (allowedTypes.Contains(maskType))
-                    continue;
-
-                await engineApi.FixColumnRuleAsync(metadataId);
-                fixedCount++;
-            }
-
-            if (fixedCount > 0)
-            {
-                rules = await engineApi.FetchColumnRulesAsync(fileFormatId);
-                enriched = engineApi.EnrichColumnRules(rules, metadataService.Algorithms, metadataService.Domains, metadataService.Frameworks);
-            }
-        }
-
         return Results.Ok(new
         {
             success = true,
-            fixedCount,
+            fixedCount = 0,
             responseList = enriched.Rules.Select(e => JsonSerializer.Deserialize<object>(e.GetRawText())).ToArray(),
             algorithms = enriched.Algorithms.Select(e => JsonSerializer.Deserialize<object>(e.GetRawText())).ToArray(),
             domains = enriched.Domains.Select(e => JsonSerializer.Deserialize<object>(e.GetRawText())).ToArray(),
