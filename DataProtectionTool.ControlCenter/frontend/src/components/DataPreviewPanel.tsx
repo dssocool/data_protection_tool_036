@@ -555,33 +555,35 @@ export default function DataPreviewPanel({
                 </div>
                 <div className="column-rule-row">
                   <span className="column-rule-label">Algorithm Name</span>
-                  <select
-                    className="column-rule-select"
-                    value={modalAlgorithmName}
-                    onChange={(e) => {
-                      const newAlgName = e.target.value;
-                      setModalAlgorithmName(newAlgName);
-                      const alg = newAlgName ? allAlgorithms.find(a => a.algorithmName === newAlgName) : undefined;
-                      setModalAlgorithmType(alg ? String(alg.maskType ?? "") : "");
-                    }}
-                  >
-                    <option value="">-- Select --</option>
-                    {allAlgorithms
-                      .filter(a => {
-                        if (modalAlgorithmType && String(a.maskType ?? "") !== modalAlgorithmType) return false;
-                        return true;
-                      })
-                      .map((a, i) => (
-                        <option key={i} value={String(a.algorithmName ?? "")}>
-                          {String(a.algorithmName ?? "")}
-                        </option>
-                      ))}
-                  </select>
-                  {modalAlgorithmType && allowedAlgorithmTypes.length > 0 && !allowedAlgorithmTypes.includes(modalAlgorithmType) && (
-                    <span className="column-rule-mismatch-hint">
-                      The Algorithm is for <strong>{modalAlgorithmType}</strong>, but column is <strong>{selectedColumnSqlType}</strong>
-                    </span>
-                  )}
+                  <div className="column-rule-field">
+                    <select
+                      className="column-rule-select"
+                      value={modalAlgorithmName}
+                      onChange={(e) => {
+                        const newAlgName = e.target.value;
+                        setModalAlgorithmName(newAlgName);
+                        const alg = newAlgName ? allAlgorithms.find(a => a.algorithmName === newAlgName) : undefined;
+                        setModalAlgorithmType(alg ? String(alg.maskType ?? "") : "");
+                      }}
+                    >
+                      <option value="">-- Select --</option>
+                      {allAlgorithms
+                        .filter(a => {
+                          if (modalAlgorithmType && String(a.maskType ?? "") !== modalAlgorithmType) return false;
+                          return true;
+                        })
+                        .map((a, i) => (
+                          <option key={i} value={String(a.algorithmName ?? "")}>
+                            {String(a.algorithmName ?? "")}
+                          </option>
+                        ))}
+                    </select>
+                    {modalAlgorithmType && allowedAlgorithmTypes.length > 0 && !allowedAlgorithmTypes.includes(modalAlgorithmType) && (
+                      <span className="column-rule-mismatch-hint">
+                        The Algorithm is for <strong>{modalAlgorithmType}</strong>, but column is <strong>{selectedColumnSqlType}</strong>
+                      </span>
+                    )}
+                  </div>
                 </div>
                 <div className="column-rule-row">
                   <span className="column-rule-label">Algorithm Type</span>
