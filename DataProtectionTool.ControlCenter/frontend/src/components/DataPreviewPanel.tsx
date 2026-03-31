@@ -66,7 +66,12 @@ const DataTable = forwardRef<HTMLTableElement, { data: PreviewData }>(
         <thead>
           <tr>
             {data.headers.map((h, i) => (
-              <th key={i} title={data.columnTypes?.[i] ?? undefined}>{h}</th>
+              <th key={i}>
+                {h}
+                {data.columnTypes?.[i] && (
+                  <span className="column-type-label">{data.columnTypes[i]}</span>
+                )}
+              </th>
             ))}
           </tr>
         </thead>
@@ -94,7 +99,12 @@ const DiffView = forwardRef<HTMLTableElement, { left: PreviewData; right: Previe
         <thead>
           <tr>
             {headers.map((h, i) => (
-              <th key={i} title={left.columnTypes?.[i] ?? undefined}>{h}</th>
+              <th key={i}>
+                {h}
+                {left.columnTypes?.[i] && (
+                  <span className="column-type-label">{left.columnTypes[i]}</span>
+                )}
+              </th>
             ))}
           </tr>
         </thead>

@@ -174,8 +174,12 @@
   white-space: nowrap;
 }
 
-.data-preview-table th[title] {
-  cursor: help;
+.data-preview-table th .column-type-label {
+  display: block;
+  font-size: 10px;
+  font-weight: 400;
+  color: #999;
+  margin-top: 2px;
 }
 
 .data-preview-table td {
