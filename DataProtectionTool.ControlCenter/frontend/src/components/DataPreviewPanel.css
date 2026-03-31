@@ -319,6 +319,18 @@
   border-color: #0078d4;
 }
 
+.column-rule-btn-na {
+  color: #888;
+  background: #f0f0f0;
+  border-color: #d0d0d0;
+}
+
+.column-rule-btn-na:hover {
+  color: #555;
+  background: #e0e0e0;
+  border-color: #aaa;
+}
+
 .column-rule-modal-overlay {
   position: fixed;
   inset: 0;

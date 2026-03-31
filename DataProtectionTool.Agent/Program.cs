@@ -1851,29 +1851,56 @@ class EngineMetadataStore
         var baseUrl = $"{engineUrl.TrimEnd('/')}/masking/api/v5.1.44";
         using var httpClient = new HttpClient { Timeout = TimeSpan.FromSeconds(60) };
 
-        Algorithms = await FetchListAsync(httpClient, $"{baseUrl}/algorithms?page_number=1", authToken);
-        Domains = await FetchListAsync(httpClient, $"{baseUrl}/domains?page_number=1", authToken);
-        Frameworks = await FetchListAsync(httpClient, $"{baseUrl}/algorithm/frameworks/?include_schema=false&page_number=1", authToken);
+        Algorithms = await FetchAllPagesAsync(httpClient, $"{baseUrl}/algorithms", authToken);
+        Domains = await FetchAllPagesAsync(httpClient, $"{baseUrl}/domains", authToken);
+        Frameworks = await FetchAllPagesAsync(httpClient, $"{baseUrl}/algorithm/frameworks/?include_schema=false", authToken);
 
         IsLoaded = true;
     }
 
-    private static async Task<List<JsonElement>> FetchListAsync(HttpClient client, string url, string authToken)
+    private static async Task<List<JsonElement>> FetchAllPagesAsync(HttpClient client, string baseUrl, string authToken)
     {
-        using var request = new HttpRequestMessage(HttpMethod.Get, url);
-        request.Headers.Accept.Add(new System.Net.Http.Headers.MediaTypeWithQualityHeaderValue("application/json"));
-        request.Headers.TryAddWithoutValidation("Authorization", authToken);
+        var allItems = new List<JsonElement>();
+        int pageNumber = 1;
+        const int maxPages = 100;
 
-        using var response = await client.SendAsync(request);
-        response.EnsureSuccessStatusCode();
-
-        var body = await response.Content.ReadAsStringAsync();
-        using var doc = JsonDocument.Parse(body);
-        if (doc.RootElement.TryGetProperty("responseList", out var listEl) && listEl.ValueKind == JsonValueKind.Array)
+        while (pageNumber <= maxPages)
         {
-            return listEl.EnumerateArray().Select(e => e.Clone()).ToList();
+            var separator = baseUrl.Contains('?') ? "&" : "?";
+            var url = $"{baseUrl}{separator}page_number={pageNumber}";
+
+            using var request = new HttpRequestMessage(HttpMethod.Get, url);
+            request.Headers.Accept.Add(new System.Net.Http.Headers.MediaTypeWithQualityHeaderValue("application/json"));
+            request.Headers.TryAddWithoutValidation("Authorization", authToken);
+
+            using var response = await client.SendAsync(request);
+            response.EnsureSuccessStatusCode();
+
+            var body = await response.Content.ReadAsStringAsync();
+            using var doc = JsonDocument.Parse(body);
+
+            if (!doc.RootElement.TryGetProperty("responseList", out var listEl) || listEl.ValueKind != JsonValueKind.Array)
+                break;
+
+            var pageItems = listEl.EnumerateArray().Select(e => e.Clone()).ToList();
+            if (pageItems.Count == 0)
+                break;
+
+            allItems.AddRange(pageItems);
+
+            if (doc.RootElement.TryGetProperty("numberOfPages", out var numPagesEl))
+            {
+                int totalPages = numPagesEl.ValueKind == JsonValueKind.Number
+                    ? numPagesEl.GetInt32()
+                    : int.TryParse(numPagesEl.ToString(), out var parsed) ? parsed : 1;
+                if (pageNumber >= totalPages)
+                    break;
+            }
+
+            pageNumber++;
         }
-        return new List<JsonElement>();
+
+        return allItems;
     }
 }
 

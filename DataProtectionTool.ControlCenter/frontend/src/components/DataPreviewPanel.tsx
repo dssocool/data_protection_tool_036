@@ -395,9 +395,23 @@ export default function DataPreviewPanel({
                         }}
                         title={`View rule for ${header}`}
                       >
-                        {header}
+                        {rule.isMasked !== false && typeof rule.algorithmName === "string"
+                          ? rule.algorithmName
+                          : header}
                       </button>
-                    ) : null}
+                    ) : (
+                      <button
+                        className="column-rule-btn column-rule-btn-na"
+                        onClick={() => {
+                          setSelectedRule({ fieldName: header, _noRule: true });
+                          setModalDomainName("");
+                          setModalAlgorithmName("");
+                        }}
+                        title={`No rule for ${header}`}
+                      >
+                        N/A
+                      </button>
+                    )}
                   </div>
                 );
               })}
