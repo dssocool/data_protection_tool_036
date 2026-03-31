@@ -35,14 +35,6 @@ function consolidateSteps(steps: StatusEventStep[]): ConsolidatedStep[] {
   return result;
 }
 
-function getBadgeClass(event: StatusEvent): string {
-  const s = event.summary.toLowerCase();
-  if (s.includes("error") || s.includes("failed")) return "event-badge-error";
-  if (s.includes("timeout")) return "event-badge-warn";
-  if (s.includes("connected") || s.includes("disconnected")) return "event-badge-info";
-  return "event-badge-success";
-}
-
 function formatBadgeLabel(type: string): string {
   return type.replace(/_/g, " ");
 }
@@ -50,7 +42,14 @@ function formatBadgeLabel(type: string): string {
 function formatTime(iso: string): string {
   try {
     const d = new Date(iso);
-    return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+    const yyyy = d.getFullYear();
+    const MM = String(d.getMonth() + 1).padStart(2, "0");
+    const dd = String(d.getDate()).padStart(2, "0");
+    const HH = String(d.getHours()).padStart(2, "0");
+    const mm = String(d.getMinutes()).padStart(2, "0");
+    const ss = String(d.getSeconds()).padStart(2, "0");
+    const fff = String(d.getMilliseconds()).padStart(3, "0");
+    return `${yyyy}${MM}${dd}${HH}${mm}${ss}${fff}`;
   } catch {
     return "";
   }
@@ -158,21 +157,21 @@ export default function EventDialog({ events, onClose }: EventDialogProps) {
                     className={`event-item${stepsPresent ? " event-item-expandable" : ""}`}
                     onClick={() => setExpandedIdx(isExpanded ? null : originalIdx)}
                   >
-                    {stepsPresent && (
-                      <span className={`event-item-chevron${isExpanded ? " event-item-chevron-open" : ""}`}>
-                        <svg width="10" height="10" viewBox="0 0 10 10">
-                          <path d="M3 2 L7 5 L3 8" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
-                        </svg>
-                      </span>
-                    )}
-                    <span className="event-item-time">{formatTime(evt.timestamp)}</span>
-                    <span className={`event-item-badge ${getBadgeClass(evt)}`}>
-                      {formatBadgeLabel(evt.type)}
-                    </span>
-                    <span className="event-item-summary">
-                      {evt.summary}
+                    <div className="event-item-row1">
+                      {stepsPresent && (
+                        <span className={`event-item-chevron${isExpanded ? " event-item-chevron-open" : ""}`}>
+                          <svg width="10" height="10" viewBox="0 0 10 10">
+                            <path d="M3 2 L7 5 L3 8" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+                          </svg>
+                        </span>
+                      )}
+                      <span className="event-item-time">{formatTime(evt.timestamp)}</span>
+                      <span className="event-item-type">{formatBadgeLabel(evt.type)}</span>
                       {inProgress && <span className="event-item-spinner" />}
-                    </span>
+                    </div>
+                    <div className="event-item-row2">
+                      <span className="event-item-summary">{evt.summary}</span>
+                    </div>
                   </div>
                   {isExpanded && stepsPresent && (
                     <div className="event-steps">
