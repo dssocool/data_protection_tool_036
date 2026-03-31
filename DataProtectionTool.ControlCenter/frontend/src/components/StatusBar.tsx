@@ -9,6 +9,7 @@ export interface StatusEventStep {
 export interface StatusEvent {
   timestamp: string;
   type: string;
+  flowId?: string;
   summary: string;
   detail: string;
   steps?: StatusEventStep[];

@@ -286,10 +286,18 @@ public class ClientTableService
             }
             catch (JsonException) { }
 
+            var flowId = "";
+            if (type.StartsWith("dp_run_") && type.Length > 7)
+            {
+                flowId = type["dp_run_".Length..];
+                type = "dp_run";
+            }
+
             events.Add(new EventRecord
             {
                 Timestamp = timestamp,
                 Type = type,
+                FlowId = flowId,
                 Summary = summary,
                 Detail = detail
             });

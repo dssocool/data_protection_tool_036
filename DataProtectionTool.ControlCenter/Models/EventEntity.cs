@@ -23,6 +23,7 @@ public class EventRecord
 {
     public DateTime Timestamp { get; set; }
     public string Type { get; set; } = "";
+    public string FlowId { get; set; } = "";
     public string Summary { get; set; } = "";
     public string Detail { get; set; } = "";
 }

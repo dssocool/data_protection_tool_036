@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import type { FlowSource, FlowDest } from "./FullRunModal";
+import type { StatusEvent } from "./StatusBar";
 import "./FlowsPanel.css";
 
 export interface FlowItem {
@@ -64,6 +65,21 @@ function parseFlow(flow: FlowItem): ParsedFlow {
   };
 }
 
+function formatHistoryTime(iso: string): string {
+  try {
+    const d = new Date(iso);
+    return d.toLocaleString([], {
+      month: "short",
+      day: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+    });
+  } catch {
+    return "";
+  }
+}
+
 export default function FlowsPanel({
   agentPath,
   onClose,
@@ -80,6 +96,9 @@ export default function FlowsPanel({
   const [actionOpen, setActionOpen] = useState(false);
   const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false);
   const [confirmRunOpen, setConfirmRunOpen] = useState(false);
+  const [selectedFlowRowKey, setSelectedFlowRowKey] = useState<string | null>(null);
+  const [historyEvents, setHistoryEvents] = useState<StatusEvent[]>([]);
+  const [historyLoading, setHistoryLoading] = useState(false);
   const actionRef = useRef<HTMLDivElement>(null);
 
   const resizingCol = useRef<number | null>(null);
@@ -139,7 +158,55 @@ export default function FlowsPanel({
     };
   }, []);
 
+  const selectedFlowId = useMemo(() => {
+    if (!selectedFlowRowKey) return null;
+    return selectedFlowRowKey.startsWith("flow_")
+      ? selectedFlowRowKey.slice("flow_".length)
+      : selectedFlowRowKey;
+  }, [selectedFlowRowKey]);
+
+  const fetchHistory = useCallback(async () => {
+    if (!agentPath || !selectedFlowId) return;
+    setHistoryLoading(true);
+    try {
+      const res = await fetch(`/api/agents/${agentPath}/events`);
+      if (res.ok) {
+        const data: StatusEvent[] = await res.json();
+        const filtered = data.filter(
+          (e) => e.type === "dp_run" && e.flowId === selectedFlowId,
+        );
+        filtered.sort(
+          (a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime(),
+        );
+        setHistoryEvents(filtered);
+      }
+    } catch {
+      // best-effort
+    } finally {
+      setHistoryLoading(false);
+    }
+  }, [agentPath, selectedFlowId]);
+
+  useEffect(() => {
+    if (selectedFlowRowKey) {
+      fetchHistory();
+    } else {
+      setHistoryEvents([]);
+    }
+  }, [selectedFlowRowKey, fetchHistory]);
+
+  function handleRowClick(rowKey: string, e: React.MouseEvent) {
+    const target = e.target as HTMLElement;
+    if (target.tagName === "INPUT" || target.closest(".flows-td-checkbox")) return;
+    setSelectedFlowRowKey((prev) => (prev === rowKey ? null : rowKey));
+  }
+
   const parsed = useMemo(() => flows.map(parseFlow), [flows]);
+
+  const selectedParsedFlow = useMemo(
+    () => (selectedFlowRowKey ? parsed.find((f) => f.rowKey === selectedFlowRowKey) ?? null : null),
+    [parsed, selectedFlowRowKey],
+  );
 
   const filtered = useMemo(() => {
     if (!searchText.trim()) return parsed;
@@ -334,73 +401,129 @@ export default function FlowsPanel({
         </div>
       </div>
 
-      <div className="flows-table-container">
-        {loading ? (
-          <p className="flows-panel-empty">Loading...</p>
-        ) : flows.length === 0 ? (
-          <p className="flows-panel-empty">No flows saved yet.</p>
-        ) : sorted.length === 0 ? (
-          <p className="flows-panel-empty">No flows match the search.</p>
-        ) : (
-          <table className="flows-table">
-            <thead>
-              <tr>
-                <th className="flows-th-checkbox">
-                  <input
-                    type="checkbox"
-                    checked={allFilteredSelected}
-                    ref={(el) => {
-                      if (el) el.indeterminate = someFilteredSelected && !allFilteredSelected;
-                    }}
-                    onChange={handleSelectAll}
-                  />
-                </th>
-                {COLUMNS.map((col, i) => (
-                  <th
-                    key={col.key}
-                    className="flows-th"
-                    style={{ width: colWidths[i] }}
-                    onClick={() => handleSort(col.key)}
-                  >
-                    <span className="flows-th-label">
-                      {col.label}
-                      {sortField === col.key && (
-                        <span className="flows-sort-arrow">
-                          {sortDir === "asc" ? "▲" : "▼"}
-                        </span>
-                      )}
-                    </span>
-                    <div
-                      className="flows-col-resize"
-                      onMouseDown={(e) => handleResizeStart(e, i)}
-                    />
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {sorted.map((flow) => (
-                <tr
-                  key={flow.rowKey}
-                  className={selected.has(flow.rowKey) ? "flows-row-selected" : ""}
-                >
-                  <td className="flows-td-checkbox">
+      <div className="flows-content-area">
+        <div className={`flows-table-container${selectedFlowRowKey ? " flows-table-container-shrunk" : ""}`}>
+          {loading ? (
+            <p className="flows-panel-empty">Loading...</p>
+          ) : flows.length === 0 ? (
+            <p className="flows-panel-empty">No flows saved yet.</p>
+          ) : sorted.length === 0 ? (
+            <p className="flows-panel-empty">No flows match the search.</p>
+          ) : (
+            <table className="flows-table">
+              <thead>
+                <tr>
+                  <th className="flows-th-checkbox">
                     <input
                       type="checkbox"
-                      checked={selected.has(flow.rowKey)}
-                      onChange={() => handleSelectRow(flow.rowKey)}
+                      checked={allFilteredSelected}
+                      ref={(el) => {
+                        if (el) el.indeterminate = someFilteredSelected && !allFilteredSelected;
+                      }}
+                      onChange={handleSelectAll}
                     />
-                  </td>
-                  <td style={{ width: colWidths[0] }}>{flow.srcDatabase}</td>
-                  <td style={{ width: colWidths[1] }}>{flow.srcSchema}</td>
-                  <td style={{ width: colWidths[2] }}>{flow.srcTable}</td>
-                  <td style={{ width: colWidths[3] }}>{flow.destDatabase}</td>
-                  <td style={{ width: colWidths[4] }}>{flow.destSchema}</td>
-                  <td style={{ width: colWidths[5] }}>{flow.destTable}</td>
+                  </th>
+                  {COLUMNS.map((col, i) => (
+                    <th
+                      key={col.key}
+                      className="flows-th"
+                      style={{ width: colWidths[i] }}
+                      onClick={() => handleSort(col.key)}
+                    >
+                      <span className="flows-th-label">
+                        {col.label}
+                        {sortField === col.key && (
+                          <span className="flows-sort-arrow">
+                            {sortDir === "asc" ? "▲" : "▼"}
+                          </span>
+                        )}
+                      </span>
+                      <div
+                        className="flows-col-resize"
+                        onMouseDown={(e) => handleResizeStart(e, i)}
+                      />
+                    </th>
+                  ))}
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {sorted.map((flow) => (
+                  <tr
+                    key={flow.rowKey}
+                    className={`${selected.has(flow.rowKey) ? "flows-row-selected" : ""}${selectedFlowRowKey === flow.rowKey ? " flows-row-active" : ""}`}
+                    onClick={(e) => handleRowClick(flow.rowKey, e)}
+                  >
+                    <td className="flows-td-checkbox">
+                      <input
+                        type="checkbox"
+                        checked={selected.has(flow.rowKey)}
+                        onChange={() => handleSelectRow(flow.rowKey)}
+                      />
+                    </td>
+                    <td style={{ width: colWidths[0] }}>{flow.srcDatabase}</td>
+                    <td style={{ width: colWidths[1] }}>{flow.srcSchema}</td>
+                    <td style={{ width: colWidths[2] }}>{flow.srcTable}</td>
+                    <td style={{ width: colWidths[3] }}>{flow.destDatabase}</td>
+                    <td style={{ width: colWidths[4] }}>{flow.destSchema}</td>
+                    <td style={{ width: colWidths[5] }}>{flow.destTable}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+
+        {selectedFlowRowKey && (
+          <div className="flows-history-panel">
+            <div className="flows-history-header">
+              <div className="flows-history-title">
+                <span className="flows-history-title-label">Execution History</span>
+                {selectedParsedFlow && (
+                  <span className="flows-history-title-flow">
+                    {selectedParsedFlow.srcSchema}.{selectedParsedFlow.srcTable}
+                  </span>
+                )}
+              </div>
+              <button
+                className="flows-history-close"
+                onClick={() => setSelectedFlowRowKey(null)}
+                title="Close"
+              >
+                <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+                  <path d="M3 3L11 11M11 3L3 11" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+                </svg>
+              </button>
+            </div>
+            <div className="flows-history-body">
+              {historyLoading ? (
+                <p className="flows-history-empty">Loading...</p>
+              ) : historyEvents.length === 0 ? (
+                <p className="flows-history-empty">No executions recorded for this flow.</p>
+              ) : (
+                historyEvents.map((evt, idx) => {
+                  const isError = evt.summary.toLowerCase().includes("error") || evt.summary.toLowerCase().includes("failed");
+                  const isTimeout = evt.summary.toLowerCase().includes("timeout");
+                  const badgeClass = isError ? "flows-history-badge-error" : isTimeout ? "flows-history-badge-warn" : "flows-history-badge-success";
+                  return (
+                    <div className="flows-history-item" key={idx}>
+                      <div className="flows-history-item-header">
+                        <span className="flows-history-item-time">
+                          {formatHistoryTime(evt.timestamp)}
+                        </span>
+                        <span className={`flows-history-item-badge ${badgeClass}`}>
+                          dp run
+                        </span>
+                      </div>
+                      <div className="flows-history-item-summary">{evt.summary}</div>
+                      {evt.detail && (
+                        <div className="flows-history-item-detail">{evt.detail}</div>
+                      )}
+                    </div>
+                  );
+                })
+              )}
+            </div>
+          </div>
         )}
       </div>
 

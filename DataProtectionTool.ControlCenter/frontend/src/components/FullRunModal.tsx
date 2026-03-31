@@ -188,7 +188,7 @@ export default function FullRunModal({
                 className="fullrun-form-select"
                 type="text"
                 value={tableName}
-                readOnly
+                disabled
               />
             </div>
           </div>

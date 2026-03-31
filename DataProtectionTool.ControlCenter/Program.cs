@@ -2051,6 +2051,7 @@ app.MapGet("/api/agents/{path}/events", async (string path, AgentRegistry regist
     {
         timestamp = e.Timestamp.ToString("O"),
         type = e.Type,
+        flowId = e.FlowId,
         summary = e.Summary,
         detail = e.Detail
     });
