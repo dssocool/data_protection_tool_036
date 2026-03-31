@@ -74,11 +74,6 @@ function hasSteps(evt: StatusEvent): boolean {
   return Array.isArray(evt.steps) && evt.steps.length > 0;
 }
 
-function isInProgress(evt: StatusEvent): boolean {
-  if (!evt.steps || evt.steps.length === 0) return false;
-  return evt.steps[evt.steps.length - 1].status === "running";
-}
-
 function eventMatchesSearch(evt: StatusEvent, query: string): boolean {
   const q = query.toLowerCase();
   if (evt.summary.toLowerCase().includes(q)) return true;
@@ -164,7 +159,6 @@ export default function EventDialog({ events, onClose }: EventDialogProps) {
               const originalIdx = events.indexOf(evt);
               const isExpanded = expandedIdx === originalIdx || autoExpandedIndices.has(originalIdx);
               const stepsPresent = hasSteps(evt);
-              const inProgress = isInProgress(evt);
 
               return (
                 <div key={originalIdx}>
