@@ -25,7 +25,7 @@ interface FullRunModalProps {
   agentPath: string;
   minimizing?: boolean;
   onClose: () => void;
-  onRun: (destConnectionRowKey: string, destSchema: string) => void;
+  onSaveAndRun: (source: FlowSource, dest: FlowDest, destConnectionRowKey: string, destSchema: string) => void;
   onAddToFlow: (source: FlowSource, dest: FlowDest) => void;
   onMinimizeEnd?: () => void;
 }
@@ -38,7 +38,7 @@ export default function FullRunModal({
   agentPath,
   minimizing,
   onClose,
-  onRun,
+  onSaveAndRun,
   onAddToFlow,
   onMinimizeEnd,
 }: FullRunModalProps) {
@@ -97,6 +97,27 @@ export default function FullRunModal({
         databaseName: destConn.databaseName,
         schema: selectedSchema,
       },
+    );
+  }
+
+  function handleSaveAndRun() {
+    if (!canSubmit || !sourceConn || !destConn) return;
+    onSaveAndRun(
+      {
+        connectionRowKey: sourceConnectionRowKey,
+        serverName: sourceConn.serverName,
+        databaseName: sourceConn.databaseName,
+        schema,
+        tableName,
+      },
+      {
+        connectionRowKey: selectedConnection,
+        serverName: destConn.serverName,
+        databaseName: destConn.databaseName,
+        schema: selectedSchema,
+      },
+      selectedConnection,
+      selectedSchema,
     );
   }
 
@@ -175,9 +196,9 @@ export default function FullRunModal({
             <button
               className="fullrun-btn fullrun-btn-run"
               disabled={!canSubmit}
-              onClick={() => onRun(selectedConnection, selectedSchema)}
+              onClick={handleSaveAndRun}
             >
-              Run
+              Save &amp; Run
             </button>
           </div>
         </div>

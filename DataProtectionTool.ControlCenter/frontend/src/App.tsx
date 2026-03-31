@@ -86,6 +86,7 @@ export default function App() {
   const tableCacheRef = useRef<Map<string, TablePreviewCache>>(new Map());
   const selectedTableRef = useRef(selectedTable);
   selectedTableRef.current = selectedTable;
+  const pendingSaveAndRunRef = useRef<{ destConnectionRowKey: string; destSchema: string; rowKey: string; schema: string; tableName: string } | null>(null);
 
   const fetchEvents = useCallback(async () => {
     const agentPath = getAgentPath();
@@ -1149,12 +1150,24 @@ export default function App() {
     setFullRunTarget({ rowKey, schema, tableName });
   }
 
-  async function handleFullRunExecute(destConnectionRowKey: string, destSchema: string) {
+  async function handleFullRunExecute(
+    destConnectionRowKey: string,
+    destSchema: string,
+    sourceRowKey?: string,
+    sourceSchema?: string,
+    sourceTableName?: string,
+  ) {
     const agentPath = getAgentPath();
-    if (!agentPath || !fullRunTarget) return;
+    const target = sourceRowKey && sourceSchema && sourceTableName
+      ? { rowKey: sourceRowKey, schema: sourceSchema, tableName: sourceTableName }
+      : fullRunTarget;
+    if (!agentPath || !target) return;
 
-    const { rowKey, schema, tableName } = fullRunTarget;
+    const { rowKey, schema, tableName } = target;
     setFullRunTarget(null);
+
+    const key = tableKey(rowKey, schema, tableName);
+    setDryRunningTables((prev) => new Set(prev).add(key));
 
     const trackedEvent: StatusEvent = {
       timestamp: new Date().toISOString(),
@@ -1251,6 +1264,11 @@ export default function App() {
     } catch (e) {
       finalizeTrackedEvent(`Full run failed: ${e instanceof Error ? e.message : String(e)}`, "error");
     } finally {
+      setDryRunningTables((prev) => {
+        const next = new Set(prev);
+        next.delete(key);
+        return next;
+      });
       fetchEvents();
     }
   }
@@ -1280,10 +1298,49 @@ export default function App() {
     }
   }
 
+  async function handleSaveAndRun(
+    source: FlowSource,
+    dest: FlowDest,
+    destConnectionRowKey: string,
+    destSchema: string,
+  ) {
+    const agentPath = getAgentPath();
+    if (!agentPath || !fullRunTarget) return;
+
+    const { rowKey, schema, tableName } = fullRunTarget;
+
+    try {
+      const res = await fetch(`/api/agents/${agentPath}/save-flow`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          sourceJson: JSON.stringify(source),
+          destJson: JSON.stringify(dest),
+        }),
+      });
+      if (res.ok) {
+        const result = await res.json();
+        if (result.success) {
+          setUnseenFlowCount((c) => c + 1);
+        }
+      }
+    } catch { /* best-effort */ }
+
+    pendingSaveAndRunRef.current = { destConnectionRowKey, destSchema, rowKey, schema, tableName };
+    setFullRunMinimizing(true);
+  }
+
   function handleMinimizeEnd() {
     setFullRunMinimizing(false);
     setFullRunTarget(null);
-    setUnseenFlowCount((c) => c + 1);
+
+    const pending = pendingSaveAndRunRef.current;
+    if (pending) {
+      pendingSaveAndRunRef.current = null;
+      handleFullRunExecute(pending.destConnectionRowKey, pending.destSchema, pending.rowKey, pending.schema, pending.tableName);
+    } else {
+      setUnseenFlowCount((c) => c + 1);
+    }
   }
 
   const tableTabCounts = useMemo(() => {
@@ -1456,7 +1513,7 @@ export default function App() {
           agentPath={getAgentPath() ?? ""}
           minimizing={fullRunMinimizing}
           onClose={() => setFullRunTarget(null)}
-          onRun={handleFullRunExecute}
+          onSaveAndRun={handleSaveAndRun}
           onAddToFlow={handleAddToFlow}
           onMinimizeEnd={handleMinimizeEnd}
         />
