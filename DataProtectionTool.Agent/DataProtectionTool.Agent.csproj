@@ -25,4 +25,9 @@
     <ProjectReference Include="..\DataProtectionTool.Contracts\DataProtectionTool.Contracts.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <TrimmerRootAssembly Include="System.Net.Http" />
+    <TrimmerRootAssembly Include="System.Net.Security" />
+  </ItemGroup>
+
 </Project>
