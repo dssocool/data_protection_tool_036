@@ -179,19 +179,25 @@
 
 @keyframes fullrun-minimize {
   0% {
-    transform: scale(1) translate(0, 0);
+    transform: translate(0, 0) scale(1);
     opacity: 1;
     border-radius: 6px;
     box-shadow: 0 8px 32px rgba(0, 0, 0, 0.25);
   }
-  30% {
-    transform: scale(0.55) translate(0, 0);
+  25% {
+    transform: translate(0, 0) scale(0.55);
     opacity: 1;
     border-radius: 12px;
     box-shadow: 0 4px 24px rgba(0, 120, 212, 0.35);
   }
+  85% {
+    transform: translate(var(--minimize-tx, -800px), var(--minimize-ty, -300px)) scale(0.08);
+    opacity: 1;
+    border-radius: 50%;
+    box-shadow: 0 0 8px rgba(0, 120, 212, 0.3);
+  }
   100% {
-    transform: scale(0.02) translate(var(--minimize-tx, -800px), var(--minimize-ty, -300px));
+    transform: translate(var(--minimize-tx, -800px), var(--minimize-ty, -300px)) scale(0.02);
     opacity: 0;
     border-radius: 50%;
     box-shadow: 0 0 0 rgba(0, 120, 212, 0);
@@ -200,16 +206,102 @@
 
 @keyframes fullrun-overlay-fade {
   0% { background: rgba(0, 0, 0, 0.4); }
-  40% { background: rgba(0, 0, 0, 0.15); }
+  30% { background: rgba(0, 0, 0, 0.1); }
   100% { background: transparent; }
 }
 
 .fullrun-modal-minimizing {
-  animation: fullrun-minimize 700ms cubic-bezier(0.4, 0, 0.2, 1) forwards;
+  animation: fullrun-minimize 800ms cubic-bezier(0.4, 0, 0.2, 1) forwards;
   pointer-events: none;
 }
 
 .fullrun-overlay-minimizing {
-  animation: fullrun-overlay-fade 700ms ease-out forwards;
+  animation: fullrun-overlay-fade 800ms ease-out forwards;
   pointer-events: none;
+}
+
+/* ── Confirm dialog (shown on top of FullRunModal) ──── */
+
+.fullrun-confirm-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 2147483647;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.35);
+}
+
+.fullrun-confirm-dialog {
+  background: #fff;
+  border-radius: 10px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.22);
+  padding: 24px 28px 20px;
+  min-width: 340px;
+  max-width: 480px;
+  animation: fullrun-confirm-fade-in 0.15s ease-out;
+}
+
+@keyframes fullrun-confirm-fade-in {
+  from {
+    opacity: 0;
+    transform: scale(0.95) translateY(-8px);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+
+.fullrun-confirm-title {
+  margin: 0 0 8px;
+  font-size: 16px;
+  font-weight: 600;
+  color: #222;
+}
+
+.fullrun-confirm-body {
+  margin: 0 0 20px;
+  font-size: 13.5px;
+  line-height: 1.5;
+  color: #555;
+}
+
+.fullrun-confirm-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.fullrun-confirm-btn {
+  height: 32px;
+  padding: 0 16px;
+  font-size: 13px;
+  font-weight: 500;
+  border-radius: 6px;
+  border: 1px solid transparent;
+  cursor: pointer;
+  transition: background 0.12s, border-color 0.12s;
+}
+
+.fullrun-confirm-btn-cancel {
+  color: #333;
+  background: #f0f0f0;
+  border-color: #d0d0d0;
+}
+
+.fullrun-confirm-btn-cancel:hover {
+  background: #e5e5e5;
+  border-color: #bbb;
+}
+
+.fullrun-confirm-btn-confirm {
+  color: #fff;
+  background: #0078d4;
+  border-color: #0078d4;
+}
+
+.fullrun-confirm-btn-confirm:hover {
+  background: #006cbe;
+  border-color: #006cbe;
 }

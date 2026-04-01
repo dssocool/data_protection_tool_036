@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import type { SavedConnection } from "./ConnectionsPanel";
 import "./FullRunModal.css";
 
@@ -49,6 +50,7 @@ export default function FullRunModal({
   const [schemas, setSchemas] = useState<string[]>([]);
   const [selectedSchema, setSelectedSchema] = useState("");
   const [loadingSchemas, setLoadingSchemas] = useState(false);
+  const [confirmRunOpen, setConfirmRunOpen] = useState(false);
 
   const sourceConn = connections.find((c) => c.rowKey === sourceConnectionRowKey);
 
@@ -125,8 +127,14 @@ export default function FullRunModal({
     );
   }
 
-  function handleSaveAndRun() {
+  function handleSaveAndRunClick() {
+    if (!canSubmit) return;
+    setConfirmRunOpen(true);
+  }
+
+  function handleConfirmSaveAndRun() {
     if (!canSubmit || !sourceConn || !destConn) return;
+    setConfirmRunOpen(false);
     onSaveAndRun(
       {
         connectionRowKey: sourceConnectionRowKey,
@@ -233,13 +241,41 @@ export default function FullRunModal({
             <button
               className="fullrun-btn fullrun-btn-run"
               disabled={!canSubmit}
-              onClick={handleSaveAndRun}
+              onClick={handleSaveAndRunClick}
             >
               Save &amp; Run
             </button>
           </div>
         </div>
       </div>
+
+      {confirmRunOpen && destConn &&
+        createPortal(
+          <div className="fullrun-confirm-overlay" onMouseDown={() => setConfirmRunOpen(false)}>
+            <div className="fullrun-confirm-dialog" onMouseDown={(e) => e.stopPropagation()}>
+              <h3 className="fullrun-confirm-title">Confirm Run</h3>
+              <p className="fullrun-confirm-body">
+                This will overwrite all data in this table:{" "}
+                <strong>{destConn.databaseName}.{selectedSchema}.{tableName}</strong>
+              </p>
+              <div className="fullrun-confirm-actions">
+                <button
+                  className="fullrun-confirm-btn fullrun-confirm-btn-cancel"
+                  onClick={() => setConfirmRunOpen(false)}
+                >
+                  Cancel
+                </button>
+                <button
+                  className="fullrun-confirm-btn fullrun-confirm-btn-confirm"
+                  onClick={handleConfirmSaveAndRun}
+                >
+                  Confirm
+                </button>
+              </div>
+            </div>
+          </div>,
+          document.body
+        )}
     </div>
   );
 }
