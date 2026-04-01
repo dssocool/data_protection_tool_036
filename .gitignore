@@ -68,3 +68,5 @@ DataProtectionTool.ControlCenter/appsettings.Development.json
 *.tmp
 *.orig
 *.log
+
+/server/

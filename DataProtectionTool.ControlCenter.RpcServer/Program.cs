@@ -1,19 +1,10 @@
 using Azure.Data.Tables;
 using Azure.Storage;
-using Microsoft.AspNetCore.Server.Kestrel.Core;
 using DataProtectionTool.ControlCenter.RpcServer.Interceptors;
 using DataProtectionTool.ControlCenter.RpcServer.Models;
 using DataProtectionTool.ControlCenter.RpcServer.Services;
 
 var builder = WebApplication.CreateBuilder(args);
-
-builder.WebHost.ConfigureKestrel(options =>
-{
-    options.ListenAnyIP(8191, listenOptions =>
-    {
-        listenOptions.Protocols = HttpProtocols.Http2;
-    });
-});
 
 builder.Services.AddGrpc(options =>
 {
