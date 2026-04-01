@@ -240,6 +240,15 @@ export default function App() {
     fetchConnections();
   }
 
+  function handleDismissNewBadge(rowKey: string) {
+    setNewConnectionRowKeys((prev) => {
+      const next = new Set(prev);
+      next.delete(rowKey);
+      return next;
+    });
+    setUnseenConnectionCount((c) => Math.max(0, c - 1));
+  }
+
   async function handleExpandConnection(rowKey: string) {
     const agentPath = getAgentPath();
     if (!agentPath) return;
@@ -1436,6 +1445,7 @@ export default function App() {
                 flowsBadgeCount={unseenFlowCount}
                 connectionsBadgeCount={unseenConnectionCount}
                 newConnectionRowKeys={newConnectionRowKeys}
+                onDismissNewBadge={handleDismissNewBadge}
                 onExpandConnection={handleExpandConnection}
                 onTableClick={handleTableClick}
                 onQueryClick={handleQueryClick}

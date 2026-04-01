@@ -60,6 +60,7 @@ interface ConnectionsPanelProps {
   flowsBadgeCount?: number;
   connectionsBadgeCount?: number;
   newConnectionRowKeys?: Set<string>;
+  onDismissNewBadge?: (rowKey: string) => void;
 }
 
 const MIN_WIDTH = 200;
@@ -89,6 +90,7 @@ export default function ConnectionsPanel({
   flowsBadgeCount,
   connectionsBadgeCount,
   newConnectionRowKeys,
+  onDismissNewBadge,
 }: ConnectionsPanelProps) {
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
   const isResizing = useRef(false);
@@ -178,6 +180,9 @@ export default function ConnectionsPanel({
   }, [connections]);
 
   function handleToggle(rowKey: string) {
+    if (newConnectionRowKeys?.has(rowKey)) {
+      onDismissNewBadge?.(rowKey);
+    }
     const next = new Set(expanded);
     if (next.has(rowKey)) {
       next.delete(rowKey);
