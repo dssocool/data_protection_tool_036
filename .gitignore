@@ -62,6 +62,9 @@ wwwroot/
 DataProtectionTool.ControlCenter/appsettings.json
 DataProtectionTool.ControlCenter/appsettings.Development.json
 
+## Environment variable files
+.env
+
 ## Misc
 *.swp
 *.bak
