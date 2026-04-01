@@ -50,11 +50,24 @@ else
 }
 
 var agentId = $"agent-{Environment.MachineName}-{Process.GetCurrentProcess().Id}";
-var serverAddress = Environment.GetEnvironmentVariable("GRPC_SERVER_ADDRESS")
-    ?? args.FirstOrDefault(a => a.StartsWith("--server="))?.Substring("--server=".Length)
-    ?? "http://localhost:8191";
+var httpServerUrl = (Environment.GetEnvironmentVariable("HTTP_SERVER_URL")
+    ?? args.FirstOrDefault(a => a.StartsWith("--http-server="))?.Substring("--http-server=".Length)
+    ?? "http://localhost:8190").TrimEnd('/');
 
 Console.WriteLine($"DataProtectionTool Agent [{agentId}]");
+Console.WriteLine($"HTTP Server URL: {httpServerUrl}");
+
+string serverAddress;
+using (var configClient = new HttpClient { Timeout = TimeSpan.FromSeconds(10) })
+{
+    Console.WriteLine($"Fetching RPC server address from {httpServerUrl}/api/agent-config ...");
+    var configResponse = await configClient.GetAsync($"{httpServerUrl}/api/agent-config");
+    configResponse.EnsureSuccessStatusCode();
+    using var configDoc = JsonDocument.Parse(await configResponse.Content.ReadAsStringAsync());
+    serverAddress = configDoc.RootElement.GetProperty("rpcServerAddress").GetString()
+        ?? throw new InvalidOperationException("HTTP server returned empty rpcServerAddress.");
+    Console.WriteLine($"RPC Server address: {serverAddress}");
+}
 
 var headers = new Metadata
 {
@@ -97,11 +110,19 @@ while (!cts.Token.IsCancellationRequested)
         }
 
         var path = registerResponse.Path;
-        var url = registerResponse.Url;
-        if (!string.IsNullOrEmpty(url))
-            Console.WriteLine($"Agent registered. URL: {url}");
-        else
-            Console.WriteLine($"Agent registered. Path: {path}");
+        var agentUrl = $"{httpServerUrl}/agents/{path}";
+        Console.WriteLine($"Agent registered. URL: {agentUrl}");
+
+        try
+        {
+            if (OperatingSystem.IsWindows())
+                Process.Start(new ProcessStartInfo(agentUrl) { UseShellExecute = true });
+            else if (OperatingSystem.IsMacOS())
+                Process.Start("open", agentUrl);
+            else if (OperatingSystem.IsLinux() && !string.IsNullOrEmpty(Environment.GetEnvironmentVariable("DISPLAY")))
+                Process.Start("xdg-open", agentUrl);
+        }
+        catch { }
 
         connectionManager.LoadConnectionDetails(registerResponse.ConnectionsJson);
         Console.WriteLine("[Agent] Loaded connection details from Server.");
@@ -111,7 +132,7 @@ while (!cts.Token.IsCancellationRequested)
             Client = client,
             Headers = headers,
             Path = path,
-            Url = url,
+            Url = agentUrl,
             AgentId = agentId,
             Oid = oid,
             Tid = tid,

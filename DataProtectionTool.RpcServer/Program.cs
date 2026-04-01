@@ -1,6 +1,5 @@
 using Azure.Data.Tables;
 using DataProtectionTool.RpcServer.Interceptors;
-using DataProtectionTool.RpcServer.Models;
 using DataProtectionTool.RpcServer.Services;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -42,12 +41,6 @@ if (tableServiceClient != null)
         "Events",
         sp.GetRequiredService<ILogger<ClientTableService>>()));
 }
-
-var httpServerConfig = new HttpServerConfig
-{
-    BaseUrl = builder.Configuration.GetSection("HttpServer")["BaseUrl"] ?? ""
-};
-builder.Services.AddSingleton(httpServerConfig);
 
 var app = builder.Build();
 

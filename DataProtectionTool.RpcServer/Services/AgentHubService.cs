@@ -10,17 +10,14 @@ public class AgentHubService : AgentHub.AgentHubBase
     private readonly ILogger<AgentHubService> _logger;
     private readonly AgentRegistry _registry;
     private readonly ClientTableService? _clientTableService;
-    private readonly HttpServerConfig _httpServerConfig;
 
     public AgentHubService(
         ILogger<AgentHubService> logger,
         AgentRegistry registry,
-        HttpServerConfig httpServerConfig,
         ClientTableService? clientTableService = null)
     {
         _logger = logger;
         _registry = registry;
-        _httpServerConfig = httpServerConfig;
         _clientTableService = clientTableService;
     }
 
@@ -82,20 +79,15 @@ public class AgentHubService : AgentHub.AgentHubBase
             _logger.LogWarning(ex, "Failed to fetch connections for agent {AgentId}", request.AgentId);
         }
 
-        var url = string.IsNullOrEmpty(_httpServerConfig.BaseUrl)
-            ? ""
-            : $"{_httpServerConfig.BaseUrl.TrimEnd('/')}/agents/{path}";
-
         _logger.LogInformation(
-            "Agent {AgentId} registered — oid={Oid}, tid={Tid}, path={Path}, url={Url}",
-            request.AgentId, oid, tid, path, url);
+            "Agent {AgentId} registered — oid={Oid}, tid={Tid}, path={Path}",
+            request.AgentId, oid, tid, path);
 
         return new RegisterResponse
         {
             Success = true,
             Path = path,
             ConnectionsJson = connectionsJson,
-            Url = url
         };
     }
 

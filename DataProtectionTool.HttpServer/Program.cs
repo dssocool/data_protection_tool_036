@@ -211,6 +211,11 @@ app.UseStaticFiles();
 
 app.MapGet("/", () => "DataProtectionTool HttpServer is running.");
 
+app.MapGet("/api/agent-config", () =>
+{
+    return Results.Ok(new { rpcServerAddress = rpcServerAddress ?? "" });
+});
+
 app.MapGet("/agents/{path}", async (string path, RpcAgentProxy agentProxy, IWebHostEnvironment env) =>
 {
     if (!await agentProxy.TryGetAsync(path))
