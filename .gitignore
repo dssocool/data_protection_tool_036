@@ -70,3 +70,4 @@ DataProtectionTool.ControlCenter/appsettings.Development.json
 *.log
 
 /server/
+/client/

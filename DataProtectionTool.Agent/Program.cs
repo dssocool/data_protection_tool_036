@@ -50,7 +50,9 @@ else
 }
 
 var agentId = $"agent-{Environment.MachineName}-{Process.GetCurrentProcess().Id}";
-var serverAddress = "http://localhost:8191";
+var serverAddress = Environment.GetEnvironmentVariable("GRPC_SERVER_ADDRESS")
+    ?? args.FirstOrDefault(a => a.StartsWith("--server="))?.Substring("--server=".Length)
+    ?? "http://localhost:8191";
 
 Console.WriteLine($"DataProtectionTool Agent [{agentId}]");
 
@@ -78,12 +80,18 @@ while (!cts.Token.IsCancellationRequested)
 
     try
     {
+        var handler = new SocketsHttpHandler
+        {
+            EnableMultipleHttp2Connections = true,
+            PooledConnectionIdleTimeout = Timeout.InfiniteTimeSpan,
+            KeepAlivePingDelay = TimeSpan.FromSeconds(60),
+            KeepAlivePingTimeout = TimeSpan.FromSeconds(30),
+        };
+
         using var channel = GrpcChannel.ForAddress(serverAddress, new GrpcChannelOptions
         {
-            HttpHandler = new SocketsHttpHandler
-            {
-                EnableMultipleHttp2Connections = true,
-            },
+            HttpHandler = handler,
+            DisposeHttpClient = true,
         });
         var client = new AgentHub.AgentHubClient(channel);
 
