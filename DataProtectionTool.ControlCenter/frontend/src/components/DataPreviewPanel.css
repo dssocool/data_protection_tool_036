@@ -112,7 +112,7 @@
 .data-preview-column-rules {
   flex-shrink: 0;
   border-top: 1px solid #e8e8e8;
-  background: #f3f3f3;
+  background: #f4e4b7;
 }
 
 .data-preview-column-rules-scroll {
@@ -123,7 +123,7 @@
   display: flex;
   padding: 0 14px;
   border-bottom: 1px solid #e8e8e8;
-  background: #f3f3f3;
+  background: #f4e4b7;
 }
 
 .data-preview-column-rules-tab {

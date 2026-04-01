@@ -1,8 +1,33 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import type { FlowSource, FlowDest } from "./FullRunModal";
-import type { StatusEvent } from "./StatusBar";
+import type { StatusEvent, StatusEventStep } from "./StatusBar";
 import "./FlowsPanel.css";
+
+interface ConsolidatedStep extends StatusEventStep {
+  pollCount?: number;
+}
+
+function consolidateSteps(steps: StatusEventStep[]): ConsolidatedStep[] {
+  const result: ConsolidatedStep[] = [];
+  for (const step of steps) {
+    if (!step.message.startsWith("Polling ")) {
+      result.push({ ...step });
+      continue;
+    }
+    const prefix = step.message.replace(/:.*$/, "");
+    const prev = result[result.length - 1];
+    if (prev && prev.message.startsWith("Polling ") && prev.message.replace(/:.*$/, "") === prefix) {
+      prev.message = step.message;
+      prev.status = step.status;
+      prev.timestamp = step.timestamp;
+      prev.pollCount = (prev.pollCount ?? 1) + 1;
+    } else {
+      result.push({ ...step, pollCount: 1 });
+    }
+  }
+  return result;
+}
 
 export interface FlowItem {
   rowKey: string;
@@ -97,6 +122,7 @@ export default function FlowsPanel({
   const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false);
   const [confirmRunOpen, setConfirmRunOpen] = useState(false);
   const [selectedFlowRowKey, setSelectedFlowRowKey] = useState<string | null>(null);
+  const [expandedHistoryIdx, setExpandedHistoryIdx] = useState<number | null>(null);
   const actionRef = useRef<HTMLDivElement>(null);
 
   const resizingCol = useRef<number | null>(null);
@@ -470,9 +496,21 @@ export default function FlowsPanel({
                   const isError = evt.summary.toLowerCase().includes("error") || evt.summary.toLowerCase().includes("failed");
                   const isTimeout = evt.summary.toLowerCase().includes("timeout");
                   const badgeClass = isError ? "flows-history-badge-error" : isTimeout ? "flows-history-badge-warn" : "flows-history-badge-success";
+                  const hasSteps = Array.isArray(evt.steps) && evt.steps.length > 0;
+                  const isExpanded = expandedHistoryIdx === idx;
                   return (
                     <div className="flows-history-item" key={idx}>
-                      <div className="flows-history-item-header">
+                      <div
+                        className={`flows-history-item-header${hasSteps ? " flows-history-item-expandable" : ""}`}
+                        onClick={() => hasSteps && setExpandedHistoryIdx(isExpanded ? null : idx)}
+                      >
+                        {hasSteps && (
+                          <span className={`flows-history-chevron${isExpanded ? " flows-history-chevron-open" : ""}`}>
+                            <svg width="10" height="10" viewBox="0 0 10 10">
+                              <path d="M3 2 L7 5 L3 8" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+                            </svg>
+                          </span>
+                        )}
                         <span className="flows-history-item-time">
                           {formatHistoryTime(evt.timestamp)}
                         </span>
@@ -483,6 +521,37 @@ export default function FlowsPanel({
                       <div className="flows-history-item-summary">{evt.summary}</div>
                       {evt.detail && (
                         <div className="flows-history-item-detail">{evt.detail}</div>
+                      )}
+                      {isExpanded && hasSteps && (
+                        <div className="flows-history-steps">
+                          {consolidateSteps(evt.steps!).map((step, si) => (
+                            <div className="flows-history-step" key={si}>
+                              <span className={`flows-history-step-icon flows-history-step-icon-${step.status}`}>
+                                {step.status === "done" && (
+                                  <svg width="10" height="10" viewBox="0 0 10 10">
+                                    <path d="M2 5 L4.5 7.5 L8 2.5" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+                                  </svg>
+                                )}
+                                {step.status === "skipped" && (
+                                  <svg width="10" height="10" viewBox="0 0 10 10">
+                                    <path d="M1.5 2 L4.5 5 L1.5 8" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+                                    <path d="M5.5 2 L8.5 5 L5.5 8" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+                                  </svg>
+                                )}
+                                {step.status === "running" && <span className="flows-history-step-spinner" />}
+                                {step.status === "error" && (
+                                  <svg width="10" height="10" viewBox="0 0 10 10">
+                                    <path d="M3 3 L7 7 M7 3 L3 7" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+                                  </svg>
+                                )}
+                              </span>
+                              <span className="flows-history-step-message">{step.message}</span>
+                              {step.pollCount != null && step.pollCount > 1 && (
+                                <span className="flows-history-step-poll-count">x{step.pollCount}</span>
+                              )}
+                            </div>
+                          ))}
+                        </div>
                       )}
                     </div>
                   );

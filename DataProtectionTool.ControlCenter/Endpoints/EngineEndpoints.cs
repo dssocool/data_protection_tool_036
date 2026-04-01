@@ -29,6 +29,13 @@ public static class EngineEndpoints
             var body = await request.ReadBodyAsync();
 
             SseWriter.SetupHeaders(response);
+            var statusSteps = new List<string>();
+
+            async Task WriteStatus(string msg)
+            {
+                await SseWriter.WriteEventAsync(response, "status", msg);
+                statusSteps.Add(msg);
+            }
 
             try
             {
@@ -54,7 +61,7 @@ public static class EngineEndpoints
                 var engineBaseUrl = engineApi.BaseUrl;
 
                 // Copy preview files from data_preview container to configured (engine) container
-                await SseWriter.WriteEventAsync(response, "status", "Copying preview files...");
+                await WriteStatus("Copying preview files...");
                 var previewContainerClient = blobClient.GetBlobContainerClient(blobConfig.PreviewContainer);
                 var engineContainerClient = blobClient.GetBlobContainerClient(blobConfig.Container);
 
@@ -69,7 +76,7 @@ public static class EngineEndpoints
                 }
 
                 // Fetch original SQL types from the database via the agent
-                await SseWriter.WriteEventAsync(response, "status", "Fetching SQL column types...");
+                await WriteStatus("Fetching SQL column types...");
                 var sqlColumnTypes = new List<string>();
                 try
                 {
@@ -123,7 +130,7 @@ public static class EngineEndpoints
 
                 if (string.IsNullOrEmpty(fileFormatId))
                 {
-                    await SseWriter.WriteEventAsync(response, "status", "Creating file format...");
+                    await WriteStatus("Creating file format...");
                     var containerClient = blobClient.GetBlobContainerClient(blobConfig.Container);
                     var blobRef = containerClient.GetBlobClient(previewFilenames[0]);
                     using var downloadStream = new MemoryStream();
@@ -146,11 +153,11 @@ public static class EngineEndpoints
                 }
                 else
                 {
-                    await SseWriter.WriteEventAsync(response, "status", "Creating file format... (skipped, already exists)");
+                    await WriteStatus("Creating file format... (skipped, already exists)");
                 }
 
                 // Create a file ruleset
-                await SseWriter.WriteEventAsync(response, "status", "Creating file ruleset...");
+                await WriteStatus("Creating file ruleset...");
                 var dryRunUuid = Guid.NewGuid().ToString("N");
                 var rulesetName = $"ruleset_{dryRunUuid}";
 
@@ -163,11 +170,11 @@ public static class EngineEndpoints
 
                 // Create file metadata for each preview file
                 var (metaBatchSuccess, fileMetadataIds) = await EngineRelayService.CreateFileMetadataBatchAsync(
-                    engineApi, response, previewFilenames, fileRulesetId, fileFormatId);
+                    engineApi, response, previewFilenames, fileRulesetId, fileFormatId, statusSteps);
                 if (!metaBatchSuccess) return;
 
                 // Create profile job
-                await SseWriter.WriteEventAsync(response, "status", "Creating profile job...");
+                await WriteStatus("Creating profile job...");
                 using var profileJobResp = await EngineRelayService.RelayHttpAsync(connection, engineBaseUrl, dataEngineConfig.AuthorizationToken, "POST", "profile-jobs", new
                 {
                     jobName = $"profile_{dryRunUuid}",
@@ -190,7 +197,7 @@ public static class EngineEndpoints
                 }
 
                 // Create masking job
-                await SseWriter.WriteEventAsync(response, "status", "Creating masking job...");
+                await WriteStatus("Creating masking job...");
                 using var maskingJobResp = await EngineRelayService.RelayHttpAsync(connection, engineBaseUrl, dataEngineConfig.AuthorizationToken, "POST", "masking-jobs", new
                 {
                     jobName = $"masking_{dryRunUuid}",
@@ -213,7 +220,7 @@ public static class EngineEndpoints
                 }
 
                 // Run the profile job
-                await SseWriter.WriteEventAsync(response, "status", "Running profile job...");
+                await WriteStatus("Running profile job...");
                 using var profileExecResp = await EngineRelayService.RelayHttpAsync(connection, engineBaseUrl, dataEngineConfig.AuthorizationToken, "POST", "executions", new
                 {
                     jobId = int.Parse(profileJobId)
@@ -236,7 +243,7 @@ public static class EngineEndpoints
                 // Poll profile job status
                 var profileStatus = await EngineRelayService.PollExecutionAsync(
                     connection, engineBaseUrl, dataEngineConfig.AuthorizationToken,
-                    profileExecId, response, "profile job");
+                    profileExecId, response, "profile job", statusSteps: statusSteps);
 
                 if (profileStatus is not ("SUCCEEDED" or "WARNING"))
                 {
@@ -247,7 +254,7 @@ public static class EngineEndpoints
                 // Apply mapping rules to fix column rules with incompatible algorithm types
                 if (previewHeaders.Count > 0 && previewColumnTypes.Count == previewHeaders.Count)
                 {
-                    await SseWriter.WriteEventAsync(response, "status", "Applying mapping rules to column rules...");
+                    await WriteStatus("Applying mapping rules to column rules...");
 
                     var sqlTypeByColumn = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
                     for (var i = 0; i < previewHeaders.Count; i++)
@@ -291,7 +298,7 @@ public static class EngineEndpoints
                             if (allowedTypes.Contains(maskType))
                                 continue;
 
-                            await SseWriter.WriteEventAsync(response, "status", $"Fixing type mismatch: {fieldName} ({sqlType}) — algorithm type {maskType} not allowed...");
+                            await WriteStatus($"Fixing type mismatch: {fieldName} ({sqlType}) — algorithm type {maskType} not allowed...");
                             using var fixResp = await EngineRelayService.RelayHttpAsync(connection, engineBaseUrl, dataEngineConfig.AuthorizationToken, "PUT", $"file-field-metadata/{metadataId}", new
                             {
                                 isMasked = false,
@@ -301,18 +308,18 @@ public static class EngineEndpoints
                         }
 
                         if (fixedCount > 0)
-                            await SseWriter.WriteEventAsync(response, "status", $"Fixed {fixedCount} column rule(s) with incompatible algorithm types.");
+                            await WriteStatus($"Fixed {fixedCount} column rule(s) with incompatible algorithm types.");
                         else
-                            await SseWriter.WriteEventAsync(response, "status", "All column rules have compatible algorithm types.");
+                            await WriteStatus("All column rules have compatible algorithm types.");
                     }
                     catch (Exception ex)
                     {
-                        await SseWriter.WriteEventAsync(response, "status", $"Warning: Could not apply mapping rules: {ex.Message}");
+                        await WriteStatus($"Warning: Could not apply mapping rules: {ex.Message}");
                     }
                 }
 
                 // Run the masking job
-                await SseWriter.WriteEventAsync(response, "status", "Running masking job...");
+                await WriteStatus("Running masking job...");
                 using var maskingExecResp = await EngineRelayService.RelayHttpAsync(connection, engineBaseUrl, dataEngineConfig.AuthorizationToken, "POST", "executions", new
                 {
                     jobId = int.Parse(maskingJobId)
@@ -335,7 +342,7 @@ public static class EngineEndpoints
                 // Poll masking job status
                 var maskingStatus = await EngineRelayService.PollExecutionAsync(
                     connection, engineBaseUrl, dataEngineConfig.AuthorizationToken,
-                    maskingExecId, response, "masking job");
+                    maskingExecId, response, "masking job", statusSteps: statusSteps);
 
                 if (maskingStatus is not ("SUCCEEDED" or "WARNING"))
                 {
@@ -344,7 +351,7 @@ public static class EngineEndpoints
                 }
 
                 // Copy masked files from engine container back to preview container
-                await SseWriter.WriteEventAsync(response, "status", "Copying masked results...");
+                await WriteStatus("Copying masked results...");
                 var maskedFilenames = new List<string>();
                 foreach (var previewFile in previewFilenames)
                 {
@@ -360,7 +367,8 @@ public static class EngineEndpoints
 
                 var dryRunEvtSummary = $"DP preview completed: fileFormatId={fileFormatId}, fileRulesetId={fileRulesetId}, " +
                     $"profileJobId={profileJobId} ({profileStatus}), maskingJobId={maskingJobId} ({maskingStatus})";
-                _ = clientTableService.AppendEventAsync(partitionKey, "dp_preview", dryRunEvtSummary);
+                var stepsDetail = JsonSerializer.Serialize(statusSteps);
+                _ = clientTableService.AppendEventAsync(partitionKey, "dp_preview", dryRunEvtSummary, stepsDetail);
                 await SseWriter.WriteEventAsync(response, "event", JsonSerializer.Serialize(new { timestamp = DateTime.UtcNow.ToString("O"), type = "dp_preview", summary = dryRunEvtSummary, detail = "" }));
 
                 var completeJson = JsonSerializer.Serialize(new
@@ -381,15 +389,16 @@ public static class EngineEndpoints
             catch (TimeoutException)
             {
                 var evtSummary = "DP preview: timeout";
-                var evtDetail = "Agent did not respond within 120 seconds.";
-                _ = clientTableService.AppendEventAsync(partitionKey, "dp_preview", evtSummary, evtDetail);
-                await SseWriter.WriteEventAsync(response, "event", JsonSerializer.Serialize(new { timestamp = DateTime.UtcNow.ToString("O"), type = "dp_preview", summary = evtSummary, detail = evtDetail }));
+                var stepsDetail = JsonSerializer.Serialize(statusSteps);
+                _ = clientTableService.AppendEventAsync(partitionKey, "dp_preview", evtSummary, stepsDetail);
+                await SseWriter.WriteEventAsync(response, "event", JsonSerializer.Serialize(new { timestamp = DateTime.UtcNow.ToString("O"), type = "dp_preview", summary = evtSummary, detail = "" }));
                 await SseWriter.WriteErrorAsync(response, "Agent did not respond within 120 seconds.");
             }
             catch (Exception ex)
             {
                 var evtSummary = $"DP preview error: {ex.Message}";
-                _ = clientTableService.AppendEventAsync(partitionKey, "dp_preview", evtSummary);
+                var stepsDetail = JsonSerializer.Serialize(statusSteps);
+                _ = clientTableService.AppendEventAsync(partitionKey, "dp_preview", evtSummary, stepsDetail);
                 await SseWriter.WriteEventAsync(response, "event", JsonSerializer.Serialize(new { timestamp = DateTime.UtcNow.ToString("O"), type = "dp_preview", summary = evtSummary, detail = "" }));
                 await SseWriter.WriteErrorAsync(response, $"DP preview error: {ex.Message}");
             }
@@ -414,6 +423,13 @@ public static class EngineEndpoints
             var body = await request.ReadBodyAsync();
 
             SseWriter.SetupHeaders(response);
+            var statusSteps = new List<string>();
+
+            async Task WriteStatus(string msg)
+            {
+                await SseWriter.WriteEventAsync(response, "status", msg);
+                statusSteps.Add(msg);
+            }
 
             var flowId = "";
             using (var preDoc = JsonDocument.Parse(body))
@@ -461,7 +477,7 @@ public static class EngineEndpoints
                 }
 
                 // Export full table via agent
-                await SseWriter.WriteEventAsync(response, "status", "Exporting full table...");
+                await WriteStatus("Exporting full table...");
                 var uniqueId = await clientTableService.GetUserIdAsync(partitionKey);
                 if (string.IsNullOrWhiteSpace(uniqueId) || !EndpointHelpers.IsDigitsOnly(uniqueId))
                 {
@@ -501,7 +517,7 @@ public static class EngineEndpoints
                 await SseWriter.WriteEventAsync(response, "event", JsonSerializer.Serialize(new { timestamp = DateTime.UtcNow.ToString("O"), type = "dp_run", summary = exportEvtSummary, detail = "" }));
 
                 // Create file ruleset
-                await SseWriter.WriteEventAsync(response, "status", "Creating file ruleset...");
+                await WriteStatus("Creating file ruleset...");
                 var fullRunUuid = Guid.NewGuid().ToString("N");
 
                 var (rulesetSuccess, fileRulesetId, _) = await engineApi.CreateFileRulesetAsync(
@@ -514,11 +530,11 @@ public static class EngineEndpoints
 
                 // Create file metadata for each exported file
                 var (metaBatchSuccess, fileMetadataIds) = await EngineRelayService.CreateFileMetadataBatchAsync(
-                    engineApi, response, exportFilenames, fileRulesetId, fileFormatId);
+                    engineApi, response, exportFilenames, fileRulesetId, fileFormatId, statusSteps);
                 if (!metaBatchSuccess) return;
 
                 // Create masking job
-                await SseWriter.WriteEventAsync(response, "status", "Creating masking job...");
+                await WriteStatus("Creating masking job...");
                 using var maskingJobResp = await EngineRelayService.RelayHttpAsync(connection, engineBaseUrl, dataEngineConfig.AuthorizationToken, "POST", "masking-jobs", new
                 {
                     jobName = $"fullrun_masking_{fullRunUuid}",
@@ -541,7 +557,7 @@ public static class EngineEndpoints
                 }
 
                 // Execute masking job
-                await SseWriter.WriteEventAsync(response, "status", "Executing masking job...");
+                await WriteStatus("Executing masking job...");
                 using var maskingExecResp = await EngineRelayService.RelayHttpAsync(connection, engineBaseUrl, dataEngineConfig.AuthorizationToken, "POST", "executions", new
                 {
                     jobId = int.Parse(maskingJobId)
@@ -562,10 +578,10 @@ public static class EngineEndpoints
                 }
 
                 // Poll masking job status
-                await SseWriter.WriteEventAsync(response, "status", "Waiting for masking to complete...");
+                await WriteStatus("Waiting for masking to complete...");
                 var maskingStatus = await EngineRelayService.PollExecutionAsync(
                     connection, engineBaseUrl, dataEngineConfig.AuthorizationToken,
-                    maskingExecId, response, "", maxIterations: 600);
+                    maskingExecId, response, "", maxIterations: 600, statusSteps: statusSteps);
 
                 if (maskingStatus is not ("SUCCEEDED" or "WARNING"))
                 {
@@ -574,11 +590,11 @@ public static class EngineEndpoints
                 }
 
                 // Load masked data to destination table
-                await SseWriter.WriteEventAsync(response, "status", "Loading masked data to destination...");
+                await WriteStatus("Loading masked data to destination...");
                 for (var fi = 0; fi < exportFilenames.Count; fi++)
                 {
                     var exportFile = exportFilenames[fi];
-                    await SseWriter.WriteEventAsync(response, "status", $"Loading masked file to destination... ({fi + 1} of {exportFilenames.Count})");
+                    await WriteStatus($"Loading masked file to destination... ({fi + 1} of {exportFilenames.Count})");
 
                     var loadPayload = JsonSerializer.Serialize(new
                     {
@@ -607,7 +623,8 @@ public static class EngineEndpoints
                 var fullRunEvtSummary = $"DP run completed: fileFormatId={fileFormatId}, fileRulesetId={fileRulesetId}, " +
                     $"maskingJobId={maskingJobId} ({maskingStatus}), files={exportFilenames.Count}, " +
                     $"destination=[{destSchema}].{tableName}";
-                _ = clientTableService.AppendEventAsync(partitionKey, "dp_run", flowId, fullRunEvtSummary);
+                var stepsDetail = JsonSerializer.Serialize(statusSteps);
+                _ = clientTableService.AppendEventAsync(partitionKey, "dp_run", flowId, fullRunEvtSummary, stepsDetail);
                 await SseWriter.WriteEventAsync(response, "event", JsonSerializer.Serialize(new { timestamp = DateTime.UtcNow.ToString("O"), type = "dp_run", summary = fullRunEvtSummary, detail = "" }));
 
                 var completeJson = JsonSerializer.Serialize(new
@@ -625,15 +642,16 @@ public static class EngineEndpoints
             catch (TimeoutException)
             {
                 var evtSummary = "DP run: timeout";
-                var evtDetail = "Agent did not respond in time.";
-                _ = clientTableService.AppendEventAsync(partitionKey, "dp_run", flowId, evtSummary, evtDetail);
-                await SseWriter.WriteEventAsync(response, "event", JsonSerializer.Serialize(new { timestamp = DateTime.UtcNow.ToString("O"), type = "dp_run", summary = evtSummary, detail = evtDetail }));
+                var stepsDetail = JsonSerializer.Serialize(statusSteps);
+                _ = clientTableService.AppendEventAsync(partitionKey, "dp_run", flowId, evtSummary, stepsDetail);
+                await SseWriter.WriteEventAsync(response, "event", JsonSerializer.Serialize(new { timestamp = DateTime.UtcNow.ToString("O"), type = "dp_run", summary = evtSummary, detail = "" }));
                 await SseWriter.WriteErrorAsync(response, "Agent did not respond in time.");
             }
             catch (Exception ex)
             {
                 var evtSummary = $"DP run error: {ex.Message}";
-                _ = clientTableService.AppendEventAsync(partitionKey, "dp_run", flowId, evtSummary);
+                var stepsDetail = JsonSerializer.Serialize(statusSteps);
+                _ = clientTableService.AppendEventAsync(partitionKey, "dp_run", flowId, evtSummary, stepsDetail);
                 await SseWriter.WriteEventAsync(response, "event", JsonSerializer.Serialize(new { timestamp = DateTime.UtcNow.ToString("O"), type = "dp_run", summary = evtSummary, detail = "" }));
                 await SseWriter.WriteErrorAsync(response, $"DP run error: {ex.Message}");
             }

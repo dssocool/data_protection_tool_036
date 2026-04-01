@@ -17,13 +17,28 @@ public static class FlowEndpoints
             var partitionKey = ClientEntity.BuildPartitionKey(info.Oid, info.Tid);
             var events = await clientTableService.GetEventsAsync(partitionKey);
 
-            var result = events.Select(e => new
+            var result = events.Select(e =>
             {
-                timestamp = e.Timestamp.ToString("O"),
-                type = e.Type,
-                flowId = e.FlowId,
-                summary = e.Summary,
-                detail = e.Detail
+                string[] steps = Array.Empty<string>();
+                var detail = e.Detail;
+                if (!string.IsNullOrEmpty(detail) && detail.TrimStart().StartsWith("["))
+                {
+                    try
+                    {
+                        steps = JsonSerializer.Deserialize<string[]>(detail) ?? Array.Empty<string>();
+                        detail = "";
+                    }
+                    catch (JsonException) { }
+                }
+                return new
+                {
+                    timestamp = e.Timestamp.ToString("O"),
+                    type = e.Type,
+                    flowId = e.FlowId,
+                    summary = e.Summary,
+                    detail,
+                    steps
+                };
             });
 
             return Results.Ok(result);

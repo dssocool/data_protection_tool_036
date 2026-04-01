@@ -35,7 +35,8 @@ public static class EngineRelayService
 
     public static async Task<string> PollExecutionAsync(
         AgentConnection connection, string engineBaseUrl, string authorizationToken,
-        string executionId, HttpResponse response, string statusLabel, int maxIterations = 300)
+        string executionId, HttpResponse response, string statusLabel, int maxIterations = 300,
+        List<string>? statusSteps = null)
     {
         var status = "";
         for (var i = 0; i < maxIterations; i++)
@@ -48,7 +49,11 @@ public static class EngineRelayService
 
             status = ExtractBodyField(statusResp, "status");
             if (!string.IsNullOrEmpty(statusLabel))
-                await SseWriter.WriteEventAsync(response, "status", $"Polling {statusLabel}: {status}...");
+            {
+                var msg = $"Polling {statusLabel}: {status}...";
+                await SseWriter.WriteEventAsync(response, "status", msg);
+                statusSteps?.Add(msg);
+            }
             if (status is "SUCCEEDED" or "WARNING" or "FAILED" or "CANCELLED")
                 break;
         }
@@ -82,13 +87,16 @@ public static class EngineRelayService
 
     public static async Task<(bool success, List<string> metadataIds)> CreateFileMetadataBatchAsync(
         EngineApiClient engineApi, HttpResponse response,
-        List<string> filenames, string fileRulesetId, string fileFormatId)
+        List<string> filenames, string fileRulesetId, string fileFormatId,
+        List<string>? statusSteps = null)
     {
         var fileMetadataIds = new List<string>();
         for (var fi = 0; fi < filenames.Count; fi++)
         {
             var file = filenames[fi];
-            await SseWriter.WriteEventAsync(response, "status", $"Creating file metadata... ({fi + 1} of {filenames.Count})");
+            var msg = $"Creating file metadata... ({fi + 1} of {filenames.Count})";
+            await SseWriter.WriteEventAsync(response, "status", msg);
+            statusSteps?.Add(msg);
 
             var (metaSuccess, fileMetadataId, _) = await engineApi.CreateFileMetadataAsync(file, fileRulesetId, fileFormatId);
             if (!metaSuccess)

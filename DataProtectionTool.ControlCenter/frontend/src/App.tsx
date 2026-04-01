@@ -94,7 +94,22 @@ export default function App() {
     try {
       const res = await fetch(`/api/agents/${agentPath}/events`);
       if (res.ok) {
-        const data: StatusEvent[] = await res.json();
+        const raw: (StatusEvent & { steps?: string[] })[] = await res.json();
+        const data: StatusEvent[] = raw.map(evt => {
+          if (Array.isArray(evt.steps) && evt.steps.length > 0 && typeof evt.steps[0] === "string") {
+            const isError = evt.summary.toLowerCase().includes("error") || evt.summary.toLowerCase().includes("failed") || evt.summary.toLowerCase().includes("timeout");
+            return {
+              ...evt,
+              steps: (evt.steps as string[]).map(msg => ({
+                timestamp: evt.timestamp,
+                message: msg,
+                status: (isError && msg === (evt.steps as string[])[(evt.steps as string[]).length - 1]
+                  ? "error" : msg.includes("(skipped") ? "skipped" : "done") as "done" | "error" | "skipped",
+              })),
+            };
+          }
+          return evt;
+        });
         setStatusEvents(prev => {
           const tracked = prev.filter(e => Array.isArray(e.steps) && e.steps.length > 0);
           if (tracked.length === 0) return data;
