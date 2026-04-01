@@ -100,7 +100,10 @@ while (!cts.Token.IsCancellationRequested)
         var msgHandlers = new Dictionary<string, Action<ServerMessage>>
         {
             ["registration_url"] = msg =>
-                Console.WriteLine($"Agent registered. URL: {msg.Payload}"),
+            {
+                Console.WriteLine($"Agent registered. URL: {msg.Payload}");
+                TryOpenBrowser(msg.Payload);
+            },
             ["connections_list"] = msg =>
             {
                 connectionManager.LoadConnectionDetails(msg.Payload);
@@ -687,6 +690,54 @@ static async Task<string> UploadParquetBlobAsync(
 }
 
 // --- Utility ---
+
+static bool HasDisplay()
+{
+    if (OperatingSystem.IsWindows())
+        return true;
+
+    if (OperatingSystem.IsMacOS())
+        return Environment.GetEnvironmentVariable("__CFBundleIdentifier") != null
+            || !string.IsNullOrEmpty(Environment.GetEnvironmentVariable("TERM_PROGRAM"))
+            || File.Exists("/usr/bin/open");
+
+    // Linux / others: check for DISPLAY or WAYLAND_DISPLAY
+    return !string.IsNullOrEmpty(Environment.GetEnvironmentVariable("DISPLAY"))
+        || !string.IsNullOrEmpty(Environment.GetEnvironmentVariable("WAYLAND_DISPLAY"));
+}
+
+static void TryOpenBrowser(string url)
+{
+    if (string.IsNullOrWhiteSpace(url))
+        return;
+
+    if (!HasDisplay())
+    {
+        Console.WriteLine("[Agent] No display detected — skipping browser open.");
+        return;
+    }
+
+    try
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            Process.Start(new ProcessStartInfo(url) { UseShellExecute = true });
+        }
+        else if (OperatingSystem.IsMacOS())
+        {
+            Process.Start("open", url);
+        }
+        else
+        {
+            Process.Start("xdg-open", url);
+        }
+        Console.WriteLine($"[Agent] Opened browser: {url}");
+    }
+    catch (Exception ex)
+    {
+        Console.WriteLine($"[Agent] Could not open browser: {ex.Message}");
+    }
+}
 
 static string GetLocalIpAddress()
 {
