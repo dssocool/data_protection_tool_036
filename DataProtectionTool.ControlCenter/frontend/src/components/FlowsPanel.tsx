@@ -40,6 +40,8 @@ interface FlowsPanelProps {
   agentPath: string;
   statusEvents: StatusEvent[];
   connectionsBadgeCount?: number;
+  newFlowRowKeys?: Set<string>;
+  onDismissNewFlowBadge?: (rowKey: string) => void;
   onSwitchPanel: (panel: "connections" | "flows") => void;
   onRunFlows?: (flows: FlowItem[]) => void;
 }
@@ -49,6 +51,7 @@ type SortDir = "asc" | "desc";
 
 interface ParsedFlow {
   rowKey: string;
+  createdAt: string;
   srcDatabase: string;
   srcSchema: string;
   srcTable: string;
@@ -82,6 +85,7 @@ function parseFlow(flow: FlowItem): ParsedFlow {
   const dest = parseJson<FlowDest>(flow.destJson);
   return {
     rowKey: flow.rowKey,
+    createdAt: flow.createdAt ?? "",
     srcDatabase: src?.databaseName || src?.serverName || "—",
     srcSchema: src?.schema || "—",
     srcTable: src?.tableName || "—",
@@ -110,6 +114,8 @@ export default function FlowsPanel({
   agentPath,
   statusEvents,
   connectionsBadgeCount,
+  newFlowRowKeys,
+  onDismissNewFlowBadge,
   onSwitchPanel,
   onRunFlows,
 }: FlowsPanelProps) {
@@ -201,6 +207,9 @@ export default function FlowsPanel({
   function handleRowClick(rowKey: string, e: React.MouseEvent) {
     const target = e.target as HTMLElement;
     if (target.tagName === "INPUT" || target.closest(".flows-td-checkbox")) return;
+    if (newFlowRowKeys?.has(rowKey)) {
+      onDismissNewFlowBadge?.(rowKey);
+    }
     setSelectedFlowRowKey((prev) => (prev === rowKey ? null : rowKey));
   }
 
@@ -231,7 +240,9 @@ export default function FlowsPanel({
   }, [parsed, flows, searchText]);
 
   const sorted = useMemo(() => {
-    if (!sortField) return filtered;
+    if (!sortField) {
+      return [...filtered].sort((a, b) => (b.createdAt ?? "").localeCompare(a.createdAt ?? ""));
+    }
     const dir = sortDir === "asc" ? 1 : -1;
     return [...filtered].sort((a, b) => {
       const va = a[sortField].toLowerCase();
@@ -460,7 +471,12 @@ export default function FlowsPanel({
                         onChange={() => handleSelectRow(flow.rowKey)}
                       />
                     </td>
-                    <td style={{ width: colWidths[0] }}>{flow.srcDatabase}</td>
+                    <td style={{ width: colWidths[0] }}>
+                      {flow.srcDatabase}
+                      {newFlowRowKeys?.has(flow.rowKey) && (
+                        <span className="flow-new-badge">new</span>
+                      )}
+                    </td>
                     <td style={{ width: colWidths[1] }}>{flow.srcSchema}</td>
                     <td style={{ width: colWidths[2] }}>{flow.srcTable}</td>
                     <td style={{ width: colWidths[3] }}>{flow.destDatabase}</td>

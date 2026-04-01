@@ -85,7 +85,9 @@ export default function App() {
   const [sqlModalMinimizing, setSqlModalMinimizing] = useState(false);
   const [unseenConnectionCount, setUnseenConnectionCount] = useState(0);
   const [newConnectionRowKeys, setNewConnectionRowKeys] = useState<Set<string>>(new Set());
+  const [newFlowRowKeys, setNewFlowRowKeys] = useState<Set<string>>(new Set());
   const pendingSqlSaveRowKeyRef = useRef<string | null>(null);
+  const pendingFlowRowKeyRef = useRef<string | null>(null);
   const previewCacheRef = useRef<Map<string, string[]>>(new Map());
   const tableCacheRef = useRef<Map<string, TablePreviewCache>>(new Map());
   const selectedTableRef = useRef(selectedTable);
@@ -204,7 +206,6 @@ export default function App() {
 
   function handleViewFlows() {
     setLeftPanel("flows");
-    setUnseenFlowCount(0);
   }
 
   async function handleSave(data: SqlServerConnectionData) {
@@ -247,6 +248,15 @@ export default function App() {
       return next;
     });
     setUnseenConnectionCount((c) => Math.max(0, c - 1));
+  }
+
+  function handleDismissNewFlowBadge(rowKey: string) {
+    setNewFlowRowKeys((prev) => {
+      const next = new Set(prev);
+      next.delete(rowKey);
+      return next;
+    });
+    setUnseenFlowCount((c) => Math.max(0, c - 1));
   }
 
   async function handleExpandConnection(rowKey: string) {
@@ -1320,6 +1330,7 @@ export default function App() {
       if (res.ok) {
         const result = await res.json();
         if (result.success) {
+          if (result.rowKey) pendingFlowRowKeyRef.current = result.rowKey;
           setFullRunMinimizing(true);
         }
       }
@@ -1369,8 +1380,16 @@ export default function App() {
     const pending = pendingSaveAndRunRef.current;
     if (pending) {
       pendingSaveAndRunRef.current = null;
+      if (pending.flowRowKey) {
+        setNewFlowRowKeys((prev) => new Set(prev).add(pending.flowRowKey));
+      }
       handleFullRunExecute(pending.destConnectionRowKey, pending.destSchema, pending.rowKey, pending.schema, pending.tableName, pending.flowRowKey);
     } else {
+      const flowRowKey = pendingFlowRowKeyRef.current;
+      pendingFlowRowKeyRef.current = null;
+      if (flowRowKey) {
+        setNewFlowRowKeys((prev) => new Set(prev).add(flowRowKey));
+      }
       setUnseenFlowCount((c) => c + 1);
     }
   }
@@ -1424,6 +1443,8 @@ export default function App() {
             agentPath={getAgentPath() ?? ""}
             statusEvents={statusEvents}
             connectionsBadgeCount={unseenConnectionCount}
+            newFlowRowKeys={newFlowRowKeys}
+            onDismissNewFlowBadge={handleDismissNewFlowBadge}
             onSwitchPanel={(p) => { setLeftPanel(p); if (p === "connections") setUnseenConnectionCount(0); }}
             onRunFlows={handleRunFlows}
           />
@@ -1453,7 +1474,7 @@ export default function App() {
                 onRefreshConnection={handleRefreshConnection}
                 onDryRun={handleDryRun}
                 onFullRun={handleFullRunOpen}
-                onSwitchPanel={(p) => { setLeftPanel(p); if (p === "flows") setUnseenFlowCount(0); if (p === "connections") setUnseenConnectionCount(0); }}
+                onSwitchPanel={(p) => { setLeftPanel(p); if (p === "connections") setUnseenConnectionCount(0); }}
                 onWidthChange={setConnectionsPanelWidth}
               />
             )}

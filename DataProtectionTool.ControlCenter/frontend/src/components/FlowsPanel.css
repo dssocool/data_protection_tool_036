@@ -357,6 +357,19 @@
   border-bottom: 1px solid #f0f0f0;
 }
 
+.flow-new-badge {
+  margin-left: 6px;
+  padding: 1px 8px;
+  border-radius: 8px;
+  background: #0078d4;
+  color: #fff;
+  font-size: 10px;
+  font-weight: 700;
+  white-space: nowrap;
+  line-height: 16px;
+  vertical-align: middle;
+}
+
 /* ── Checkbox styling ──────────────────────────────────── */
 
 .flows-th-checkbox input[type="checkbox"],
