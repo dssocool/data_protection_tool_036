@@ -40,6 +40,7 @@ interface FlowsPanelProps {
   agentPath: string;
   statusEvents: StatusEvent[];
   connectionsBadgeCount?: number;
+  flowsBadgeCount?: number;
   newFlowRowKeys?: Set<string>;
   onDismissNewFlowBadge?: (rowKey: string) => void;
   onSwitchPanel: (panel: "connections" | "flows") => void;
@@ -114,6 +115,7 @@ export default function FlowsPanel({
   agentPath,
   statusEvents,
   connectionsBadgeCount,
+  flowsBadgeCount,
   newFlowRowKeys,
   onDismissNewFlowBadge,
   onSwitchPanel,
@@ -372,6 +374,9 @@ export default function FlowsPanel({
                 <path d="M3 4H7M3 8H10M3 12H13" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
                 <path d="M12 3L14 4L12 5" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round" />
               </svg>
+              {!!flowsBadgeCount && flowsBadgeCount > 0 && (
+                <span className="flows-badge">{flowsBadgeCount}</span>
+              )}
             </button>
           </div>
           <div className="flows-search-wrapper">

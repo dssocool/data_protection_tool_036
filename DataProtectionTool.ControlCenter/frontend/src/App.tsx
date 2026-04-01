@@ -1443,6 +1443,7 @@ export default function App() {
             agentPath={getAgentPath() ?? ""}
             statusEvents={statusEvents}
             connectionsBadgeCount={unseenConnectionCount}
+            flowsBadgeCount={unseenFlowCount}
             newFlowRowKeys={newFlowRowKeys}
             onDismissNewFlowBadge={handleDismissNewFlowBadge}
             onSwitchPanel={(p) => { setLeftPanel(p); if (p === "connections") setUnseenConnectionCount(0); }}
