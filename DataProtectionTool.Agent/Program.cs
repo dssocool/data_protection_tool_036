@@ -78,7 +78,13 @@ while (!cts.Token.IsCancellationRequested)
 
     try
     {
-        using var channel = GrpcChannel.ForAddress(serverAddress);
+        using var channel = GrpcChannel.ForAddress(serverAddress, new GrpcChannelOptions
+        {
+            HttpHandler = new SocketsHttpHandler
+            {
+                EnableMultipleHttp2Connections = true,
+            },
+        });
         var client = new AgentHub.AgentHubClient(channel);
 
         using var call = client.Connect(headers: headers, cancellationToken: cts.Token);
