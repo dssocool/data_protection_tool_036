@@ -45,10 +45,6 @@ function getAgentPath(): string | null {
   return segments[agentsIdx + 1];
 }
 
-function getSessionKey(agentPath: string): string {
-  return `bootstrap_${agentPath}`;
-}
-
 export default function App() {
   const [showSqlModal, setShowSqlModal] = useState(false);
   const [showQueryModal, setShowQueryModal] = useState(false);
@@ -132,12 +128,7 @@ export default function App() {
   useEffect(() => {
     const agentPath = getAgentPath();
     if (!agentPath) return;
-    const key = getSessionKey(agentPath);
-    if (!sessionStorage.getItem(key)) {
-      fetchEvents().then(() => {
-        sessionStorage.setItem(key, "true");
-      });
-    }
+    fetchEvents();
   }, [fetchEvents]);
 
   const fetchConnections = useCallback(async () => {
