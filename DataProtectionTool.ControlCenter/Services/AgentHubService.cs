@@ -75,7 +75,7 @@ public class AgentHubService : AgentHub.AgentHubBase
                 $"Agent {firstMessage.AgentId} connected from {peer}");
 
             var host = GetServerHost();
-            var url = $"http://{host}:8190/agents/{registeredPath}";
+            var url = $"http://{host}:5000/agents/{registeredPath}";
             _logger.LogInformation(
                 "Agent {AgentId} registered — oid={Oid}, tid={Tid}, url={Url}",
                 firstMessage.AgentId, oid, tid, url);

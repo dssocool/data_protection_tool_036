@@ -10,8 +10,8 @@ export default defineConfig({
   },
   server: {
     proxy: {
-      "/api": "http://localhost:8190",
-      "/agents": "http://localhost:8190",
+      "/api": "http://localhost:5000",
+      "/agents": "http://localhost:5000",
     },
   },
 });

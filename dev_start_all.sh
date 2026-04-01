@@ -66,7 +66,7 @@ fi
 npm run build --prefix "$FRONTEND_DIR"
 
 # --- Control Center ---
-echo "[3/4] Starting ControlCenter (HTTP on port 8190, gRPC on port 8191)..."
+echo "[3/4] Starting ControlCenter (HTTP on port 5000, gRPC on port 5001)..."
 
 if [ "$NO_AZURITE" = false ]; then
     # Override storage settings to point to Azurite

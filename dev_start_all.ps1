@@ -77,7 +77,7 @@ Push-Location $frontendDir
 Pop-Location
 
 # --- [3/4] ControlCenter ---
-Write-Host "[3/4] Starting ControlCenter (HTTP on port 8190, gRPC on port 8191)..."
+Write-Host "[3/4] Starting ControlCenter (HTTP on port 5000, gRPC on port 5001)..."
 
 if (-not $noAzurite) {
     # Override storage settings to point to Azurite

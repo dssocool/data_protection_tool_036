@@ -19,5 +19,5 @@ RUN dotnet publish DataProtectionTool.ControlCenter/DataProtectionTool.ControlCe
 FROM mcr.microsoft.com/dotnet/aspnet:9.0 AS runtime
 WORKDIR /app
 COPY --from=dotnet-build /app/publish .
-EXPOSE 8190 8191
+EXPOSE 5000 5001
 ENTRYPOINT ["dotnet", "DataProtectionTool.ControlCenter.dll"]

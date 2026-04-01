@@ -11,11 +11,11 @@ var builder = WebApplication.CreateBuilder(args);
 
 builder.WebHost.ConfigureKestrel(options =>
 {
-    options.ListenAnyIP(8190, listenOptions =>
+    options.ListenAnyIP(5000, listenOptions =>
     {
         listenOptions.Protocols = HttpProtocols.Http1;
     });
-    options.ListenAnyIP(8191, listenOptions =>
+    options.ListenAnyIP(5001, listenOptions =>
     {
         listenOptions.Protocols = HttpProtocols.Http2;
     });
