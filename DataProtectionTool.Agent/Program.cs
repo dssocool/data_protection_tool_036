@@ -5,6 +5,7 @@ using System.Net;
 using System.Net.Sockets;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using Azure.Identity;
 using Azure.Storage.Blobs;
 using Grpc.Core;
@@ -199,7 +200,7 @@ Console.WriteLine("Agent disconnected.");
 
 static async Task RunCommandAsync(
     AgentContext ctx, string payload, string resultType,
-    Func<string, JsonElement, Task<object>> coreLogic)
+    Func<string, JsonElement, Task<string>> coreLogic)
 {
     string correlationId = "";
     try
@@ -209,14 +210,16 @@ static async Task RunCommandAsync(
         var dataJson = envelope.RootElement.GetProperty("data").GetString() ?? "{}";
 
         using var paramsDoc = JsonDocument.Parse(dataJson);
-        var result = await coreLogic(correlationId, paramsDoc.RootElement);
+        var resultJson = await coreLogic(correlationId, paramsDoc.RootElement);
 
-        await ctx.SendAsync(resultType, JsonSerializer.Serialize(result));
+        await ctx.SendAsync(resultType, resultJson);
     }
     catch (Exception ex)
     {
         Console.Error.WriteLine($"[Agent] {resultType} failed: {ex.Message}");
-        var errorPayload = JsonSerializer.Serialize(new { correlationId, success = false, message = ex.Message });
+        var errorPayload = JsonSerializer.Serialize(
+            new CommandErrorResult(correlationId, false, ex.Message),
+            AgentJsonContext.Default.CommandErrorResult);
         try { await ctx.SendAsync(resultType, errorPayload); }
         catch (Exception writeEx) { Console.Error.WriteLine($"[Agent] Failed to send error result: {writeEx.Message}"); }
     }
@@ -224,7 +227,7 @@ static async Task RunCommandAsync(
 
 // --- Handlers ---
 
-static async Task<object> HandleValidateSqlCore(string correlationId, JsonElement root)
+static async Task<string> HandleValidateSqlCore(string correlationId, JsonElement root)
 {
     var details = ConnectionDetails.FromJson(root);
     if (string.IsNullOrEmpty(details.Encrypt)) details.Encrypt = "Mandatory";
@@ -236,10 +239,12 @@ static async Task<object> HandleValidateSqlCore(string correlationId, JsonElemen
     await conn.OpenAsync();
 
     Console.WriteLine("[Agent] SQL connection test succeeded.");
-    return new { correlationId, success = true, message = $"Connection successful. Server version: {conn.ServerVersion}" };
+    return JsonSerializer.Serialize(
+        new ValidateSqlResult(correlationId, true, $"Connection successful. Server version: {conn.ServerVersion}"),
+        AgentJsonContext.Default.ValidateSqlResult);
 }
 
-static async Task<object> HandleExecuteSqlCore(
+static async Task<string> HandleExecuteSqlCore(
     string correlationId, JsonElement root,
     AgentContext ctx, SqlConnectionManager connManager)
 {
@@ -274,10 +279,12 @@ static async Task<object> HandleExecuteSqlCore(
         });
 
     Console.WriteLine($"[Agent] Executed SQL, returned {rows.Count} rows for connection {rowKey}.");
-    return new { correlationId, success = true, rows };
+    return JsonSerializer.Serialize(
+        new ExecuteSqlResult(correlationId, true, rows),
+        AgentJsonContext.Default.ExecuteSqlResult);
 }
 
-static async Task<object> HandleSqlToParquetCore(
+static async Task<string> HandleSqlToParquetCore(
     string correlationId, JsonElement root,
     AgentContext ctx, SqlConnectionManager connManager, SasTokenManager sasManager,
     string connectionKeyProperty = "rowKey",
@@ -310,10 +317,12 @@ static async Task<object> HandleSqlToParquetCore(
         });
 
     Console.WriteLine($"[Agent] Uploaded {filenames.Count} Parquet file(s) for connection {rowKey}");
-    return new { correlationId, success = true, filenames };
+    return JsonSerializer.Serialize(
+        new SqlToParquetResult(correlationId, true, filenames),
+        AgentJsonContext.Default.SqlToParquetResult);
 }
 
-static async Task<object> HandleValidateQueryCore(
+static async Task<string> HandleValidateQueryCore(
     string correlationId, JsonElement root,
     AgentContext ctx, SqlConnectionManager connManager)
 {
@@ -347,10 +356,12 @@ static async Task<object> HandleValidateQueryCore(
         });
 
     Console.WriteLine("[Agent] Query validation succeeded.");
-    return new { correlationId, success = true, message };
+    return JsonSerializer.Serialize(
+        new ValidateQueryResult(correlationId, true, message),
+        AgentJsonContext.Default.ValidateQueryResult);
 }
 
-static async Task<object> HandleLoadMaskedToTableCore(
+static async Task<string> HandleLoadMaskedToTableCore(
     string correlationId, JsonElement root,
     AgentContext ctx, SqlConnectionManager connManager, SasTokenManager sasManager)
 {
@@ -382,7 +393,7 @@ static async Task<object> HandleLoadMaskedToTableCore(
         if (parquetReader.CustomMetadata != null &&
             parquetReader.CustomMetadata.TryGetValue("sql_types", out var sqlTypesJson))
         {
-            sqlTypes = JsonSerializer.Deserialize<string[]>(sqlTypesJson) ?? columnNames.Select(_ => "nvarchar(max)").ToArray();
+            sqlTypes = JsonSerializer.Deserialize(sqlTypesJson, AgentJsonContext.Default.StringArray) ?? columnNames.Select(_ => "nvarchar(max)").ToArray();
         }
         else
         {
@@ -470,10 +481,12 @@ static async Task<object> HandleLoadMaskedToTableCore(
         try { File.Delete(tempFile); } catch { }
     }
 
-    return new { correlationId, success = true };
+    return JsonSerializer.Serialize(
+        new LoadMaskedResult(correlationId, true),
+        AgentJsonContext.Default.LoadMaskedResult);
 }
 
-static async Task<object> HandleHttpRequestCore(string correlationId, JsonElement root)
+static async Task<string> HandleHttpRequestCore(string correlationId, JsonElement root)
 {
     var method = root.GetProperty("method").GetString() ?? "GET";
     var url = root.GetProperty("url").GetString() ?? "";
@@ -536,26 +549,17 @@ static async Task<object> HandleHttpRequestCore(string correlationId, JsonElemen
         var requestHeaders = CollectHeaders(requestMessage.Headers,
             requestMessage.Content?.Headers);
 
-        return new
-        {
-            correlationId,
-            success = false,
-            message = $"HTTP {(int)response.StatusCode} {response.ReasonPhrase}",
-            statusCode = (int)response.StatusCode,
-            headers = responseHeaders,
-            body = responseBody,
-            requestDetails = new { method, url, headers = requestHeaders, body = bodyContent }
-        };
+        return JsonSerializer.Serialize(
+            new HttpFailResult(correlationId, false,
+                $"HTTP {(int)response.StatusCode} {response.ReasonPhrase}",
+                (int)response.StatusCode, responseHeaders, responseBody,
+                new HttpRequestDetails(method, url, requestHeaders, bodyContent)),
+            AgentJsonContext.Default.HttpFailResult);
     }
 
-    return new
-    {
-        correlationId,
-        success = true,
-        statusCode = (int)response.StatusCode,
-        headers = responseHeaders,
-        body = responseBody
-    };
+    return JsonSerializer.Serialize(
+        new HttpSuccessResult(correlationId, true, (int)response.StatusCode, responseHeaders, responseBody),
+        AgentJsonContext.Default.HttpSuccessResult);
 }
 
 static Dictionary<string, string> CollectHeaders(
@@ -594,7 +598,7 @@ static async Task<List<string>> StreamReaderToParquetBlobs(
 
     var sqlTypesMetadata = new Dictionary<string, string>
     {
-        ["sql_types"] = JsonSerializer.Serialize(sqlTypes)
+        ["sql_types"] = JsonSerializer.Serialize(sqlTypes, AgentJsonContext.Default.StringArray)
     };
 
     var parquetSchema = new ParquetSchema(dataFields);
@@ -727,7 +731,7 @@ class CorrelationManager<T>
 
     public async Task<T> RequestAsync(
         AgentContext ctx, string messageType,
-        Func<string, object> buildRequestBody,
+        Func<string, string> buildPayload,
         TimeSpan? timeout = null)
     {
         var correlationId = Guid.NewGuid().ToString("N");
@@ -736,7 +740,7 @@ class CorrelationManager<T>
 
         try
         {
-            var payload = JsonSerializer.Serialize(buildRequestBody(correlationId));
+            var payload = buildPayload(correlationId);
             await ctx.SendAsync(messageType, payload);
 
             using var timeoutCts = new CancellationTokenSource(timeout ?? TimeSpan.FromSeconds(15));
@@ -883,7 +887,9 @@ class SqlConnectionManager : IDisposable
             try
             {
                 await _detailCorrelation.RequestAsync(ctx, "get_connection_details",
-                    cid => new { correlationId = cid, rowKey });
+                    cid => JsonSerializer.Serialize(
+                        new CorrelationWithRowKey(cid, rowKey),
+                        AgentJsonContext.Default.CorrelationWithRowKey));
                 Console.WriteLine($"[ConnMgr] Refreshed connection details for {rowKey}");
             }
             catch (Exception refetchEx)
@@ -941,6 +947,34 @@ class SqlConnectionManager : IDisposable
     }
 }
 
+record CommandErrorResult(string correlationId, bool success, string message);
+record ValidateSqlResult(string correlationId, bool success, string message);
+record ExecuteSqlResult(string correlationId, bool success, List<Dictionary<string, object?>> rows);
+record SqlToParquetResult(string correlationId, bool success, List<string> filenames);
+record ValidateQueryResult(string correlationId, bool success, string message);
+record LoadMaskedResult(string correlationId, bool success);
+record HttpSuccessResult(string correlationId, bool success, int statusCode, Dictionary<string, string> headers, string body);
+record HttpFailResult(string correlationId, bool success, string message, int statusCode, Dictionary<string, string> headers, string body, HttpRequestDetails requestDetails);
+record HttpRequestDetails(string method, string url, Dictionary<string, string> headers, string? body);
+record CorrelationOnly(string correlationId);
+record CorrelationWithRowKey(string correlationId, string rowKey);
+record CorrelationWithContainer(string correlationId, string containerName);
+
+[JsonSourceGenerationOptions(PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase)]
+[JsonSerializable(typeof(string[]))]
+[JsonSerializable(typeof(CommandErrorResult))]
+[JsonSerializable(typeof(ValidateSqlResult))]
+[JsonSerializable(typeof(ExecuteSqlResult))]
+[JsonSerializable(typeof(SqlToParquetResult))]
+[JsonSerializable(typeof(ValidateQueryResult))]
+[JsonSerializable(typeof(LoadMaskedResult))]
+[JsonSerializable(typeof(HttpSuccessResult))]
+[JsonSerializable(typeof(HttpFailResult))]
+[JsonSerializable(typeof(CorrelationOnly))]
+[JsonSerializable(typeof(CorrelationWithRowKey))]
+[JsonSerializable(typeof(CorrelationWithContainer))]
+internal partial class AgentJsonContext : JsonSerializerContext { }
+
 class SasTokenInfo
 {
     public string SasToken { get; set; } = "";
@@ -957,8 +991,8 @@ class SasTokenManager
     {
         return await _correlation.RequestAsync(ctx, "request_sas_token",
             cid => string.IsNullOrEmpty(containerName)
-                ? (object)new { correlationId = cid }
-                : new { correlationId = cid, containerName });
+                ? JsonSerializer.Serialize(new CorrelationOnly(cid), AgentJsonContext.Default.CorrelationOnly)
+                : JsonSerializer.Serialize(new CorrelationWithContainer(cid, containerName), AgentJsonContext.Default.CorrelationWithContainer));
     }
 
     public void HandleSasTokenResponse(string payload)
