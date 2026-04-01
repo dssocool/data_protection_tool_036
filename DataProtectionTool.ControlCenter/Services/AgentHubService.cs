@@ -1,3 +1,5 @@
+using System.Net;
+using System.Net.Sockets;
 using System.Text.Json;
 using Azure.Storage;
 using Azure.Storage.Sas;
@@ -14,19 +16,22 @@ public class AgentHubService : AgentHub.AgentHubBase
     private readonly ClientTableService _clientTableService;
     private readonly BlobStorageConfig _blobStorageConfig;
     private readonly StorageSharedKeyCredential _blobCredential;
+    private readonly IConfiguration _configuration;
 
     public AgentHubService(
         ILogger<AgentHubService> logger,
         AgentRegistry registry,
         ClientTableService clientTableService,
         BlobStorageConfig blobStorageConfig,
-        StorageSharedKeyCredential blobCredential)
+        StorageSharedKeyCredential blobCredential,
+        IConfiguration configuration)
     {
         _logger = logger;
         _registry = registry;
         _clientTableService = clientTableService;
         _blobStorageConfig = blobStorageConfig;
         _blobCredential = blobCredential;
+        _configuration = configuration;
     }
 
     public override async Task Connect(
@@ -69,7 +74,8 @@ public class AgentHubService : AgentHub.AgentHubBase
             _ = _clientTableService.AppendEventAsync(partitionKeyForEvents, "agent_connected",
                 $"Agent {firstMessage.AgentId} connected from {peer}");
 
-            var url = $"http://localhost:8190/agents/{registeredPath}";
+            var host = GetServerHost();
+            var url = $"http://{host}:8190/agents/{registeredPath}";
             _logger.LogInformation(
                 "Agent {AgentId} registered — oid={Oid}, tid={Tid}, url={Url}",
                 firstMessage.AgentId, oid, tid, url);
@@ -243,6 +249,27 @@ public class AgentHubService : AgentHub.AgentHubBase
         {
             _logger.LogWarning(ex, "Failed to handle SAS token request");
         }
+    }
+
+    private string GetServerHost()
+    {
+        var configured = _configuration["ControlCenter:PublicHost"];
+        if (!string.IsNullOrWhiteSpace(configured))
+            return configured;
+
+        try
+        {
+            using var socket = new Socket(AddressFamily.InterNetwork, SocketType.Dgram, ProtocolType.Udp);
+            socket.Connect("8.8.8.8", 80);
+            if (socket.LocalEndPoint is IPEndPoint endPoint)
+                return endPoint.Address.ToString();
+        }
+        catch
+        {
+            // fall through
+        }
+
+        return Dns.GetHostName();
     }
 
     private async Task HandleGetConnectionDetailsAsync(
