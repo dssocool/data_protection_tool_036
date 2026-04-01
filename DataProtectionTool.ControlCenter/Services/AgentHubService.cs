@@ -11,22 +11,25 @@ public class AgentHubService : AgentHub.AgentHubBase
 {
     private readonly ILogger<AgentHubService> _logger;
     private readonly AgentRegistry _registry;
-    private readonly ClientTableService _clientTableService;
+    private readonly ClientTableService? _clientTableService;
     private readonly BlobStorageConfig _blobStorageConfig;
-    private readonly StorageSharedKeyCredential _blobCredential;
+    private readonly StorageSharedKeyCredential? _blobCredential;
+    private readonly CenterHealthStatus _healthStatus;
 
     public AgentHubService(
         ILogger<AgentHubService> logger,
         AgentRegistry registry,
-        ClientTableService clientTableService,
         BlobStorageConfig blobStorageConfig,
-        StorageSharedKeyCredential blobCredential)
+        CenterHealthStatus healthStatus,
+        ClientTableService? clientTableService = null,
+        StorageSharedKeyCredential? blobCredential = null)
     {
         _logger = logger;
         _registry = registry;
         _clientTableService = clientTableService;
         _blobStorageConfig = blobStorageConfig;
         _blobCredential = blobCredential;
+        _healthStatus = healthStatus;
     }
 
     public override async Task Connect(
@@ -36,6 +39,17 @@ public class AgentHubService : AgentHub.AgentHubBase
     {
         var peer = context.Peer;
         _logger.LogInformation("Agent connected from {Peer}", peer);
+
+        if (!_healthStatus.IsHealthy)
+        {
+            _logger.LogWarning("Rejecting agent from {Peer} — center has configuration issues", peer);
+            await responseStream.WriteAsync(new ServerMessage
+            {
+                Type = "error",
+                Payload = "Error: Center is having issues to start"
+            });
+            return;
+        }
 
         string? registeredPath = null;
 
@@ -63,11 +77,14 @@ public class AgentHubService : AgentHub.AgentHubBase
             var agentInfo = new AgentInfo(oid, tid, firstMessage.AgentId, DateTime.UtcNow, userName);
             registeredPath = _registry.Register(agentInfo, responseStream);
 
-            await _clientTableService.CreateOrUpdateClientAsync(oid, tid, firstMessage.AgentId, userName);
+            if (_clientTableService != null)
+            {
+                await _clientTableService.CreateOrUpdateClientAsync(oid, tid, firstMessage.AgentId, userName);
 
-            var partitionKeyForEvents = Models.ClientEntity.BuildPartitionKey(oid, tid);
-            _ = _clientTableService.AppendEventAsync(partitionKeyForEvents, "agent_connected",
-                $"Agent {firstMessage.AgentId} connected from {peer}");
+                var partitionKeyForEvents = Models.ClientEntity.BuildPartitionKey(oid, tid);
+                _ = _clientTableService.AppendEventAsync(partitionKeyForEvents, "agent_connected",
+                    $"Agent {firstMessage.AgentId} connected from {peer}");
+            }
 
             var url = $"http://localhost:8190/agents/{registeredPath}";
             _logger.LogInformation(
@@ -83,7 +100,9 @@ public class AgentHubService : AgentHub.AgentHubBase
             var partitionKey = Models.ClientEntity.BuildPartitionKey(oid, tid);
             try
             {
-                var connections = await _clientTableService.GetConnectionsAsync(partitionKey);
+                var connections = _clientTableService != null
+                    ? await _clientTableService.GetConnectionsAsync(partitionKey)
+                    : new List<Models.ConnectionEntity>();
                 var connectionsJson = JsonSerializer.Serialize(connections.Select(c => new
                 {
                     rowKey = c.RowKey,
@@ -160,7 +179,7 @@ public class AgentHubService : AgentHub.AgentHubBase
         {
             if (registeredPath != null)
             {
-                if (_registry.TryGetConnection(registeredPath, out var disc) && disc != null)
+                if (_clientTableService != null && _registry.TryGetConnection(registeredPath, out var disc) && disc != null)
                 {
                     var pk = Models.ClientEntity.BuildPartitionKey(disc.Info.Oid, disc.Info.Tid);
                     _ = _clientTableService.AppendEventAsync(pk, "agent_disconnected", "Agent disconnected");
@@ -217,6 +236,9 @@ public class AgentHubService : AgentHub.AgentHubBase
             };
             sasBuilder.SetPermissions(AccountSasPermissions.Read | AccountSasPermissions.Write | AccountSasPermissions.Create);
 
+            if (_blobCredential == null)
+                throw new InvalidOperationException("Blob storage credentials are not configured.");
+
             var sasToken = sasBuilder.ToSasQueryParameters(_blobCredential).ToString();
 
             var blobEndpoint = _blobStorageConfig.StorageAccount == "devstoreaccount1"
@@ -256,6 +278,9 @@ public class AgentHubService : AgentHub.AgentHubBase
             var rowKey = doc.RootElement.GetProperty("rowKey").GetString() ?? "";
             var correlationId = doc.RootElement.TryGetProperty("correlationId", out var cidEl)
                 ? cidEl.GetString() ?? "" : "";
+
+            if (_clientTableService == null)
+                throw new InvalidOperationException("Table service is not configured.");
 
             var entity = await _clientTableService.GetConnectionByRowKeyAsync(partitionKey, rowKey);
 

@@ -26,19 +26,40 @@ builder.Services.AddGrpc(options =>
     options.Interceptors.Add<SecretValidationInterceptor>();
 });
 
+var healthStatus = new CenterHealthStatus();
+builder.Services.AddSingleton(healthStatus);
 builder.Services.AddSingleton<AgentRegistry>();
 
-var tableConnectionString = builder.Configuration.GetSection("AzureTableStorage")["ConnectionString"]
-    ?? throw new InvalidOperationException("AzureTableStorage:ConnectionString is not configured.");
-var tableServiceClient = new TableServiceClient(tableConnectionString);
-builder.Services.AddSingleton(tableServiceClient);
-builder.Services.AddSingleton(sp => new ClientTableService(
-    sp.GetRequiredService<TableServiceClient>(),
-    "Users",
-    "ControlCenter",
-    "DataItem",
-    "Events",
-    sp.GetRequiredService<ILogger<ClientTableService>>()));
+var tableConnectionString = builder.Configuration.GetSection("AzureTableStorage")["ConnectionString"];
+TableServiceClient? tableServiceClient = null;
+
+if (string.IsNullOrEmpty(tableConnectionString))
+{
+    healthStatus.ConfigurationErrors.Add("AzureTableStorage:ConnectionString is not configured.");
+}
+else
+{
+    try
+    {
+        tableServiceClient = new TableServiceClient(tableConnectionString);
+    }
+    catch (Exception ex)
+    {
+        healthStatus.ConfigurationErrors.Add($"AzureTableStorage:ConnectionString is invalid: {ex.Message}");
+    }
+}
+
+if (tableServiceClient != null)
+{
+    builder.Services.AddSingleton(tableServiceClient);
+    builder.Services.AddSingleton(sp => new ClientTableService(
+        sp.GetRequiredService<TableServiceClient>(),
+        "Users",
+        "ControlCenter",
+        "DataItem",
+        "Events",
+        sp.GetRequiredService<ILogger<ClientTableService>>()));
+}
 
 var blobSection = builder.Configuration.GetSection("AzureBlobStorage");
 var blobStorageConfig = new BlobStorageConfig
@@ -50,16 +71,45 @@ var blobStorageConfig = new BlobStorageConfig
 };
 builder.Services.AddSingleton(blobStorageConfig);
 
-var blobCredential = new StorageSharedKeyCredential(blobStorageConfig.StorageAccount, blobStorageConfig.AccessKey);
-var blobServiceUri = blobStorageConfig.StorageAccount == "devstoreaccount1"
-    ? new Uri($"http://127.0.0.1:10000/{blobStorageConfig.StorageAccount}")
-    : new Uri($"https://{blobStorageConfig.StorageAccount}.blob.core.windows.net");
-var blobServiceClient = new BlobServiceClient(blobServiceUri, blobCredential);
-builder.Services.AddSingleton(blobServiceClient);
-builder.Services.AddSingleton(blobCredential);
+StorageSharedKeyCredential? blobCredential = null;
+BlobServiceClient? blobServiceClient = null;
 
-var dataEngineConfig = builder.Configuration.GetSection("DataEngine").Get<DataEngineConfig>()
-    ?? throw new InvalidOperationException("DataEngine section is not configured in appsettings.");
+if (string.IsNullOrEmpty(blobStorageConfig.StorageAccount))
+    healthStatus.ConfigurationErrors.Add("AzureBlobStorage:StorageAccount is not configured.");
+if (string.IsNullOrEmpty(blobStorageConfig.AccessKey))
+    healthStatus.ConfigurationErrors.Add("AzureBlobStorage:AccessKey is not configured.");
+if (string.IsNullOrEmpty(blobStorageConfig.Container))
+    healthStatus.ConfigurationErrors.Add("AzureBlobStorage:Container is not configured.");
+if (string.IsNullOrEmpty(blobStorageConfig.PreviewContainer))
+    healthStatus.ConfigurationErrors.Add("AzureBlobStorage:PreviewContainer is not configured.");
+
+if (!string.IsNullOrEmpty(blobStorageConfig.StorageAccount) && !string.IsNullOrEmpty(blobStorageConfig.AccessKey))
+{
+    try
+    {
+        blobCredential = new StorageSharedKeyCredential(blobStorageConfig.StorageAccount, blobStorageConfig.AccessKey);
+        var blobServiceUri = blobStorageConfig.StorageAccount == "devstoreaccount1"
+            ? new Uri($"http://127.0.0.1:10000/{blobStorageConfig.StorageAccount}")
+            : new Uri($"https://{blobStorageConfig.StorageAccount}.blob.core.windows.net");
+        blobServiceClient = new BlobServiceClient(blobServiceUri, blobCredential);
+    }
+    catch (Exception ex)
+    {
+        healthStatus.ConfigurationErrors.Add($"AzureBlobStorage credentials are invalid: {ex.Message}");
+    }
+}
+
+if (blobCredential != null)
+    builder.Services.AddSingleton(blobCredential);
+if (blobServiceClient != null)
+    builder.Services.AddSingleton(blobServiceClient);
+
+var dataEngineConfig = builder.Configuration.GetSection("DataEngine").Get<DataEngineConfig>();
+if (dataEngineConfig == null)
+{
+    healthStatus.ConfigurationErrors.Add("DataEngine section is not configured in appsettings.");
+    dataEngineConfig = new DataEngineConfig();
+}
 builder.Services.AddSingleton(dataEngineConfig);
 
 builder.Services.AddHttpClient<EngineApiClient>(client =>
@@ -71,48 +121,56 @@ builder.Services.AddSingleton<EngineMetadataService>();
 var app = builder.Build();
 
 var isAzuriteMode = blobStorageConfig.StorageAccount == "devstoreaccount1"
-    || tableConnectionString.Contains("devstoreaccount1", StringComparison.OrdinalIgnoreCase)
-    || tableConnectionString.Contains("UseDevelopmentStorage=true", StringComparison.OrdinalIgnoreCase);
+    || (tableConnectionString != null && (
+        tableConnectionString.Contains("devstoreaccount1", StringComparison.OrdinalIgnoreCase)
+        || tableConnectionString.Contains("UseDevelopmentStorage=true", StringComparison.OrdinalIgnoreCase)));
 
-try
+if (tableServiceClient != null)
 {
-    var usersTable = tableServiceClient.GetTableClient("Users");
-    await usersTable.CreateIfNotExistsAsync();
-    var controlCenterTable = tableServiceClient.GetTableClient("ControlCenter");
-    await controlCenterTable.CreateIfNotExistsAsync();
-    var dataItemTable = tableServiceClient.GetTableClient("DataItem");
-    await dataItemTable.CreateIfNotExistsAsync();
-    var eventsTable = tableServiceClient.GetTableClient("Events");
-    await eventsTable.CreateIfNotExistsAsync();
-}
-catch (Azure.RequestFailedException ex)
-{
-    Console.Error.WriteLine("=== Azure Storage initialization failed ===");
-    Console.Error.WriteLine($"HTTP Status : {ex.Status}");
-    Console.Error.WriteLine($"Error Code  : {ex.ErrorCode}");
-    Console.Error.WriteLine($"Message     : {ex.Message}");
-    Console.Error.WriteLine($"Stack Trace : {ex.StackTrace}");
-    Console.Error.WriteLine($"Full Details: {ex}");
-    if (!isAzuriteMode)
+    try
     {
-        Console.Error.WriteLine("=== Running in Azure Storage mode (not Azurite). Cannot connect to the configured storage account. Exiting. ===");
-        Environment.Exit(1);
+        var usersTable = tableServiceClient.GetTableClient("Users");
+        await usersTable.CreateIfNotExistsAsync();
+        var controlCenterTable = tableServiceClient.GetTableClient("ControlCenter");
+        await controlCenterTable.CreateIfNotExistsAsync();
+        var dataItemTable = tableServiceClient.GetTableClient("DataItem");
+        await dataItemTable.CreateIfNotExistsAsync();
+        var eventsTable = tableServiceClient.GetTableClient("Events");
+        await eventsTable.CreateIfNotExistsAsync();
     }
-    throw;
-}
-catch (Exception ex)
-{
-    Console.Error.WriteLine("=== Storage initialization failed (unexpected error) ===");
-    Console.Error.WriteLine(ex.ToString());
-    if (!isAzuriteMode)
+    catch (Azure.RequestFailedException ex)
     {
-        Console.Error.WriteLine("=== Running in Azure Storage mode (not Azurite). Cannot connect to the configured storage account. Exiting. ===");
-        Environment.Exit(1);
+        Console.Error.WriteLine("=== Azure Storage initialization failed ===");
+        Console.Error.WriteLine($"HTTP Status : {ex.Status}");
+        Console.Error.WriteLine($"Error Code  : {ex.ErrorCode}");
+        Console.Error.WriteLine($"Message     : {ex.Message}");
+        Console.Error.WriteLine($"Stack Trace : {ex.StackTrace}");
+        Console.Error.WriteLine($"Full Details: {ex}");
+        if (!isAzuriteMode)
+        {
+            healthStatus.ConfigurationErrors.Add($"Azure Table Storage initialization failed: {ex.Message}");
+        }
+        else
+        {
+            throw;
+        }
     }
-    throw;
+    catch (Exception ex)
+    {
+        Console.Error.WriteLine("=== Storage initialization failed (unexpected error) ===");
+        Console.Error.WriteLine(ex.ToString());
+        if (!isAzuriteMode)
+        {
+            healthStatus.ConfigurationErrors.Add($"Azure Table Storage initialization failed: {ex.Message}");
+        }
+        else
+        {
+            throw;
+        }
+    }
 }
 
-if (!isAzuriteMode)
+if (!isAzuriteMode && blobServiceClient != null)
 {
     try
     {
@@ -123,9 +181,26 @@ if (!isAzuriteMode)
     {
         Console.Error.WriteLine("=== Azure Blob Storage connectivity check failed ===");
         Console.Error.WriteLine(ex.ToString());
-        Console.Error.WriteLine("=== Running in Azure Storage mode (not Azurite). Cannot connect to the configured storage account. Exiting. ===");
-        Environment.Exit(1);
+        healthStatus.ConfigurationErrors.Add($"Azure Blob Storage connectivity check failed: {ex.Message}");
     }
+}
+
+if (!healthStatus.IsHealthy)
+{
+    Console.Error.WriteLine("=== Center is starting in degraded mode. Configuration issues detected: ===");
+    foreach (var error in healthStatus.ConfigurationErrors)
+        Console.Error.WriteLine($"  - {error}");
+
+    _ = Task.Run(async () =>
+    {
+        using var timer = new PeriodicTimer(TimeSpan.FromSeconds(30));
+        while (await timer.WaitForNextTickAsync())
+        {
+            Console.Error.WriteLine("=== [Periodic] Center configuration issues: ===");
+            foreach (var error in healthStatus.ConfigurationErrors)
+                Console.Error.WriteLine($"  - {error}");
+        }
+    });
 }
 
 app.UseStaticFiles();

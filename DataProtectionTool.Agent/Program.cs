@@ -107,6 +107,8 @@ while (!cts.Token.IsCancellationRequested)
                 Console.WriteLine("[Agent] Loaded connection details from ControlCenter.");
             },
             ["ack"] = _ => { },
+            ["error"] = msg =>
+                Console.Error.WriteLine($"[Server Error] {msg.Payload}"),
             ["validate_sql"] = msg =>
                 _ = RunCommandAsync(ctx, msg.Payload, "validate_sql_result", HandleValidateSqlCore),
             ["execute_sql"] = msg =>
