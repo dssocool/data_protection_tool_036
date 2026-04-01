@@ -1,7 +1,7 @@
 using Azure;
 using Azure.Data.Tables;
 
-namespace DataProtectionTool.ControlCenter.RpcServer.Models;
+namespace DataProtectionTool.RpcServer.Models;
 
 public class DataItemEntity : ITableEntity
 {

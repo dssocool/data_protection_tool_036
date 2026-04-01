@@ -2,7 +2,7 @@ using Grpc.Core;
 using Grpc.Core.Interceptors;
 using DataProtectionTool.Contracts;
 
-namespace DataProtectionTool.ControlCenter.RpcServer.Interceptors;
+namespace DataProtectionTool.RpcServer.Interceptors;
 
 public class SecretValidationInterceptor : Interceptor
 {

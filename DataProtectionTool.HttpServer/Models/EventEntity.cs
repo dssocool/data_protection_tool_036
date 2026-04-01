@@ -1,7 +1,7 @@
 using Azure;
 using Azure.Data.Tables;
 
-namespace DataProtectionTool.ControlCenter.HttpServer.Models;
+namespace DataProtectionTool.HttpServer.Models;
 
 public class EventEntity : ITableEntity
 {

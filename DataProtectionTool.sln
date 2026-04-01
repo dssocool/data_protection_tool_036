@@ -7,9 +7,9 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "DataProtectionTool.Contract
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "DataProtectionTool.Agent", "DataProtectionTool.Agent\DataProtectionTool.Agent.csproj", "{87BB9864-886E-43D5-B785-2F88025E9ACB}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "DataProtectionTool.ControlCenter.RpcServer", "DataProtectionTool.ControlCenter.RpcServer\DataProtectionTool.ControlCenter.RpcServer.csproj", "{22D6069A-1F32-4414-B62F-0C359C03482B}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "DataProtectionTool.RpcServer", "DataProtectionTool.RpcServer\DataProtectionTool.RpcServer.csproj", "{22D6069A-1F32-4414-B62F-0C359C03482B}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "DataProtectionTool.ControlCenter.HttpServer", "DataProtectionTool.ControlCenter.HttpServer\DataProtectionTool.ControlCenter.HttpServer.csproj", "{5837436A-5714-4CAF-9C23-57D1D71E363D}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "DataProtectionTool.HttpServer", "DataProtectionTool.HttpServer\DataProtectionTool.HttpServer.csproj", "{5837436A-5714-4CAF-9C23-57D1D71E363D}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution

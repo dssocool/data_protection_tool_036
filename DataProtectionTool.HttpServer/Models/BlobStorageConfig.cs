@@ -1,4 +1,4 @@
-namespace DataProtectionTool.ControlCenter.HttpServer.Models;
+namespace DataProtectionTool.HttpServer.Models;
 
 public class BlobStorageConfig
 {

@@ -1,4 +1,4 @@
-namespace DataProtectionTool.ControlCenter.HttpServer.Services;
+namespace DataProtectionTool.HttpServer.Services;
 
 public class CenterHealthStatus
 {

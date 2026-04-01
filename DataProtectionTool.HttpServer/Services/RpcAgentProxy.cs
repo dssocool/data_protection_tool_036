@@ -1,6 +1,6 @@
 using DataProtectionTool.Contracts;
 
-namespace DataProtectionTool.ControlCenter.HttpServer.Services;
+namespace DataProtectionTool.HttpServer.Services;
 
 public record AgentInfoDto(string Oid, string Tid, string AgentId, DateTime ConnectedAt, string UserName = "");
 

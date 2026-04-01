@@ -58,9 +58,9 @@ wwwroot/
 ## Azurite (local Azure Storage emulator data)
 .azurite/
 
-## ControlCenter config files (use *.example.json as templates)
-DataProtectionTool.ControlCenter/appsettings.json
-DataProtectionTool.ControlCenter/appsettings.Development.json
+## Server config files (use *.example.json as templates)
+DataProtectionTool.HttpServer/appsettings.Development.json
+DataProtectionTool.RpcServer/appsettings.Development.json
 
 ## Environment variable files
 .env

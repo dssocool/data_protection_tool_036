@@ -2,9 +2,9 @@ $ErrorActionPreference = "Stop"
 
 $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Definition
 $azuriteData = Join-Path $scriptDir ".azurite"
-$frontendDir = Join-Path $scriptDir "DataProtectionTool.ControlCenter.HttpServer\frontend"
-$rpcProj     = Join-Path $scriptDir "DataProtectionTool.ControlCenter.RpcServer\DataProtectionTool.ControlCenter.RpcServer.csproj"
-$httpProj    = Join-Path $scriptDir "DataProtectionTool.ControlCenter.HttpServer\DataProtectionTool.ControlCenter.HttpServer.csproj"
+$frontendDir = Join-Path $scriptDir "DataProtectionTool.HttpServer\frontend"
+$rpcProj     = Join-Path $scriptDir "DataProtectionTool.RpcServer\DataProtectionTool.RpcServer.csproj"
+$httpProj    = Join-Path $scriptDir "DataProtectionTool.HttpServer\DataProtectionTool.HttpServer.csproj"
 $agentProj   = Join-Path $scriptDir "DataProtectionTool.Agent\DataProtectionTool.Agent.csproj"
 
 $noAzurite = $args -contains "--no-azurite"

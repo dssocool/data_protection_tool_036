@@ -3,9 +3,9 @@ using Azure.Storage;
 using Azure.Storage.Sas;
 using Grpc.Core;
 using DataProtectionTool.Contracts;
-using DataProtectionTool.ControlCenter.RpcServer.Models;
+using DataProtectionTool.RpcServer.Models;
 
-namespace DataProtectionTool.ControlCenter.RpcServer.Services;
+namespace DataProtectionTool.RpcServer.Services;
 
 public class AgentHubService : AgentHub.AgentHubBase
 {

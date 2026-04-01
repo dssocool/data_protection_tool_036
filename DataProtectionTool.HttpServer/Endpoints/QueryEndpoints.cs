@@ -1,9 +1,9 @@
 using System.Text.Json;
-using DataProtectionTool.ControlCenter.HttpServer.Helpers;
-using DataProtectionTool.ControlCenter.HttpServer.Models;
-using DataProtectionTool.ControlCenter.HttpServer.Services;
+using DataProtectionTool.HttpServer.Helpers;
+using DataProtectionTool.HttpServer.Models;
+using DataProtectionTool.HttpServer.Services;
 
-namespace DataProtectionTool.ControlCenter.HttpServer.Endpoints;
+namespace DataProtectionTool.HttpServer.Endpoints;
 
 public static class QueryEndpoints
 {

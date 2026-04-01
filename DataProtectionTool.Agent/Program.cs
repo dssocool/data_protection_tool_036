@@ -75,7 +75,7 @@ Console.CancelKeyPress += (_, e) =>
 
 while (!cts.Token.IsCancellationRequested)
 {
-    Console.WriteLine($"Connecting to ControlCenter at {serverAddress}...");
+    Console.WriteLine($"Connecting to Server at {serverAddress}...");
 
     try
     {
@@ -100,7 +100,7 @@ while (!cts.Token.IsCancellationRequested)
         Console.WriteLine($"Agent registered. Path: {path}");
 
         connectionManager.LoadConnectionDetails(registerResponse.ConnectionsJson);
-        Console.WriteLine("[Agent] Loaded connection details from ControlCenter.");
+        Console.WriteLine("[Agent] Loaded connection details from Server.");
 
         var ctx = new AgentContext
         {
@@ -186,7 +186,7 @@ static void HandleServerMessage(AgentContext ctx, SqlConnectionManager connectio
     {
         case "connections_list":
             connectionManager.LoadConnectionDetails(msg.Payload);
-            Console.WriteLine("[Agent] Loaded connection details from ControlCenter.");
+            Console.WriteLine("[Agent] Loaded connection details from Server.");
             break;
         case "validate_sql":
             _ = RunCommandAsync(ctx, msg.Payload, "validate_sql_result", HandleValidateSqlCore);

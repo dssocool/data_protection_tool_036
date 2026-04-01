@@ -1,8 +1,8 @@
 using System.Text.Json;
 using Azure.Data.Tables;
-using DataProtectionTool.ControlCenter.RpcServer.Models;
+using DataProtectionTool.RpcServer.Models;
 
-namespace DataProtectionTool.ControlCenter.RpcServer.Services;
+namespace DataProtectionTool.RpcServer.Services;
 
 public class ClientTableService
 {

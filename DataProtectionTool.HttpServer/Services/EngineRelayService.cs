@@ -1,7 +1,7 @@
 using System.Text.Json;
-using DataProtectionTool.ControlCenter.HttpServer.Models;
+using DataProtectionTool.HttpServer.Models;
 
-namespace DataProtectionTool.ControlCenter.HttpServer.Services;
+namespace DataProtectionTool.HttpServer.Services;
 
 public static class EngineRelayService
 {

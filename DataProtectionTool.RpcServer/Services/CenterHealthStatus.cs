@@ -1,4 +1,4 @@
-namespace DataProtectionTool.ControlCenter.RpcServer.Services;
+namespace DataProtectionTool.RpcServer.Services;
 
 public class CenterHealthStatus
 {

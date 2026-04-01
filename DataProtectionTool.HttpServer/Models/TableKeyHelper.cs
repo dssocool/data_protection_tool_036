@@ -1,6 +1,6 @@
 using System.Text;
 
-namespace DataProtectionTool.ControlCenter.HttpServer.Models;
+namespace DataProtectionTool.HttpServer.Models;
 
 public static class TableKeyHelper
 {

@@ -1,6 +1,6 @@
 using System.Text.Json;
 
-namespace DataProtectionTool.ControlCenter.HttpServer.Services;
+namespace DataProtectionTool.HttpServer.Services;
 
 public class EngineMetadataService
 {

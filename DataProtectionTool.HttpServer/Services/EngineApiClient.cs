@@ -1,9 +1,9 @@
 using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
-using DataProtectionTool.ControlCenter.HttpServer.Models;
+using DataProtectionTool.HttpServer.Models;
 
-namespace DataProtectionTool.ControlCenter.HttpServer.Services;
+namespace DataProtectionTool.HttpServer.Services;
 
 public class EngineApiClient
 {

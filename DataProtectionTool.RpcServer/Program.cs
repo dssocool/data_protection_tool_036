@@ -1,8 +1,8 @@
 using Azure.Data.Tables;
 using Azure.Storage;
-using DataProtectionTool.ControlCenter.RpcServer.Interceptors;
-using DataProtectionTool.ControlCenter.RpcServer.Models;
-using DataProtectionTool.ControlCenter.RpcServer.Services;
+using DataProtectionTool.RpcServer.Interceptors;
+using DataProtectionTool.RpcServer.Models;
+using DataProtectionTool.RpcServer.Services;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -40,7 +40,7 @@ if (tableServiceClient != null)
     builder.Services.AddSingleton(sp => new ClientTableService(
         sp.GetRequiredService<TableServiceClient>(),
         "Users",
-        "ControlCenter",
+        "ServerConfig",
         "DataItem",
         "Events",
         sp.GetRequiredService<ILogger<ClientTableService>>()));
@@ -101,8 +101,8 @@ if (tableServiceClient != null)
     {
         var usersTable = tableServiceClient.GetTableClient("Users");
         await usersTable.CreateIfNotExistsAsync();
-        var controlCenterTable = tableServiceClient.GetTableClient("ControlCenter");
-        await controlCenterTable.CreateIfNotExistsAsync();
+        var serverConfigTable = tableServiceClient.GetTableClient("ServerConfig");
+        await serverConfigTable.CreateIfNotExistsAsync();
         var dataItemTable = tableServiceClient.GetTableClient("DataItem");
         await dataItemTable.CreateIfNotExistsAsync();
         var eventsTable = tableServiceClient.GetTableClient("Events");

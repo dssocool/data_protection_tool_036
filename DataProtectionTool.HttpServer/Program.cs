@@ -4,9 +4,9 @@ using Azure.Storage.Blobs;
 using Grpc.Net.Client;
 using Microsoft.AspNetCore.Server.Kestrel.Core;
 using DataProtectionTool.Contracts;
-using DataProtectionTool.ControlCenter.HttpServer.Endpoints;
-using DataProtectionTool.ControlCenter.HttpServer.Models;
-using DataProtectionTool.ControlCenter.HttpServer.Services;
+using DataProtectionTool.HttpServer.Endpoints;
+using DataProtectionTool.HttpServer.Models;
+using DataProtectionTool.HttpServer.Services;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -52,7 +52,7 @@ if (tableServiceClient != null)
     builder.Services.AddSingleton(sp => new ClientTableService(
         sp.GetRequiredService<TableServiceClient>(),
         "Users",
-        "ControlCenter",
+        "ServerConfig",
         "DataItem",
         "Events",
         sp.GetRequiredService<ILogger<ClientTableService>>()));
@@ -128,8 +128,8 @@ if (tableServiceClient != null)
     {
         var usersTable = tableServiceClient.GetTableClient("Users");
         await usersTable.CreateIfNotExistsAsync();
-        var controlCenterTable = tableServiceClient.GetTableClient("ControlCenter");
-        await controlCenterTable.CreateIfNotExistsAsync();
+        var serverConfigTable = tableServiceClient.GetTableClient("ServerConfig");
+        await serverConfigTable.CreateIfNotExistsAsync();
         var dataItemTable = tableServiceClient.GetTableClient("DataItem");
         await dataItemTable.CreateIfNotExistsAsync();
         var eventsTable = tableServiceClient.GetTableClient("Events");

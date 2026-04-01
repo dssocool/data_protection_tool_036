@@ -2,7 +2,7 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Text.RegularExpressions;
 
-namespace DataProtectionTool.ControlCenter.HttpServer.Helpers;
+namespace DataProtectionTool.HttpServer.Helpers;
 
 internal static class EndpointHelpers
 {

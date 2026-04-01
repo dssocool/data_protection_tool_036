@@ -1,7 +1,7 @@
 using Grpc.Core;
 using DataProtectionTool.Contracts;
 
-namespace DataProtectionTool.ControlCenter.RpcServer.Services;
+namespace DataProtectionTool.RpcServer.Services;
 
 public class ControlPlaneService : ControlPlane.ControlPlaneBase
 {

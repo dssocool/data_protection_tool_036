@@ -2,7 +2,7 @@ using System.Collections.Concurrent;
 using System.Threading.Channels;
 using DataProtectionTool.Contracts;
 
-namespace DataProtectionTool.ControlCenter.RpcServer.Services;
+namespace DataProtectionTool.RpcServer.Services;
 
 public record AgentInfo(string Oid, string Tid, string AgentId, DateTime ConnectedAt, string UserName = "");
 

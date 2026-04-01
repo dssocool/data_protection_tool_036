@@ -1,6 +1,6 @@
 using Parquet;
 
-namespace DataProtectionTool.ControlCenter.HttpServer.Services;
+namespace DataProtectionTool.HttpServer.Services;
 
 public static class ParquetReaderService
 {
