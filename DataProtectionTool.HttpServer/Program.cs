@@ -18,14 +18,21 @@ builder.WebHost.ConfigureKestrel(options =>
     });
 });
 
-var rpcServerAddress = builder.Configuration.GetSection("RpcServer")["Address"] ?? "http://localhost:8191";
-var grpcChannel = GrpcChannel.ForAddress(rpcServerAddress);
-var controlPlaneClient = new ControlPlane.ControlPlaneClient(grpcChannel);
-builder.Services.AddSingleton(controlPlaneClient);
-builder.Services.AddSingleton<RpcAgentProxy>();
-
 var healthStatus = new CenterHealthStatus();
 builder.Services.AddSingleton(healthStatus);
+
+var rpcServerAddress = builder.Configuration.GetSection("RpcServer")["Address"];
+if (string.IsNullOrEmpty(rpcServerAddress))
+{
+    healthStatus.ConfigurationErrors.Add("RpcServer:Address is not configured.");
+}
+else
+{
+    var grpcChannel = GrpcChannel.ForAddress(rpcServerAddress);
+    var controlPlaneClient = new ControlPlane.ControlPlaneClient(grpcChannel);
+    builder.Services.AddSingleton(controlPlaneClient);
+}
+builder.Services.AddSingleton<RpcAgentProxy>();
 
 var tableConnectionString = builder.Configuration.GetSection("AzureTableStorage")["ConnectionString"];
 TableServiceClient? tableServiceClient = null;
@@ -190,7 +197,7 @@ if (!healthStatus.IsHealthy)
 
     _ = Task.Run(async () =>
     {
-        using var timer = new PeriodicTimer(TimeSpan.FromSeconds(30));
+        using var timer = new PeriodicTimer(TimeSpan.FromSeconds(60));
         while (await timer.WaitForNextTickAsync())
         {
             Console.Error.WriteLine("=== [Periodic] HttpServer configuration issues: ===");

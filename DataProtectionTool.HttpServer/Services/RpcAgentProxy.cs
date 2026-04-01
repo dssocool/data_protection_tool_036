@@ -1,4 +1,5 @@
 using DataProtectionTool.Contracts;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace DataProtectionTool.HttpServer.Services;
 
@@ -53,22 +54,28 @@ public class RpcAgentConnection
 
 public class RpcAgentProxy
 {
-    private readonly ControlPlane.ControlPlaneClient _client;
+    private readonly ControlPlane.ControlPlaneClient? _client;
 
-    public RpcAgentProxy(ControlPlane.ControlPlaneClient client)
+    public bool IsAvailable => _client is not null;
+
+    public RpcAgentProxy(IServiceProvider services)
     {
-        _client = client;
+        _client = services.GetService<ControlPlane.ControlPlaneClient>();
     }
+
+    private ControlPlane.ControlPlaneClient RequireClient()
+        => _client ?? throw new InvalidOperationException(
+            "RpcServer:Address is not configured. The RPC client is unavailable.");
 
     public async Task<bool> TryGetAsync(string path)
     {
-        var response = await _client.GetAgentInfoAsync(new GetAgentInfoRequest { Path = path });
+        var response = await RequireClient().GetAgentInfoAsync(new GetAgentInfoRequest { Path = path });
         return response.Found;
     }
 
     public async Task<(bool found, AgentInfoDto? info)> GetAgentInfoAsync(string path)
     {
-        var response = await _client.GetAgentInfoAsync(new GetAgentInfoRequest { Path = path });
+        var response = await RequireClient().GetAgentInfoAsync(new GetAgentInfoRequest { Path = path });
         if (!response.Found)
             return (false, null);
 
@@ -83,6 +90,6 @@ public class RpcAgentProxy
         if (!found || info is null)
             return (false, null);
 
-        return (true, new RpcAgentConnection(_client, path, info));
+        return (true, new RpcAgentConnection(RequireClient(), path, info));
     }
 }

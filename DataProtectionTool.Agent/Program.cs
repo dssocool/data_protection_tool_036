@@ -97,7 +97,11 @@ while (!cts.Token.IsCancellationRequested)
         }
 
         var path = registerResponse.Path;
-        Console.WriteLine($"Agent registered. Path: {path}");
+        var url = registerResponse.Url;
+        if (!string.IsNullOrEmpty(url))
+            Console.WriteLine($"Agent registered. URL: {url}");
+        else
+            Console.WriteLine($"Agent registered. Path: {path}");
 
         connectionManager.LoadConnectionDetails(registerResponse.ConnectionsJson);
         Console.WriteLine("[Agent] Loaded connection details from Server.");
