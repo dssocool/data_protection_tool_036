@@ -1,5 +1,4 @@
 using Azure.Data.Tables;
-using Azure.Storage;
 using DataProtectionTool.RpcServer.Interceptors;
 using DataProtectionTool.RpcServer.Models;
 using DataProtectionTool.RpcServer.Services;
@@ -11,8 +10,6 @@ builder.Services.AddGrpc(options =>
     options.Interceptors.Add<SecretValidationInterceptor>();
 });
 
-var healthStatus = new CenterHealthStatus();
-builder.Services.AddSingleton(healthStatus);
 builder.Services.AddSingleton<AgentRegistry>();
 
 var tableConnectionString = builder.Configuration.GetSection("AzureTableStorage")["ConnectionString"];
@@ -20,7 +17,7 @@ TableServiceClient? tableServiceClient = null;
 
 if (string.IsNullOrEmpty(tableConnectionString))
 {
-    healthStatus.ConfigurationErrors.Add("AzureTableStorage:ConnectionString is not configured.");
+    Console.Error.WriteLine("WARNING: AzureTableStorage:ConnectionString is not configured.");
 }
 else
 {
@@ -30,7 +27,7 @@ else
     }
     catch (Exception ex)
     {
-        healthStatus.ConfigurationErrors.Add($"AzureTableStorage:ConnectionString is invalid: {ex.Message}");
+        Console.Error.WriteLine($"WARNING: AzureTableStorage:ConnectionString is invalid: {ex.Message}");
     }
 }
 
@@ -46,54 +43,17 @@ if (tableServiceClient != null)
         sp.GetRequiredService<ILogger<ClientTableService>>()));
 }
 
-var blobSection = builder.Configuration.GetSection("AzureBlobStorage");
-var blobStorageConfig = new BlobStorageConfig
-{
-    StorageAccount = blobSection["StorageAccount"] ?? "",
-    Container = blobSection["Container"] ?? "",
-    AccessKey = blobSection["AccessKey"] ?? "",
-    PreviewContainer = blobSection["PreviewContainer"] ?? ""
-};
-builder.Services.AddSingleton(blobStorageConfig);
-
 var httpServerConfig = new HttpServerConfig
 {
     BaseUrl = builder.Configuration.GetSection("HttpServer")["BaseUrl"] ?? ""
 };
 builder.Services.AddSingleton(httpServerConfig);
 
-StorageSharedKeyCredential? blobCredential = null;
-
-if (string.IsNullOrEmpty(blobStorageConfig.StorageAccount))
-    healthStatus.ConfigurationErrors.Add("AzureBlobStorage:StorageAccount is not configured.");
-if (string.IsNullOrEmpty(blobStorageConfig.AccessKey))
-    healthStatus.ConfigurationErrors.Add("AzureBlobStorage:AccessKey is not configured.");
-if (string.IsNullOrEmpty(blobStorageConfig.Container))
-    healthStatus.ConfigurationErrors.Add("AzureBlobStorage:Container is not configured.");
-if (string.IsNullOrEmpty(blobStorageConfig.PreviewContainer))
-    healthStatus.ConfigurationErrors.Add("AzureBlobStorage:PreviewContainer is not configured.");
-
-if (!string.IsNullOrEmpty(blobStorageConfig.StorageAccount) && !string.IsNullOrEmpty(blobStorageConfig.AccessKey))
-{
-    try
-    {
-        blobCredential = new StorageSharedKeyCredential(blobStorageConfig.StorageAccount, blobStorageConfig.AccessKey);
-    }
-    catch (Exception ex)
-    {
-        healthStatus.ConfigurationErrors.Add($"AzureBlobStorage credentials are invalid: {ex.Message}");
-    }
-}
-
-if (blobCredential != null)
-    builder.Services.AddSingleton(blobCredential);
-
 var app = builder.Build();
 
-var isAzuriteMode = blobStorageConfig.StorageAccount == "devstoreaccount1"
-    || (tableConnectionString != null && (
-        tableConnectionString.Contains("devstoreaccount1", StringComparison.OrdinalIgnoreCase)
-        || tableConnectionString.Contains("UseDevelopmentStorage=true", StringComparison.OrdinalIgnoreCase)));
+var isAzuriteMode = tableConnectionString != null && (
+    tableConnectionString.Contains("devstoreaccount1", StringComparison.OrdinalIgnoreCase)
+    || tableConnectionString.Contains("UseDevelopmentStorage=true", StringComparison.OrdinalIgnoreCase));
 
 if (tableServiceClient != null)
 {
@@ -116,46 +76,18 @@ if (tableServiceClient != null)
         Console.Error.WriteLine($"Message     : {ex.Message}");
         Console.Error.WriteLine($"Stack Trace : {ex.StackTrace}");
         Console.Error.WriteLine($"Full Details: {ex}");
-        if (!isAzuriteMode)
-        {
-            healthStatus.ConfigurationErrors.Add($"Azure Table Storage initialization failed: {ex.Message}");
-        }
-        else
-        {
+        if (isAzuriteMode)
             throw;
-        }
+        Console.Error.WriteLine("WARNING: Azure Table Storage initialization failed. Table features will be unavailable.");
     }
     catch (Exception ex)
     {
         Console.Error.WriteLine("=== Storage initialization failed (unexpected error) ===");
         Console.Error.WriteLine(ex.ToString());
-        if (!isAzuriteMode)
-        {
-            healthStatus.ConfigurationErrors.Add($"Azure Table Storage initialization failed: {ex.Message}");
-        }
-        else
-        {
+        if (isAzuriteMode)
             throw;
-        }
+        Console.Error.WriteLine("WARNING: Azure Table Storage initialization failed. Table features will be unavailable.");
     }
-}
-
-if (!healthStatus.IsHealthy)
-{
-    Console.Error.WriteLine("=== RpcServer is starting in degraded mode. Configuration issues detected: ===");
-    foreach (var error in healthStatus.ConfigurationErrors)
-        Console.Error.WriteLine($"  - {error}");
-
-    _ = Task.Run(async () =>
-    {
-        using var timer = new PeriodicTimer(TimeSpan.FromSeconds(30));
-        while (await timer.WaitForNextTickAsync())
-        {
-            Console.Error.WriteLine("=== [Periodic] RpcServer configuration issues: ===");
-            foreach (var error in healthStatus.ConfigurationErrors)
-                Console.Error.WriteLine($"  - {error}");
-        }
-    });
 }
 
 app.MapGrpcService<AgentHubService>();

@@ -55,19 +55,6 @@ message GetConnectionDetailsResponse {
   string error = 10;
 }
 
-message GetSasTokenRequest {
-  string path = 1;
-  string container_name = 2;
-}
-
-message GetSasTokenResponse {
-  bool success = 1;
-  string sas_token = 2;
-  string blob_endpoint = 3;
-  string container = 4;
-  string error = 5;
-}
-
 message SubscribeRequest {
   string path = 1;
 }
@@ -82,6 +69,5 @@ service AgentHub {
   rpc Heartbeat (HeartbeatRequest) returns (HeartbeatResponse);
   rpc SendCommandResult (SendCommandResultRequest) returns (SendCommandResultResponse);
   rpc GetConnectionDetails (GetConnectionDetailsRequest) returns (GetConnectionDetailsResponse);
-  rpc GetSasToken (GetSasTokenRequest) returns (GetSasTokenResponse);
   rpc Subscribe (SubscribeRequest) returns (stream ServerMessage);
 }

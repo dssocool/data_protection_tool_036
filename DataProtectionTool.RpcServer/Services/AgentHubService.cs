@@ -1,6 +1,4 @@
 using System.Text.Json;
-using Azure.Storage;
-using Azure.Storage.Sas;
 using Grpc.Core;
 using DataProtectionTool.Contracts;
 using DataProtectionTool.RpcServer.Models;
@@ -12,42 +10,23 @@ public class AgentHubService : AgentHub.AgentHubBase
     private readonly ILogger<AgentHubService> _logger;
     private readonly AgentRegistry _registry;
     private readonly ClientTableService? _clientTableService;
-    private readonly BlobStorageConfig _blobStorageConfig;
-    private readonly StorageSharedKeyCredential? _blobCredential;
-    private readonly CenterHealthStatus _healthStatus;
     private readonly HttpServerConfig _httpServerConfig;
 
     public AgentHubService(
         ILogger<AgentHubService> logger,
         AgentRegistry registry,
-        BlobStorageConfig blobStorageConfig,
         HttpServerConfig httpServerConfig,
-        CenterHealthStatus healthStatus,
-        ClientTableService? clientTableService = null,
-        StorageSharedKeyCredential? blobCredential = null)
+        ClientTableService? clientTableService = null)
     {
         _logger = logger;
         _registry = registry;
-        _clientTableService = clientTableService;
-        _blobStorageConfig = blobStorageConfig;
         _httpServerConfig = httpServerConfig;
-        _blobCredential = blobCredential;
-        _healthStatus = healthStatus;
+        _clientTableService = clientTableService;
     }
 
     public override async Task<RegisterResponse> Register(RegisterRequest request, ServerCallContext context)
     {
         _logger.LogInformation("Agent {AgentId} registering from {Peer}", request.AgentId, context.Peer);
-
-        if (!_healthStatus.IsHealthy)
-        {
-            _logger.LogWarning("Rejecting agent {AgentId} — center has configuration issues", request.AgentId);
-            return new RegisterResponse
-            {
-                Success = false,
-                Error = "Error: Center is having issues to start"
-            };
-        }
 
         var oid = request.Oid;
         var tid = request.Tid;
@@ -184,52 +163,6 @@ public class AgentHubService : AgentHub.AgentHubBase
             Encrypt = entity.Encrypt,
             TrustServerCertificate = entity.TrustServerCertificate,
         };
-    }
-
-    public override Task<GetSasTokenResponse> GetSasToken(GetSasTokenRequest request, ServerCallContext context)
-    {
-        if (!_registry.TryGetConnection(request.Path, out _))
-            return Task.FromResult(new GetSasTokenResponse { Success = false, Error = "Agent not registered" });
-
-        try
-        {
-            var sasBuilder = new AccountSasBuilder
-            {
-                Services = AccountSasServices.Blobs,
-                ResourceTypes = AccountSasResourceTypes.Object,
-                ExpiresOn = DateTimeOffset.UtcNow.AddMinutes(15),
-                Protocol = SasProtocol.HttpsAndHttp
-            };
-            sasBuilder.SetPermissions(AccountSasPermissions.Read | AccountSasPermissions.Write | AccountSasPermissions.Create);
-
-            if (_blobCredential == null)
-                return Task.FromResult(new GetSasTokenResponse { Success = false, Error = "Blob storage credentials are not configured." });
-
-            var sasToken = sasBuilder.ToSasQueryParameters(_blobCredential).ToString();
-
-            var blobEndpoint = _blobStorageConfig.StorageAccount == "devstoreaccount1"
-                ? $"http://127.0.0.1:10000/{_blobStorageConfig.StorageAccount}"
-                : $"https://{_blobStorageConfig.StorageAccount}.blob.core.windows.net";
-
-            var container = string.IsNullOrEmpty(request.ContainerName)
-                ? _blobStorageConfig.PreviewContainer
-                : request.ContainerName;
-
-            _logger.LogInformation("Generated SAS token for agent at path={Path}", request.Path);
-
-            return Task.FromResult(new GetSasTokenResponse
-            {
-                Success = true,
-                SasToken = sasToken,
-                BlobEndpoint = blobEndpoint,
-                Container = container
-            });
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "Failed to generate SAS token");
-            return Task.FromResult(new GetSasTokenResponse { Success = false, Error = ex.Message });
-        }
     }
 
     public override async Task Subscribe(

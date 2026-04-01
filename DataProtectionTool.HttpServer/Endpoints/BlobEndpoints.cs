@@ -1,5 +1,7 @@
 using System.Text.Json;
+using Azure.Storage;
 using Azure.Storage.Blobs;
+using Azure.Storage.Sas;
 using Parquet;
 using DataProtectionTool.HttpServer.Helpers;
 using DataProtectionTool.HttpServer.Models;
@@ -104,6 +106,54 @@ public static class BlobEndpoints
             catch (Exception ex)
             {
                 return Results.Problem($"Failed to merge blobs: {ex.Message}");
+            }
+        });
+
+        app.MapGet("/api/agents/{path}/sas-token", async (
+            string path,
+            string? containerName,
+            RpcAgentProxy agentProxy,
+            BlobStorageConfig blobStorageConfig,
+            StorageSharedKeyCredential? blobCredential) =>
+        {
+            if (!await agentProxy.TryGetAsync(path))
+                return Results.NotFound(new { success = false, error = "Agent not found." });
+
+            if (blobCredential == null)
+                return Results.Ok(new { success = false, error = "Blob storage credentials are not configured." });
+
+            try
+            {
+                var sasBuilder = new AccountSasBuilder
+                {
+                    Services = AccountSasServices.Blobs,
+                    ResourceTypes = AccountSasResourceTypes.Object,
+                    ExpiresOn = DateTimeOffset.UtcNow.AddMinutes(15),
+                    Protocol = SasProtocol.HttpsAndHttp
+                };
+                sasBuilder.SetPermissions(AccountSasPermissions.Read | AccountSasPermissions.Write | AccountSasPermissions.Create);
+
+                var sasToken = sasBuilder.ToSasQueryParameters(blobCredential).ToString();
+
+                var blobEndpoint = blobStorageConfig.StorageAccount == "devstoreaccount1"
+                    ? $"http://127.0.0.1:10000/{blobStorageConfig.StorageAccount}"
+                    : $"https://{blobStorageConfig.StorageAccount}.blob.core.windows.net";
+
+                var container = string.IsNullOrEmpty(containerName)
+                    ? blobStorageConfig.PreviewContainer
+                    : containerName;
+
+                return Results.Ok(new
+                {
+                    success = true,
+                    sasToken,
+                    blobEndpoint,
+                    container
+                });
+            }
+            catch (Exception ex)
+            {
+                return Results.Ok(new { success = false, error = ex.Message });
             }
         });
 

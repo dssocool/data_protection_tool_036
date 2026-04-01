@@ -111,6 +111,7 @@ while (!cts.Token.IsCancellationRequested)
             Client = client,
             Headers = headers,
             Path = path,
+            Url = url,
             AgentId = agentId,
             Oid = oid,
             Tid = tid,
@@ -744,6 +745,8 @@ static string GetLocalIpAddress()
 
 class AgentContext
 {
+    private static readonly HttpClient _httpClient = new();
+
     public required AgentHub.AgentHubClient Client { get; init; }
     public required Metadata Headers { get; init; }
     public required string Path { get; init; }
@@ -751,6 +754,7 @@ class AgentContext
     public required string Oid { get; init; }
     public required string Tid { get; init; }
     public required string UserName { get; init; }
+    public string Url { get; init; } = "";
 
     public async Task SendResultAsync(string type, string payload)
     {
@@ -764,20 +768,33 @@ class AgentContext
 
     public async Task<SasTokenInfo> GetSasTokenAsync(string? containerName = null)
     {
-        var response = await Client.GetSasTokenAsync(new GetSasTokenRequest
-        {
-            Path = Path,
-            ContainerName = containerName ?? ""
-        }, headers: Headers);
+        if (string.IsNullOrEmpty(Url))
+            throw new InvalidOperationException("HTTP server URL is not available. Cannot get SAS token.");
 
-        if (!response.Success)
-            throw new InvalidOperationException($"Failed to get SAS token: {response.Error}");
+        var baseUrl = Url.Replace("/agents/", "/api/agents/");
+        var sasUrl = $"{baseUrl}/sas-token";
+        if (!string.IsNullOrEmpty(containerName))
+            sasUrl += $"?containerName={Uri.EscapeDataString(containerName)}";
+
+        var response = await _httpClient.GetAsync(sasUrl);
+        response.EnsureSuccessStatusCode();
+
+        var json = await response.Content.ReadAsStringAsync();
+        using var doc = JsonDocument.Parse(json);
+        var root = doc.RootElement;
+
+        var success = root.TryGetProperty("success", out var sEl) && sEl.GetBoolean();
+        if (!success)
+        {
+            var error = root.TryGetProperty("error", out var eEl) ? eEl.GetString() : "Unknown error";
+            throw new InvalidOperationException($"Failed to get SAS token: {error}");
+        }
 
         return new SasTokenInfo
         {
-            SasToken = response.SasToken,
-            BlobEndpoint = response.BlobEndpoint,
-            Container = response.Container
+            SasToken = root.GetProperty("sasToken").GetString() ?? "",
+            BlobEndpoint = root.GetProperty("blobEndpoint").GetString() ?? "",
+            Container = root.GetProperty("container").GetString() ?? ""
         };
     }
 
