@@ -45,6 +45,10 @@ function getAgentPath(): string | null {
   return segments[agentsIdx + 1];
 }
 
+function getSessionKey(agentPath: string): string {
+  return `bootstrap_${agentPath}`;
+}
+
 export default function App() {
   const [showSqlModal, setShowSqlModal] = useState(false);
   const [showQueryModal, setShowQueryModal] = useState(false);
@@ -82,7 +86,6 @@ export default function App() {
   const [allFrameworks, setAllFrameworks] = useState<Record<string, unknown>[]>([]);
   const [dryRunningTables, setDryRunningTables] = useState<Set<string>>(new Set());
   const [mismatchedColumns, setMismatchedColumns] = useState<Map<string, { maskType: string; sqlType: string }>>(new Map());
-  const eventsTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const previewCacheRef = useRef<Map<string, string[]>>(new Map());
   const tableCacheRef = useRef<Map<string, TablePreviewCache>>(new Map());
   const selectedTableRef = useRef(selectedTable);
@@ -127,11 +130,14 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    fetchEvents();
-    eventsTimerRef.current = setInterval(fetchEvents, 10000);
-    return () => {
-      if (eventsTimerRef.current) clearInterval(eventsTimerRef.current);
-    };
+    const agentPath = getAgentPath();
+    if (!agentPath) return;
+    const key = getSessionKey(agentPath);
+    if (!sessionStorage.getItem(key)) {
+      fetchEvents().then(() => {
+        sessionStorage.setItem(key, "true");
+      });
+    }
   }, [fetchEvents]);
 
   const fetchConnections = useCallback(async () => {
@@ -1204,7 +1210,6 @@ export default function App() {
 
       if (!response.ok) {
         finalizeTrackedEvent(`DP run failed: server error ${response.status}`, "error");
-        fetchEvents();
         return;
       }
 
@@ -1261,7 +1266,6 @@ export default function App() {
         next.delete(key);
         return next;
       });
-      fetchEvents();
     }
   }
 
