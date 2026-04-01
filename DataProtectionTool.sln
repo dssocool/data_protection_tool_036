@@ -1,11 +1,9 @@
-﻿
+
 Microsoft Visual Studio Solution File, Format Version 12.00
 # Visual Studio Version 17
 VisualStudioVersion = 17.0.31903.59
 MinimumVisualStudioVersion = 10.0.40219.1
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "DataProtectionTool.Contracts", "DataProtectionTool.Contracts\DataProtectionTool.Contracts.csproj", "{DFCD11BB-C8F2-4E81-8DD7-04EF873AC7A8}"
-EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "DataProtectionTool.ControlCenter", "DataProtectionTool.ControlCenter\DataProtectionTool.ControlCenter.csproj", "{B9166AD4-5E08-4EE7-908E-CF4EC1561BE9}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "DataProtectionTool.Agent", "DataProtectionTool.Agent\DataProtectionTool.Agent.csproj", "{87BB9864-886E-43D5-B785-2F88025E9ACB}"
 EndProject
@@ -35,18 +33,6 @@ Global
 		{DFCD11BB-C8F2-4E81-8DD7-04EF873AC7A8}.Release|x64.Build.0 = Release|Any CPU
 		{DFCD11BB-C8F2-4E81-8DD7-04EF873AC7A8}.Release|x86.ActiveCfg = Release|Any CPU
 		{DFCD11BB-C8F2-4E81-8DD7-04EF873AC7A8}.Release|x86.Build.0 = Release|Any CPU
-		{B9166AD4-5E08-4EE7-908E-CF4EC1561BE9}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
-		{B9166AD4-5E08-4EE7-908E-CF4EC1561BE9}.Debug|Any CPU.Build.0 = Debug|Any CPU
-		{B9166AD4-5E08-4EE7-908E-CF4EC1561BE9}.Debug|x64.ActiveCfg = Debug|Any CPU
-		{B9166AD4-5E08-4EE7-908E-CF4EC1561BE9}.Debug|x64.Build.0 = Debug|Any CPU
-		{B9166AD4-5E08-4EE7-908E-CF4EC1561BE9}.Debug|x86.ActiveCfg = Debug|Any CPU
-		{B9166AD4-5E08-4EE7-908E-CF4EC1561BE9}.Debug|x86.Build.0 = Debug|Any CPU
-		{B9166AD4-5E08-4EE7-908E-CF4EC1561BE9}.Release|Any CPU.ActiveCfg = Release|Any CPU
-		{B9166AD4-5E08-4EE7-908E-CF4EC1561BE9}.Release|Any CPU.Build.0 = Release|Any CPU
-		{B9166AD4-5E08-4EE7-908E-CF4EC1561BE9}.Release|x64.ActiveCfg = Release|Any CPU
-		{B9166AD4-5E08-4EE7-908E-CF4EC1561BE9}.Release|x64.Build.0 = Release|Any CPU
-		{B9166AD4-5E08-4EE7-908E-CF4EC1561BE9}.Release|x86.ActiveCfg = Release|Any CPU
-		{B9166AD4-5E08-4EE7-908E-CF4EC1561BE9}.Release|x86.Build.0 = Release|Any CPU
 		{87BB9864-886E-43D5-B785-2F88025E9ACB}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
 		{87BB9864-886E-43D5-B785-2F88025E9ACB}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{87BB9864-886E-43D5-B785-2F88025E9ACB}.Debug|x64.ActiveCfg = Debug|Any CPU

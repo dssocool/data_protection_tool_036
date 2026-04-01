@@ -2,8 +2,9 @@ $ErrorActionPreference = "Stop"
 
 $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Definition
 $azuriteData = Join-Path $scriptDir ".azurite"
-$frontendDir = Join-Path $scriptDir "DataProtectionTool.ControlCenter\frontend"
-$ccProj      = Join-Path $scriptDir "DataProtectionTool.ControlCenter\DataProtectionTool.ControlCenter.csproj"
+$frontendDir = Join-Path $scriptDir "DataProtectionTool.ControlCenter.HttpServer\frontend"
+$rpcProj     = Join-Path $scriptDir "DataProtectionTool.ControlCenter.RpcServer\DataProtectionTool.ControlCenter.RpcServer.csproj"
+$httpProj    = Join-Path $scriptDir "DataProtectionTool.ControlCenter.HttpServer\DataProtectionTool.ControlCenter.HttpServer.csproj"
 $agentProj   = Join-Path $scriptDir "DataProtectionTool.Agent\DataProtectionTool.Agent.csproj"
 
 $noAzurite = $args -contains "--no-azurite"
@@ -39,8 +40,8 @@ Write-Host ""
 $azurite = $null
 
 if (-not $noAzurite) {
-    # --- [1/4] Azurite ---
-    Write-Host "[1/4] Starting Azurite (Azure Storage Emulator)..."
+    # --- [1/5] Azurite ---
+    Write-Host "[1/5] Starting Azurite (Azure Storage Emulator)..."
 
     $azuriteCmd = Get-Command azurite -ErrorAction SilentlyContinue
     if (-not $azuriteCmd) {
@@ -59,11 +60,11 @@ if (-not $noAzurite) {
     Write-Host "      Waiting 2 seconds for Azurite to initialize..."
     Start-Sleep -Seconds 2
 } else {
-    Write-Host "[1/4] Skipping Azurite (--no-azurite flag set)"
+    Write-Host "[1/5] Skipping Azurite (--no-azurite flag set)"
 }
 
-# --- [2/4] Build Frontend ---
-Write-Host "[2/4] Building Frontend..."
+# --- [2/5] Build Frontend ---
+Write-Host "[2/5] Building Frontend..."
 
 if (-not (Test-Path (Join-Path $frontendDir "node_modules"))) {
     Write-Host "      node_modules not found. Running npm install..."
@@ -76,11 +77,7 @@ Push-Location $frontendDir
 & cmd /c "npm run build"
 Pop-Location
 
-# --- [3/4] ControlCenter ---
-Write-Host "[3/4] Starting ControlCenter (HTTP on port 8190, gRPC on port 8191)..."
-
 if (-not $noAzurite) {
-    # Override storage settings to point to Azurite
     $env:AzureTableStorage__ConnectionString = "UseDevelopmentStorage=true"
     $env:AzureTableStorage__TableName = "Clients"
     $env:AzureBlobStorage__StorageAccount = "devstoreaccount1"
@@ -91,20 +88,35 @@ if (-not $noAzurite) {
     Write-Host "      Using appsettings.Development.json for cloud Azure storage"
 }
 
-$cc = Start-Process -FilePath "dotnet" `
-    -ArgumentList "run","--project",$ccProj `
-    -NoNewWindow -PassThru
-$processes += $cc
-Write-Host "      ControlCenter PID: $($cc.Id)"
+# --- [3/5] RpcServer ---
+Write-Host "[3/5] Starting RpcServer (gRPC on port 8191)..."
 
-Write-Host "      Waiting 5 seconds for ControlCenter to initialize..."
+$rpc = Start-Process -FilePath "dotnet" `
+    -ArgumentList "run","--project",$rpcProj `
+    -NoNewWindow -PassThru
+$processes += $rpc
+Write-Host "      RpcServer PID: $($rpc.Id)"
+
+Write-Host "      Waiting 5 seconds for RpcServer to initialize..."
 Start-Sleep -Seconds 5
 
-# --- [4/4] Agent ---
+# --- [4/5] HttpServer ---
+Write-Host "[4/5] Starting HttpServer (HTTP on port 8190)..."
+
+$http = Start-Process -FilePath "dotnet" `
+    -ArgumentList "run","--project",$httpProj `
+    -NoNewWindow -PassThru
+$processes += $http
+Write-Host "      HttpServer PID: $($http.Id)"
+
+Write-Host "      Waiting 3 seconds for HttpServer to initialize..."
+Start-Sleep -Seconds 3
+
+# --- [5/5] Agent ---
 if ($noTest) {
-    Write-Host "[4/4] Starting Agent (gRPC client) without test mode..."
+    Write-Host "[5/5] Starting Agent (gRPC client) without test mode..."
 } else {
-    Write-Host "[4/4] Starting Agent (gRPC client) in test mode..."
+    Write-Host "[5/5] Starting Agent (gRPC client) in test mode..."
 }
 
 $agentArgs = @("run","--project",$agentProj)
@@ -122,10 +134,11 @@ Write-Host ""
 Write-Host "========================================="
 Write-Host " All services started"
 if (-not $noAzurite) {
-    Write-Host "   Azurite PID:       $($azurite.Id)"
+    Write-Host "   Azurite PID:    $($azurite.Id)"
 }
-Write-Host "   ControlCenter PID: $($cc.Id)"
-Write-Host "   Agent PID:         $($agent.Id)"
+Write-Host "   RpcServer PID:  $($rpc.Id)"
+Write-Host "   HttpServer PID: $($http.Id)"
+Write-Host "   Agent PID:      $($agent.Id)"
 Write-Host "========================================="
 Write-Host ""
 Write-Host "Press Ctrl+C to stop all services."
