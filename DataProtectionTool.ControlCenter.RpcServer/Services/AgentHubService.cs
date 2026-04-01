@@ -40,17 +40,6 @@ public class AgentHubService : AgentHub.AgentHubBase
         var peer = context.Peer;
         _logger.LogInformation("Agent connected from {Peer}", peer);
 
-        if (!_healthStatus.IsHealthy)
-        {
-            _logger.LogWarning("Rejecting agent from {Peer} — center has configuration issues", peer);
-            await responseStream.WriteAsync(new ServerMessage
-            {
-                Type = "error",
-                Payload = "Error: Center is having issues to start"
-            });
-            return;
-        }
-
         string? registeredPath = null;
 
         try
@@ -62,6 +51,17 @@ public class AgentHubService : AgentHub.AgentHubBase
             }
 
             var firstMessage = requestStream.Current;
+
+            if (!_healthStatus.IsHealthy)
+            {
+                _logger.LogWarning("Rejecting agent from {Peer} — center has configuration issues", peer);
+                await responseStream.WriteAsync(new ServerMessage
+                {
+                    Type = "error",
+                    Payload = "Error: Center is having issues to start"
+                });
+                return;
+            }
 
             var oid = firstMessage.Oid;
             var tid = firstMessage.Tid;
