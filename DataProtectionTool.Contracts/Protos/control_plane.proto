@@ -1,0 +1,47 @@
+syntax = "proto3";
+
+option csharp_namespace = "DataProtectionTool.Contracts";
+
+package dataprotection;
+
+message GetAgentInfoRequest {
+  string path = 1;
+}
+
+message GetAgentInfoResponse {
+  bool found = 1;
+  string oid = 2;
+  string tid = 3;
+  string agent_id = 4;
+  string connected_at = 5;
+  string user_name = 6;
+}
+
+message SendCommandRequest {
+  string path = 1;
+  string type = 2;
+  string payload = 3;
+  int32 timeout_seconds = 4;
+}
+
+message SendCommandResponse {
+  bool success = 1;
+  string payload = 2;
+  string error = 3;
+}
+
+message PushConnectionsListRequest {
+  string path = 1;
+  string connections_json = 2;
+}
+
+message PushConnectionsListResponse {
+  bool success = 1;
+  string error = 2;
+}
+
+service ControlPlane {
+  rpc GetAgentInfo (GetAgentInfoRequest) returns (GetAgentInfoResponse);
+  rpc SendCommand (SendCommandRequest) returns (SendCommandResponse);
+  rpc PushConnectionsList (PushConnectionsListRequest) returns (PushConnectionsListResponse);
+}

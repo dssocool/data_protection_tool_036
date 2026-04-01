@@ -1,28 +1,31 @@
 using Azure.Data.Tables;
 using Azure.Storage;
+using Azure.Storage.Blobs;
+using Grpc.Net.Client;
 using Microsoft.AspNetCore.Server.Kestrel.Core;
-using DataProtectionTool.ControlCenter.RpcServer.Interceptors;
-using DataProtectionTool.ControlCenter.RpcServer.Models;
-using DataProtectionTool.ControlCenter.RpcServer.Services;
+using DataProtectionTool.Contracts;
+using DataProtectionTool.ControlCenter.HttpServer.Endpoints;
+using DataProtectionTool.ControlCenter.HttpServer.Models;
+using DataProtectionTool.ControlCenter.HttpServer.Services;
 
 var builder = WebApplication.CreateBuilder(args);
 
 builder.WebHost.ConfigureKestrel(options =>
 {
-    options.ListenAnyIP(8191, listenOptions =>
+    options.ListenAnyIP(8190, listenOptions =>
     {
-        listenOptions.Protocols = HttpProtocols.Http2;
+        listenOptions.Protocols = HttpProtocols.Http1;
     });
 });
 
-builder.Services.AddGrpc(options =>
-{
-    options.Interceptors.Add<SecretValidationInterceptor>();
-});
+var rpcServerAddress = builder.Configuration.GetSection("RpcServer")["Address"] ?? "http://localhost:8191";
+var grpcChannel = GrpcChannel.ForAddress(rpcServerAddress);
+var controlPlaneClient = new ControlPlane.ControlPlaneClient(grpcChannel);
+builder.Services.AddSingleton(controlPlaneClient);
+builder.Services.AddSingleton<RpcAgentProxy>();
 
 var healthStatus = new CenterHealthStatus();
 builder.Services.AddSingleton(healthStatus);
-builder.Services.AddSingleton<AgentRegistry>();
 
 var tableConnectionString = builder.Configuration.GetSection("AzureTableStorage")["ConnectionString"];
 TableServiceClient? tableServiceClient = null;
@@ -66,6 +69,7 @@ var blobStorageConfig = new BlobStorageConfig
 builder.Services.AddSingleton(blobStorageConfig);
 
 StorageSharedKeyCredential? blobCredential = null;
+BlobServiceClient? blobServiceClient = null;
 
 if (string.IsNullOrEmpty(blobStorageConfig.StorageAccount))
     healthStatus.ConfigurationErrors.Add("AzureBlobStorage:StorageAccount is not configured.");
@@ -81,6 +85,10 @@ if (!string.IsNullOrEmpty(blobStorageConfig.StorageAccount) && !string.IsNullOrE
     try
     {
         blobCredential = new StorageSharedKeyCredential(blobStorageConfig.StorageAccount, blobStorageConfig.AccessKey);
+        var blobServiceUri = blobStorageConfig.StorageAccount == "devstoreaccount1"
+            ? new Uri($"http://127.0.0.1:10000/{blobStorageConfig.StorageAccount}")
+            : new Uri($"https://{blobStorageConfig.StorageAccount}.blob.core.windows.net");
+        blobServiceClient = new BlobServiceClient(blobServiceUri, blobCredential);
     }
     catch (Exception ex)
     {
@@ -90,6 +98,22 @@ if (!string.IsNullOrEmpty(blobStorageConfig.StorageAccount) && !string.IsNullOrE
 
 if (blobCredential != null)
     builder.Services.AddSingleton(blobCredential);
+if (blobServiceClient != null)
+    builder.Services.AddSingleton(blobServiceClient);
+
+var dataEngineConfig = builder.Configuration.GetSection("DataEngine").Get<DataEngineConfig>();
+if (dataEngineConfig == null)
+{
+    healthStatus.ConfigurationErrors.Add("DataEngine section is not configured in appsettings.");
+    dataEngineConfig = new DataEngineConfig();
+}
+builder.Services.AddSingleton(dataEngineConfig);
+
+builder.Services.AddHttpClient<EngineApiClient>(client =>
+{
+    client.Timeout = TimeSpan.FromSeconds(120);
+});
+builder.Services.AddSingleton<EngineMetadataService>();
 
 var app = builder.Build();
 
@@ -143,9 +167,24 @@ if (tableServiceClient != null)
     }
 }
 
+if (!isAzuriteMode && blobServiceClient != null)
+{
+    try
+    {
+        var previewContainer = blobServiceClient.GetBlobContainerClient(blobStorageConfig.PreviewContainer);
+        await previewContainer.CreateIfNotExistsAsync();
+    }
+    catch (Exception ex)
+    {
+        Console.Error.WriteLine("=== Azure Blob Storage connectivity check failed ===");
+        Console.Error.WriteLine(ex.ToString());
+        healthStatus.ConfigurationErrors.Add($"Azure Blob Storage connectivity check failed: {ex.Message}");
+    }
+}
+
 if (!healthStatus.IsHealthy)
 {
-    Console.Error.WriteLine("=== RpcServer is starting in degraded mode. Configuration issues detected: ===");
+    Console.Error.WriteLine("=== HttpServer is starting in degraded mode. Configuration issues detected: ===");
     foreach (var error in healthStatus.ConfigurationErrors)
         Console.Error.WriteLine($"  - {error}");
 
@@ -154,15 +193,37 @@ if (!healthStatus.IsHealthy)
         using var timer = new PeriodicTimer(TimeSpan.FromSeconds(30));
         while (await timer.WaitForNextTickAsync())
         {
-            Console.Error.WriteLine("=== [Periodic] RpcServer configuration issues: ===");
+            Console.Error.WriteLine("=== [Periodic] HttpServer configuration issues: ===");
             foreach (var error in healthStatus.ConfigurationErrors)
                 Console.Error.WriteLine($"  - {error}");
         }
     });
 }
 
-app.MapGrpcService<AgentHubService>();
-app.MapGrpcService<ControlPlaneService>();
-app.MapGet("/", () => "DataProtectionTool RpcServer is running.");
+app.UseStaticFiles();
+
+app.MapGet("/", () => "DataProtectionTool HttpServer is running.");
+
+app.MapGet("/agents/{path}", async (string path, RpcAgentProxy agentProxy, IWebHostEnvironment env) =>
+{
+    if (!await agentProxy.TryGetAsync(path))
+        return Results.NotFound("Agent not found.");
+
+    if (string.IsNullOrEmpty(env.WebRootPath))
+        return Results.NotFound("Frontend not built. No wwwroot directory found. Run 'npm run build' in frontend/.");
+
+    var indexPath = Path.Combine(env.WebRootPath, "index.html");
+    if (!File.Exists(indexPath))
+        return Results.NotFound("Frontend not built. Run 'npm run build' in frontend/.");
+
+    return Results.Content(File.ReadAllText(indexPath), "text/html");
+});
+
+app.MapAgentEndpoints();
+app.MapTableEndpoints();
+app.MapQueryEndpoints();
+app.MapBlobEndpoints();
+app.MapEngineEndpoints();
+app.MapFlowEndpoints();
 
 await app.RunAsync();
