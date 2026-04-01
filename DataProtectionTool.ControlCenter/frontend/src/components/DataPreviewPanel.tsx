@@ -78,12 +78,27 @@ interface SortableTableProps {
 const DataTable = forwardRef<HTMLTableElement, SortableTableProps>(
   function DataTable({ data, sortColumnIndex, sortDirection, onHeaderClick, columnWidths, onColumnResize }, ref) {
     const resizing = useRef<{ colIndex: number; startX: number; startWidth: number } | null>(null);
+    const innerRef = useRef<HTMLTableElement | null>(null);
+    const setRefs = useCallback((el: HTMLTableElement | null) => {
+      innerRef.current = el;
+      if (typeof ref === "function") ref(el);
+      else if (ref) (ref as React.MutableRefObject<HTMLTableElement | null>).current = el;
+    }, [ref]);
 
     const onResizeMouseDown = useCallback((e: React.MouseEvent, colIndex: number) => {
       e.stopPropagation();
       e.preventDefault();
+
+      if (columnWidths.length === 0 && innerRef.current) {
+        const ths = innerRef.current.querySelectorAll("thead th");
+        const measured = Array.from(ths).map((th) => th.getBoundingClientRect().width);
+        measured.forEach((w, i) => onColumnResize(i, w));
+      }
+
       const startX = e.clientX;
-      const startWidth = columnWidths[colIndex] ?? 150;
+      const startWidth = columnWidths[colIndex]
+        ?? innerRef.current?.querySelectorAll("thead th")[colIndex]?.getBoundingClientRect().width
+        ?? 150;
       resizing.current = { colIndex, startX, startWidth };
       document.body.style.cursor = "col-resize";
       document.body.style.userSelect = "none";
@@ -107,7 +122,7 @@ const DataTable = forwardRef<HTMLTableElement, SortableTableProps>(
     const hasWidths = columnWidths.length > 0;
 
     return (
-      <table className={`data-preview-table${hasWidths ? " data-preview-table-fixed" : ""}`} ref={ref}>
+      <table className={`data-preview-table${hasWidths ? " data-preview-table-fixed" : ""}`} ref={setRefs}>
         {hasWidths && (
           <colgroup>
             {columnWidths.map((w, i) => (
@@ -168,12 +183,27 @@ const DiffView = forwardRef<HTMLTableElement, DiffViewProps>(
     const maxRows = Math.max(left.rows.length, right.rows.length);
 
     const resizing = useRef<{ colIndex: number; startX: number; startWidth: number } | null>(null);
+    const innerRef = useRef<HTMLTableElement | null>(null);
+    const setRefs = useCallback((el: HTMLTableElement | null) => {
+      innerRef.current = el;
+      if (typeof ref === "function") ref(el);
+      else if (ref) (ref as React.MutableRefObject<HTMLTableElement | null>).current = el;
+    }, [ref]);
 
     const onResizeMouseDown = useCallback((e: React.MouseEvent, colIndex: number) => {
       e.stopPropagation();
       e.preventDefault();
+
+      if (columnWidths.length === 0 && innerRef.current) {
+        const ths = innerRef.current.querySelectorAll("thead th");
+        const measured = Array.from(ths).map((th) => th.getBoundingClientRect().width);
+        measured.forEach((w, i) => onColumnResize(i, w));
+      }
+
       const startX = e.clientX;
-      const startWidth = columnWidths[colIndex] ?? 150;
+      const startWidth = columnWidths[colIndex]
+        ?? innerRef.current?.querySelectorAll("thead th")[colIndex]?.getBoundingClientRect().width
+        ?? 150;
       resizing.current = { colIndex, startX, startWidth };
       document.body.style.cursor = "col-resize";
       document.body.style.userSelect = "none";
@@ -197,7 +227,7 @@ const DiffView = forwardRef<HTMLTableElement, DiffViewProps>(
     const hasWidths = columnWidths.length > 0;
 
     return (
-      <table className={`data-preview-table data-preview-diff-table${hasWidths ? " data-preview-table-fixed" : ""}`} ref={ref}>
+      <table className={`data-preview-table data-preview-diff-table${hasWidths ? " data-preview-table-fixed" : ""}`} ref={setRefs}>
         {hasWidths && (
           <colgroup>
             {columnWidths.map((w, i) => (
