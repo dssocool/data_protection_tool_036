@@ -1,5 +1,5 @@
 using System.Collections.Concurrent;
-using Grpc.Core;
+using System.Threading.Channels;
 using DataProtectionTool.Contracts;
 
 namespace DataProtectionTool.ControlCenter.RpcServer.Services;
@@ -9,14 +9,13 @@ public record AgentInfo(string Oid, string Tid, string AgentId, DateTime Connect
 public class AgentConnection
 {
     public AgentInfo Info { get; }
-    public IServerStreamWriter<ServerMessage> ResponseStream { get; }
+    public Channel<ServerMessage> CommandChannel { get; } = Channel.CreateUnbounded<ServerMessage>();
 
     private readonly ConcurrentDictionary<string, TaskCompletionSource<string>> _pending = new();
 
-    public AgentConnection(AgentInfo info, IServerStreamWriter<ServerMessage> responseStream)
+    public AgentConnection(AgentInfo info)
     {
         Info = info;
-        ResponseStream = responseStream;
     }
 
     public async Task<string> SendCommandAsync(string type, string payload, TimeSpan timeout)
@@ -34,7 +33,7 @@ public class AgentConnection
 
         try
         {
-            await ResponseStream.WriteAsync(new ServerMessage
+            await CommandChannel.Writer.WriteAsync(new ServerMessage
             {
                 Type = type,
                 Payload = wrappedPayload
@@ -64,6 +63,7 @@ public class AgentConnection
 
     public void CancelAll()
     {
+        CommandChannel.Writer.TryComplete();
         foreach (var kvp in _pending)
         {
             if (_pending.TryRemove(kvp.Key, out var tcs))
@@ -76,10 +76,10 @@ public class AgentRegistry
 {
     private readonly ConcurrentDictionary<string, AgentConnection> _agents = new();
 
-    public string Register(AgentInfo info, IServerStreamWriter<ServerMessage> responseStream)
+    public string Register(AgentInfo info)
     {
         var path = Guid.NewGuid().ToString("N");
-        _agents[path] = new AgentConnection(info, responseStream);
+        _agents[path] = new AgentConnection(info);
         return path;
     }
 

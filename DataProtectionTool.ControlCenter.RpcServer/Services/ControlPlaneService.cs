@@ -85,7 +85,7 @@ public class ControlPlaneService : ControlPlane.ControlPlaneBase
 
         try
         {
-            await connection.ResponseStream.WriteAsync(new ServerMessage
+            await connection.CommandChannel.Writer.WriteAsync(new ServerMessage
             {
                 Type = "connections_list",
                 Payload = request.ConnectionsJson

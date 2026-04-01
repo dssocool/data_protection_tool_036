@@ -32,200 +32,159 @@ public class AgentHubService : AgentHub.AgentHubBase
         _healthStatus = healthStatus;
     }
 
-    public override async Task Connect(
-        IAsyncStreamReader<AgentMessage> requestStream,
-        IServerStreamWriter<ServerMessage> responseStream,
-        ServerCallContext context)
+    public override async Task<RegisterResponse> Register(RegisterRequest request, ServerCallContext context)
     {
-        var peer = context.Peer;
-        _logger.LogInformation("Agent connected from {Peer}", peer);
+        _logger.LogInformation("Agent {AgentId} registering from {Peer}", request.AgentId, context.Peer);
 
-        string? registeredPath = null;
-
-        try
+        if (!_healthStatus.IsHealthy)
         {
-            if (!await requestStream.MoveNext(context.CancellationToken))
+            _logger.LogWarning("Rejecting agent {AgentId} — center has configuration issues", request.AgentId);
+            return new RegisterResponse
             {
-                _logger.LogWarning("Agent from {Peer} disconnected without sending any messages", peer);
-                return;
-            }
+                Success = false,
+                Error = "Error: Center is having issues to start"
+            };
+        }
 
-            var firstMessage = requestStream.Current;
+        var oid = request.Oid;
+        var tid = request.Tid;
+        var userName = request.UserName;
 
-            if (!_healthStatus.IsHealthy)
-            {
-                _logger.LogWarning("Rejecting agent from {Peer} — center has configuration issues", peer);
-                await responseStream.WriteAsync(new ServerMessage
-                {
-                    Type = "error",
-                    Payload = "Error: Center is having issues to start"
-                });
-                return;
-            }
+        if (string.IsNullOrEmpty(oid))
+            oid = context.RequestHeaders.GetValue(SharedSecret.OidMetadataKey) ?? "";
+        if (string.IsNullOrEmpty(tid))
+            tid = context.RequestHeaders.GetValue(SharedSecret.TidMetadataKey) ?? "";
+        if (string.IsNullOrEmpty(userName))
+            userName = context.RequestHeaders.GetValue(SharedSecret.UserNameMetadataKey) ?? "";
 
-            var oid = firstMessage.Oid;
-            var tid = firstMessage.Tid;
-            var userName = firstMessage.UserName;
+        var agentInfo = new AgentInfo(oid, tid, request.AgentId, DateTime.UtcNow, userName);
+        var path = _registry.Register(agentInfo);
 
-            if (string.IsNullOrEmpty(oid))
-                oid = context.RequestHeaders.GetValue(SharedSecret.OidMetadataKey) ?? "";
-            if (string.IsNullOrEmpty(tid))
-                tid = context.RequestHeaders.GetValue(SharedSecret.TidMetadataKey) ?? "";
-            if (string.IsNullOrEmpty(userName))
-                userName = context.RequestHeaders.GetValue(SharedSecret.UserNameMetadataKey) ?? "";
-
-            var agentInfo = new AgentInfo(oid, tid, firstMessage.AgentId, DateTime.UtcNow, userName);
-            registeredPath = _registry.Register(agentInfo, responseStream);
-
-            if (_clientTableService != null)
-            {
-                await _clientTableService.CreateOrUpdateClientAsync(oid, tid, firstMessage.AgentId, userName);
-
-                var partitionKeyForEvents = Models.ClientEntity.BuildPartitionKey(oid, tid);
-                _ = _clientTableService.AppendEventAsync(partitionKeyForEvents, "agent_connected",
-                    $"Agent {firstMessage.AgentId} connected from {peer}");
-            }
-
-            var url = $"http://localhost:8190/agents/{registeredPath}";
-            _logger.LogInformation(
-                "Agent {AgentId} registered — oid={Oid}, tid={Tid}, url={Url}",
-                firstMessage.AgentId, oid, tid, url);
-
-            await responseStream.WriteAsync(new ServerMessage
-            {
-                Type = "registration_url",
-                Payload = url
-            });
-
-            var partitionKey = Models.ClientEntity.BuildPartitionKey(oid, tid);
+        if (_clientTableService != null)
+        {
             try
             {
-                var connections = _clientTableService != null
-                    ? await _clientTableService.GetConnectionsAsync(partitionKey)
-                    : new List<Models.ConnectionEntity>();
-                var connectionsJson = JsonSerializer.Serialize(connections.Select(c => new
-                {
-                    rowKey = c.RowKey,
-                    connectionType = c.ConnectionType,
-                    serverName = c.ServerName,
-                    authentication = c.Authentication,
-                    userName = c.UserName,
-                    password = c.Password,
-                    databaseName = c.DatabaseName,
-                    encrypt = c.Encrypt,
-                    trustServerCertificate = c.TrustServerCertificate,
-                }));
-                await responseStream.WriteAsync(new ServerMessage
-                {
-                    Type = "connections_list",
-                    Payload = connectionsJson
-                });
-                _logger.LogInformation("Pushed {Count} connections to agent {AgentId}", connections.Count, firstMessage.AgentId);
+                await _clientTableService.CreateOrUpdateClientAsync(oid, tid, request.AgentId, userName);
+                var partitionKeyForEvents = ClientEntity.BuildPartitionKey(oid, tid);
+                _ = _clientTableService.AppendEventAsync(partitionKeyForEvents, "agent_connected",
+                    $"Agent {request.AgentId} connected from {context.Peer}");
             }
             catch (Exception ex)
             {
-                _logger.LogWarning(ex, "Failed to push connections to agent {AgentId}", firstMessage.AgentId);
-            }
-
-            var readTask = Task.Run(async () =>
-            {
-                while (await requestStream.MoveNext(context.CancellationToken))
-                {
-                    var message = requestStream.Current;
-                    _logger.LogInformation(
-                        "Received from agent {AgentId}: type={Type}, payload={Payload}",
-                        message.AgentId, message.Type, message.Payload);
-
-                    if (message.Type == "heartbeat")
-                    {
-                        await responseStream.WriteAsync(new ServerMessage
-                        {
-                            Type = "ack",
-                            Payload = $"Received heartbeat from {message.AgentId}"
-                        });
-                        continue;
-                    }
-
-                    if (TryRouteCommandResponse(registeredPath!, message.Payload))
-                        continue;
-
-                    if (message.Type == "get_connection_details" && registeredPath != null)
-                    {
-                        _ = HandleGetConnectionDetailsAsync(responseStream, partitionKey, message.Payload);
-                        continue;
-                    }
-
-                    if (message.Type == "request_sas_token")
-                    {
-                        _ = HandleSasTokenRequestAsync(responseStream, message.Payload);
-                        continue;
-                    }
-
-                    await responseStream.WriteAsync(new ServerMessage
-                    {
-                        Type = "ack",
-                        Payload = $"Received {message.Type} from {message.AgentId}"
-                    });
-                }
-            });
-
-            await readTask;
-        }
-        catch (OperationCanceledException)
-        {
-        }
-        finally
-        {
-            if (registeredPath != null)
-            {
-                if (_clientTableService != null && _registry.TryGetConnection(registeredPath, out var disc) && disc != null)
-                {
-                    var pk = Models.ClientEntity.BuildPartitionKey(disc.Info.Oid, disc.Info.Tid);
-                    _ = _clientTableService.AppendEventAsync(pk, "agent_disconnected", "Agent disconnected");
-                }
-                _registry.Remove(registeredPath);
+                _logger.LogWarning(ex, "Failed to update client table for agent {AgentId}", request.AgentId);
             }
         }
 
-        _logger.LogInformation("Agent disconnected from {Peer}", peer);
-    }
-
-    private bool TryRouteCommandResponse(string agentPath, string payload)
-    {
+        var connectionsJson = "[]";
+        var partitionKey = ClientEntity.BuildPartitionKey(oid, tid);
         try
         {
-            using var doc = JsonDocument.Parse(payload);
-            if (!doc.RootElement.TryGetProperty("correlationId", out var cidEl))
-                return false;
-
-            var correlationId = cidEl.GetString();
-            if (string.IsNullOrEmpty(correlationId))
-                return false;
-
-            if (_registry.TryGetConnection(agentPath, out var conn) && conn != null)
+            var connections = _clientTableService != null
+                ? await _clientTableService.GetConnectionsAsync(partitionKey)
+                : new List<ConnectionEntity>();
+            connectionsJson = JsonSerializer.Serialize(connections.Select(c => new
             {
-                return conn.TryCompleteCommand(correlationId, payload);
-            }
+                rowKey = c.RowKey,
+                connectionType = c.ConnectionType,
+                serverName = c.ServerName,
+                authentication = c.Authentication,
+                userName = c.UserName,
+                password = c.Password,
+                databaseName = c.DatabaseName,
+                encrypt = c.Encrypt,
+                trustServerCertificate = c.TrustServerCertificate,
+            }));
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "Failed to route command response from agent at {Path}", agentPath);
+            _logger.LogWarning(ex, "Failed to fetch connections for agent {AgentId}", request.AgentId);
         }
-        return false;
+
+        _logger.LogInformation(
+            "Agent {AgentId} registered — oid={Oid}, tid={Tid}, path={Path}",
+            request.AgentId, oid, tid, path);
+
+        return new RegisterResponse
+        {
+            Success = true,
+            Path = path,
+            ConnectionsJson = connectionsJson
+        };
     }
 
-    private async Task HandleSasTokenRequestAsync(
-        IServerStreamWriter<ServerMessage> responseStream,
-        string payload)
+    public override Task<HeartbeatResponse> Heartbeat(HeartbeatRequest request, ServerCallContext context)
     {
+        var exists = _registry.TryGet(request.Path, out _);
+        if (!exists)
+            _logger.LogWarning("Heartbeat from unknown agent path {Path}", request.Path);
+        return Task.FromResult(new HeartbeatResponse { Success = exists });
+    }
+
+    public override Task<SendCommandResultResponse> SendCommandResult(SendCommandResultRequest request, ServerCallContext context)
+    {
+        var routed = false;
+        if (_registry.TryGetConnection(request.Path, out var conn) && conn != null)
+        {
+            try
+            {
+                using var doc = JsonDocument.Parse(request.Payload);
+                if (doc.RootElement.TryGetProperty("correlationId", out var cidEl))
+                {
+                    var correlationId = cidEl.GetString();
+                    if (!string.IsNullOrEmpty(correlationId))
+                        routed = conn.TryCompleteCommand(correlationId, request.Payload);
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to route command result from agent at {Path}", request.Path);
+            }
+        }
+
+        if (!routed)
+            _logger.LogWarning("Could not route command result type={Type} from path={Path}", request.Type, request.Path);
+
+        return Task.FromResult(new SendCommandResultResponse { Success = routed });
+    }
+
+    public override async Task<GetConnectionDetailsResponse> GetConnectionDetails(GetConnectionDetailsRequest request, ServerCallContext context)
+    {
+        if (!_registry.TryGetConnection(request.Path, out _))
+            return new GetConnectionDetailsResponse { Success = false, Error = "Agent not registered" };
+
+        if (_clientTableService == null)
+            return new GetConnectionDetailsResponse { Success = false, Error = "Table service is not configured" };
+
+        if (!_registry.TryGet(request.Path, out var info) || info == null)
+            return new GetConnectionDetailsResponse { Success = false, Error = "Agent not found" };
+
+        var partitionKey = ClientEntity.BuildPartitionKey(info.Oid, info.Tid);
+        var entity = await _clientTableService.GetConnectionByRowKeyAsync(partitionKey, request.RowKey);
+
+        if (entity == null)
+            return new GetConnectionDetailsResponse { Success = false, Error = $"Connection {request.RowKey} not found." };
+
+        return new GetConnectionDetailsResponse
+        {
+            Success = true,
+            RowKey = entity.RowKey,
+            ServerName = entity.ServerName,
+            Authentication = entity.Authentication,
+            UserName = entity.UserName,
+            Password = entity.Password,
+            DatabaseName = entity.DatabaseName,
+            Encrypt = entity.Encrypt,
+            TrustServerCertificate = entity.TrustServerCertificate,
+        };
+    }
+
+    public override Task<GetSasTokenResponse> GetSasToken(GetSasTokenRequest request, ServerCallContext context)
+    {
+        if (!_registry.TryGetConnection(request.Path, out _))
+            return Task.FromResult(new GetSasTokenResponse { Success = false, Error = "Agent not registered" });
+
         try
         {
-            using var doc = JsonDocument.Parse(payload);
-            var correlationId = doc.RootElement.TryGetProperty("correlationId", out var cidEl)
-                ? cidEl.GetString() ?? "" : "";
-            var requestedContainer = doc.RootElement.TryGetProperty("containerName", out var cnEl)
-                ? cnEl.GetString() : null;
-
             var sasBuilder = new AccountSasBuilder
             {
                 Services = AccountSasServices.Blobs,
@@ -236,7 +195,7 @@ public class AgentHubService : AgentHub.AgentHubBase
             sasBuilder.SetPermissions(AccountSasPermissions.Read | AccountSasPermissions.Write | AccountSasPermissions.Create);
 
             if (_blobCredential == null)
-                throw new InvalidOperationException("Blob storage credentials are not configured.");
+                return Task.FromResult(new GetSasTokenResponse { Success = false, Error = "Blob storage credentials are not configured." });
 
             var sasToken = sasBuilder.ToSasQueryParameters(_blobCredential).ToString();
 
@@ -244,81 +203,51 @@ public class AgentHubService : AgentHub.AgentHubBase
                 ? $"http://127.0.0.1:10000/{_blobStorageConfig.StorageAccount}"
                 : $"https://{_blobStorageConfig.StorageAccount}.blob.core.windows.net";
 
-            var resultJson = JsonSerializer.Serialize(new
-            {
-                correlationId,
-                sasToken,
-                blobEndpoint,
-                container = requestedContainer ?? _blobStorageConfig.PreviewContainer
-            });
+            var container = string.IsNullOrEmpty(request.ContainerName)
+                ? _blobStorageConfig.PreviewContainer
+                : request.ContainerName;
 
-            await responseStream.WriteAsync(new ServerMessage
-            {
-                Type = "sas_token_result",
-                Payload = resultJson
-            });
+            _logger.LogInformation("Generated SAS token for agent at path={Path}", request.Path);
 
-            _logger.LogInformation("Generated SAS token for agent (correlationId={CorrelationId})", correlationId);
+            return Task.FromResult(new GetSasTokenResponse
+            {
+                Success = true,
+                SasToken = sasToken,
+                BlobEndpoint = blobEndpoint,
+                Container = container
+            });
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "Failed to handle SAS token request");
+            _logger.LogWarning(ex, "Failed to generate SAS token");
+            return Task.FromResult(new GetSasTokenResponse { Success = false, Error = ex.Message });
         }
     }
 
-    private async Task HandleGetConnectionDetailsAsync(
+    public override async Task Subscribe(
+        SubscribeRequest request,
         IServerStreamWriter<ServerMessage> responseStream,
-        string partitionKey,
-        string payload)
+        ServerCallContext context)
     {
+        if (!_registry.TryGetConnection(request.Path, out var conn) || conn == null)
+        {
+            _logger.LogWarning("Subscribe from unknown agent path {Path}", request.Path);
+            return;
+        }
+
+        _logger.LogInformation("Agent at path={Path} subscribed for commands", request.Path);
+
         try
         {
-            using var doc = JsonDocument.Parse(payload);
-            var rowKey = doc.RootElement.GetProperty("rowKey").GetString() ?? "";
-            var correlationId = doc.RootElement.TryGetProperty("correlationId", out var cidEl)
-                ? cidEl.GetString() ?? "" : "";
-
-            if (_clientTableService == null)
-                throw new InvalidOperationException("Table service is not configured.");
-
-            var entity = await _clientTableService.GetConnectionByRowKeyAsync(partitionKey, rowKey);
-
-            string resultJson;
-            if (entity != null)
+            await foreach (var msg in conn.CommandChannel.Reader.ReadAllAsync(context.CancellationToken))
             {
-                resultJson = JsonSerializer.Serialize(new
-                {
-                    correlationId,
-                    success = true,
-                    rowKey = entity.RowKey,
-                    serverName = entity.ServerName,
-                    authentication = entity.Authentication,
-                    userName = entity.UserName,
-                    password = entity.Password,
-                    databaseName = entity.DatabaseName,
-                    encrypt = entity.Encrypt,
-                    trustServerCertificate = entity.TrustServerCertificate,
-                });
+                await responseStream.WriteAsync(msg);
             }
-            else
-            {
-                resultJson = JsonSerializer.Serialize(new
-                {
-                    correlationId,
-                    success = false,
-                    message = $"Connection {rowKey} not found."
-                });
-            }
-
-            await responseStream.WriteAsync(new ServerMessage
-            {
-                Type = "connection_details_result",
-                Payload = resultJson
-            });
         }
-        catch (Exception ex)
+        catch (OperationCanceledException)
         {
-            _logger.LogWarning(ex, "Failed to handle get_connection_details");
         }
+
+        _logger.LogInformation("Agent at path={Path} unsubscribed", request.Path);
     }
 }

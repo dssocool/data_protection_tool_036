@@ -65,7 +65,6 @@ var headers = new Metadata
 };
 
 var connectionManager = new SqlConnectionManager();
-var sasTokenManager = new SasTokenManager();
 
 using var cts = new CancellationTokenSource();
 Console.CancelKeyPress += (_, e) =>
@@ -83,91 +82,70 @@ while (!cts.Token.IsCancellationRequested)
         using var channel = GrpcChannel.ForAddress(serverAddress);
         var client = new AgentHub.AgentHubClient(channel);
 
-        using var call = client.Connect(headers: headers, cancellationToken: cts.Token);
+        var registerResponse = await client.RegisterAsync(new RegisterRequest
+        {
+            AgentId = agentId,
+            Oid = oid,
+            Tid = tid,
+            UserName = userName
+        }, headers: headers, cancellationToken: cts.Token);
 
-        Console.WriteLine("Bidirectional stream established.");
+        if (!registerResponse.Success)
+        {
+            Console.Error.WriteLine($"[Server Error] Registration failed: {registerResponse.Error}");
+            break;
+        }
+
+        var path = registerResponse.Path;
+        Console.WriteLine($"Agent registered. Path: {path}");
+
+        connectionManager.LoadConnectionDetails(registerResponse.ConnectionsJson);
+        Console.WriteLine("[Agent] Loaded connection details from ControlCenter.");
 
         var ctx = new AgentContext
         {
-            Call = call,
+            Client = client,
+            Headers = headers,
+            Path = path,
             AgentId = agentId,
             Oid = oid,
             Tid = tid,
             UserName = userName
         };
 
-        await ctx.SendAsync("register", "");
-        Console.WriteLine("Sent registration message with oid/tid/userName.");
-
-        var msgHandlers = new Dictionary<string, Action<ServerMessage>>
-        {
-            ["registration_url"] = msg =>
-                Console.WriteLine($"Agent registered. URL: {msg.Payload}"),
-            ["connections_list"] = msg =>
-            {
-                connectionManager.LoadConnectionDetails(msg.Payload);
-                Console.WriteLine("[Agent] Loaded connection details from ControlCenter.");
-            },
-            ["ack"] = _ => { },
-            ["error"] = msg =>
-                Console.Error.WriteLine($"[Server Error] {msg.Payload}"),
-            ["validate_sql"] = msg =>
-                _ = RunCommandAsync(ctx, msg.Payload, "validate_sql_result", HandleValidateSqlCore),
-            ["execute_sql"] = msg =>
-                _ = RunCommandAsync(ctx, msg.Payload, "execute_sql_result",
-                    (cid, root) => HandleExecuteSqlCore(cid, root, ctx, connectionManager)),
-            ["sample_table"] = msg =>
-                _ = RunCommandAsync(ctx, msg.Payload, "sample_table_result",
-                    (cid, root) => HandleSqlToParquetCore(cid, root, ctx, connectionManager, sasTokenManager)),
-            ["validate_query"] = msg =>
-                _ = RunCommandAsync(ctx, msg.Payload, "validate_query_result",
-                    (cid, root) => HandleValidateQueryCore(cid, root, ctx, connectionManager)),
-            ["sample_query"] = msg =>
-                _ = RunCommandAsync(ctx, msg.Payload, "sample_query_result",
-                    (cid, root) => HandleSqlToParquetCore(cid, root, ctx, connectionManager, sasTokenManager,
-                        connectionKeyProperty: "connectionRowKey")),
-            ["http_request"] = msg =>
-                _ = RunCommandAsync(ctx, msg.Payload, "http_request_result", HandleHttpRequestCore),
-            ["export_table"] = msg =>
-                _ = RunCommandAsync(ctx, msg.Payload, "export_table_result",
-                    (cid, root) => HandleSqlToParquetCore(cid, root, ctx, connectionManager, sasTokenManager,
-                        unlimitedTimeout: true, readFilePrefix: true, readContainerName: true)),
-            ["load_masked_to_table"] = msg =>
-                _ = RunCommandAsync(ctx, msg.Payload, "load_masked_to_table_result",
-                    (cid, root) => HandleLoadMaskedToTableCore(cid, root, ctx, connectionManager, sasTokenManager)),
-            ["connection_details_result"] = msg =>
-                connectionManager.HandleConnectionDetailsResponse(msg.Payload),
-            ["sas_token_result"] = msg =>
-                sasTokenManager.HandleSasTokenResponse(msg.Payload),
-        };
-
         var receiveTask = Task.Run(async () =>
         {
-            while (await call.ResponseStream.MoveNext(cts.Token))
-            {
-                var response = call.ResponseStream.Current;
+            using var call = client.Subscribe(new SubscribeRequest { Path = path },
+                headers: headers, cancellationToken: cts.Token);
 
-                if (msgHandlers.TryGetValue(response.Type, out var handler))
-                    handler(response);
-                else
-                    Console.WriteLine($"[Server] Unknown type={response.Type}, payload={response.Payload}");
+            Console.WriteLine("Subscribed for server commands.");
+
+            await foreach (var msg in call.ResponseStream.ReadAllAsync(cts.Token))
+            {
+                HandleServerMessage(ctx, connectionManager, msg);
             }
         });
 
-        var sendTask = Task.Run(async () =>
+        var heartbeatTask = Task.Run(async () =>
         {
             var sequence = 0;
             while (!cts.Token.IsCancellationRequested)
             {
-                await ctx.SendAsync("heartbeat", $"seq={sequence++}");
-                Console.WriteLine($"[Agent] Sent heartbeat seq={sequence - 1}");
+                try
+                {
+                    await client.HeartbeatAsync(new HeartbeatRequest { Path = path },
+                        headers: headers, cancellationToken: cts.Token);
+                    Console.WriteLine($"[Agent] Sent heartbeat seq={sequence++}");
+                }
+                catch (RpcException ex) when (ex.StatusCode != StatusCode.Unauthenticated)
+                {
+                    Console.Error.WriteLine($"[Agent] Heartbeat failed: {ex.Status.Detail}");
+                }
                 await Task.Delay(TimeSpan.FromSeconds(60), cts.Token);
             }
         });
 
-        await Task.WhenAny(receiveTask, sendTask);
-
-        await call.RequestStream.CompleteAsync();
+        await Task.WhenAny(receiveTask, heartbeatTask);
         await receiveTask;
     }
     catch (RpcException ex) when (ex.StatusCode == StatusCode.Unauthenticated)
@@ -200,6 +178,54 @@ while (!cts.Token.IsCancellationRequested)
 connectionManager.Dispose();
 Console.WriteLine("Agent disconnected.");
 
+// --- Message dispatch ---
+
+static void HandleServerMessage(AgentContext ctx, SqlConnectionManager connectionManager, ServerMessage msg)
+{
+    switch (msg.Type)
+    {
+        case "connections_list":
+            connectionManager.LoadConnectionDetails(msg.Payload);
+            Console.WriteLine("[Agent] Loaded connection details from ControlCenter.");
+            break;
+        case "validate_sql":
+            _ = RunCommandAsync(ctx, msg.Payload, "validate_sql_result", HandleValidateSqlCore);
+            break;
+        case "execute_sql":
+            _ = RunCommandAsync(ctx, msg.Payload, "execute_sql_result",
+                (cid, root) => HandleExecuteSqlCore(cid, root, ctx, connectionManager));
+            break;
+        case "sample_table":
+            _ = RunCommandAsync(ctx, msg.Payload, "sample_table_result",
+                (cid, root) => HandleSqlToParquetCore(cid, root, ctx, connectionManager));
+            break;
+        case "validate_query":
+            _ = RunCommandAsync(ctx, msg.Payload, "validate_query_result",
+                (cid, root) => HandleValidateQueryCore(cid, root, ctx, connectionManager));
+            break;
+        case "sample_query":
+            _ = RunCommandAsync(ctx, msg.Payload, "sample_query_result",
+                (cid, root) => HandleSqlToParquetCore(cid, root, ctx, connectionManager,
+                    connectionKeyProperty: "connectionRowKey"));
+            break;
+        case "http_request":
+            _ = RunCommandAsync(ctx, msg.Payload, "http_request_result", HandleHttpRequestCore);
+            break;
+        case "export_table":
+            _ = RunCommandAsync(ctx, msg.Payload, "export_table_result",
+                (cid, root) => HandleSqlToParquetCore(cid, root, ctx, connectionManager,
+                    unlimitedTimeout: true, readFilePrefix: true, readContainerName: true));
+            break;
+        case "load_masked_to_table":
+            _ = RunCommandAsync(ctx, msg.Payload, "load_masked_to_table_result",
+                (cid, root) => HandleLoadMaskedToTableCore(cid, root, ctx, connectionManager));
+            break;
+        default:
+            Console.WriteLine($"[Server] Unknown type={msg.Type}, payload={msg.Payload}");
+            break;
+    }
+}
+
 // --- Command runner ---
 
 static async Task RunCommandAsync(
@@ -216,7 +242,7 @@ static async Task RunCommandAsync(
         using var paramsDoc = JsonDocument.Parse(dataJson);
         var resultJson = await coreLogic(correlationId, paramsDoc.RootElement);
 
-        await ctx.SendAsync(resultType, resultJson);
+        await ctx.SendResultAsync(resultType, resultJson);
     }
     catch (Exception ex)
     {
@@ -224,7 +250,7 @@ static async Task RunCommandAsync(
         var errorPayload = JsonSerializer.Serialize(
             new CommandErrorResult(correlationId, false, ex.Message),
             AgentJsonContext.Default.CommandErrorResult);
-        try { await ctx.SendAsync(resultType, errorPayload); }
+        try { await ctx.SendResultAsync(resultType, errorPayload); }
         catch (Exception writeEx) { Console.Error.WriteLine($"[Agent] Failed to send error result: {writeEx.Message}"); }
     }
 }
@@ -290,7 +316,7 @@ static async Task<string> HandleExecuteSqlCore(
 
 static async Task<string> HandleSqlToParquetCore(
     string correlationId, JsonElement root,
-    AgentContext ctx, SqlConnectionManager connManager, SasTokenManager sasManager,
+    AgentContext ctx, SqlConnectionManager connManager,
     string connectionKeyProperty = "rowKey",
     bool unlimitedTimeout = false,
     bool readFilePrefix = false,
@@ -317,7 +343,7 @@ static async Task<string> HandleSqlToParquetCore(
             if (unlimitedTimeout) cmd.CommandTimeout = 0;
 
             await using var reader = await cmd.ExecuteReaderAsync();
-            return await StreamReaderToParquetBlobs(reader, ctx, uniqueId, sasManager, filePrefix, containerName);
+            return await StreamReaderToParquetBlobs(reader, ctx, uniqueId, filePrefix, containerName);
         });
 
     Console.WriteLine($"[Agent] Uploaded {filenames.Count} Parquet file(s) for connection {rowKey}");
@@ -367,7 +393,7 @@ static async Task<string> HandleValidateQueryCore(
 
 static async Task<string> HandleLoadMaskedToTableCore(
     string correlationId, JsonElement root,
-    AgentContext ctx, SqlConnectionManager connManager, SasTokenManager sasManager)
+    AgentContext ctx, SqlConnectionManager connManager)
 {
     var destRowKey = root.GetProperty("destRowKey").GetString() ?? "";
     var destSchema = root.GetProperty("destSchema").GetString() ?? "";
@@ -379,7 +405,7 @@ static async Task<string> HandleLoadMaskedToTableCore(
 
     Console.WriteLine($"[Agent] Loading masked file {blobFilename} -> [{destSchema}].[{tableName}] (create={createTable}, truncate={truncate})");
 
-    var sasInfo = await sasManager.RequestSasTokenAsync(ctx, containerName);
+    var sasInfo = await ctx.GetSasTokenAsync(containerName);
     var blobUri = new Uri($"{sasInfo.BlobEndpoint}/{sasInfo.Container}/{blobFilename}?{sasInfo.SasToken}");
     var blobClient = new BlobClient(blobUri);
 
@@ -585,7 +611,7 @@ const int PreviewBatchSize = 10_000;
 
 static async Task<List<string>> StreamReaderToParquetBlobs(
     SqlDataReader reader, AgentContext ctx, string uniqueId,
-    SasTokenManager sasManager, string filePrefix = "preview",
+    string filePrefix = "preview",
     string? containerName = null)
 {
     var columnCount = reader.FieldCount;
@@ -606,7 +632,7 @@ static async Task<List<string>> StreamReaderToParquetBlobs(
     };
 
     var parquetSchema = new ParquetSchema(dataFields);
-    var sasInfo = await sasManager.RequestSasTokenAsync(ctx, containerName);
+    var sasInfo = await ctx.GetSasTokenAsync(containerName);
     var filenames = new List<string>();
     var previewRequestUuid = Guid.NewGuid().ToString("N");
     var fileSequence = 1;
@@ -703,7 +729,6 @@ static string GetLocalIpAddress()
     }
     catch
     {
-        // fallback below
     }
 
     var host = Dns.GetHostEntry(Dns.GetHostName());
@@ -715,59 +740,66 @@ static string GetLocalIpAddress()
 
 class AgentContext
 {
-    public required AsyncDuplexStreamingCall<AgentMessage, ServerMessage> Call { get; init; }
+    public required AgentHub.AgentHubClient Client { get; init; }
+    public required Metadata Headers { get; init; }
+    public required string Path { get; init; }
     public required string AgentId { get; init; }
     public required string Oid { get; init; }
     public required string Tid { get; init; }
     public required string UserName { get; init; }
 
-    public Task SendAsync(string type, string payload) =>
-        Call.RequestStream.WriteAsync(new AgentMessage
-        {
-            AgentId = AgentId, Type = type, Payload = payload,
-            Oid = Oid, Tid = Tid, UserName = UserName
-        });
-}
-
-class CorrelationManager<T>
-{
-    private readonly ConcurrentDictionary<string, TaskCompletionSource<T>> _pending = new();
-
-    public async Task<T> RequestAsync(
-        AgentContext ctx, string messageType,
-        Func<string, string> buildPayload,
-        TimeSpan? timeout = null)
+    public async Task SendResultAsync(string type, string payload)
     {
-        var correlationId = Guid.NewGuid().ToString("N");
-        var tcs = new TaskCompletionSource<T>(TaskCreationOptions.RunContinuationsAsynchronously);
-        _pending[correlationId] = tcs;
-
-        try
+        await Client.SendCommandResultAsync(new SendCommandResultRequest
         {
-            var payload = buildPayload(correlationId);
-            await ctx.SendAsync(messageType, payload);
-
-            using var timeoutCts = new CancellationTokenSource(timeout ?? TimeSpan.FromSeconds(15));
-            await using var reg = timeoutCts.Token.Register(() =>
-                tcs.TrySetException(new TimeoutException($"Timed out waiting for {messageType} response")));
-
-            return await tcs.Task;
-        }
-        finally
-        {
-            _pending.TryRemove(correlationId, out _);
-        }
+            Path = Path,
+            Type = type,
+            Payload = payload
+        }, headers: Headers);
     }
 
-    public bool TryComplete(string correlationId, T result) =>
-        !string.IsNullOrEmpty(correlationId)
-        && _pending.TryRemove(correlationId, out var tcs)
-        && tcs.TrySetResult(result);
+    public async Task<SasTokenInfo> GetSasTokenAsync(string? containerName = null)
+    {
+        var response = await Client.GetSasTokenAsync(new GetSasTokenRequest
+        {
+            Path = Path,
+            ContainerName = containerName ?? ""
+        }, headers: Headers);
 
-    public bool TryFail(string correlationId, Exception ex) =>
-        !string.IsNullOrEmpty(correlationId)
-        && _pending.TryRemove(correlationId, out var tcs)
-        && tcs.TrySetException(ex);
+        if (!response.Success)
+            throw new InvalidOperationException($"Failed to get SAS token: {response.Error}");
+
+        return new SasTokenInfo
+        {
+            SasToken = response.SasToken,
+            BlobEndpoint = response.BlobEndpoint,
+            Container = response.Container
+        };
+    }
+
+    public async Task<ConnectionDetails> GetConnectionDetailsAsync(string rowKey)
+    {
+        var response = await Client.GetConnectionDetailsAsync(new GetConnectionDetailsRequest
+        {
+            Path = Path,
+            RowKey = rowKey
+        }, headers: Headers);
+
+        if (!response.Success)
+            throw new InvalidOperationException($"Failed to get connection details: {response.Error}");
+
+        return new ConnectionDetails
+        {
+            RowKey = response.RowKey,
+            ServerName = response.ServerName,
+            Authentication = response.Authentication,
+            UserName = response.UserName,
+            Password = response.Password,
+            DatabaseName = response.DatabaseName,
+            Encrypt = response.Encrypt,
+            TrustServerCertificate = response.TrustServerCertificate,
+        };
+    }
 }
 
 class ConnectionDetails
@@ -798,7 +830,6 @@ class SqlConnectionManager : IDisposable
 {
     private readonly ConcurrentDictionary<string, ConnectionDetails> _details = new();
     private readonly ConcurrentDictionary<string, SqlConnection> _connections = new();
-    private readonly CorrelationManager<ConnectionDetails> _detailCorrelation = new();
 
     public void LoadConnectionDetails(string connectionsListJson)
     {
@@ -818,34 +849,6 @@ class SqlConnectionManager : IDisposable
         catch (Exception ex)
         {
             Console.Error.WriteLine($"[ConnMgr] Failed to load connection details: {ex.Message}");
-        }
-    }
-
-    public void HandleConnectionDetailsResponse(string payload)
-    {
-        try
-        {
-            using var doc = JsonDocument.Parse(payload);
-            var correlationId = doc.RootElement.TryGetProperty("correlationId", out var cidEl)
-                ? cidEl.GetString() ?? "" : "";
-            var success = doc.RootElement.TryGetProperty("success", out var sEl) && sEl.GetBoolean();
-
-            if (success)
-            {
-                var details = ConnectionDetails.FromJson(doc.RootElement);
-                _details[details.RowKey] = details;
-                _detailCorrelation.TryComplete(correlationId, details);
-            }
-            else
-            {
-                var message = doc.RootElement.TryGetProperty("message", out var msgEl)
-                    ? msgEl.GetString() ?? "Unknown error" : "Unknown error";
-                _detailCorrelation.TryFail(correlationId, new InvalidOperationException(message));
-            }
-        }
-        catch (Exception ex)
-        {
-            Console.Error.WriteLine($"[ConnMgr] Failed to handle connection details response: {ex.Message}");
         }
     }
 
@@ -890,10 +893,8 @@ class SqlConnectionManager : IDisposable
 
             try
             {
-                await _detailCorrelation.RequestAsync(ctx, "get_connection_details",
-                    cid => JsonSerializer.Serialize(
-                        new CorrelationWithRowKey(cid, rowKey),
-                        AgentJsonContext.Default.CorrelationWithRowKey));
+                var refreshed = await ctx.GetConnectionDetailsAsync(rowKey);
+                _details[refreshed.RowKey] = refreshed;
                 Console.WriteLine($"[ConnMgr] Refreshed connection details for {rowKey}");
             }
             catch (Exception refetchEx)
@@ -960,9 +961,6 @@ record LoadMaskedResult(string correlationId, bool success);
 record HttpSuccessResult(string correlationId, bool success, int statusCode, Dictionary<string, string> headers, string body);
 record HttpFailResult(string correlationId, bool success, string message, int statusCode, Dictionary<string, string> headers, string body, HttpRequestDetails requestDetails);
 record HttpRequestDetails(string method, string url, Dictionary<string, string> headers, string? body);
-record CorrelationOnly(string correlationId);
-record CorrelationWithRowKey(string correlationId, string rowKey);
-record CorrelationWithContainer(string correlationId, string containerName);
 
 [JsonSourceGenerationOptions(PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase)]
 [JsonSerializable(typeof(string[]))]
@@ -974,9 +972,6 @@ record CorrelationWithContainer(string correlationId, string containerName);
 [JsonSerializable(typeof(LoadMaskedResult))]
 [JsonSerializable(typeof(HttpSuccessResult))]
 [JsonSerializable(typeof(HttpFailResult))]
-[JsonSerializable(typeof(CorrelationOnly))]
-[JsonSerializable(typeof(CorrelationWithRowKey))]
-[JsonSerializable(typeof(CorrelationWithContainer))]
 internal partial class AgentJsonContext : JsonSerializerContext { }
 
 class SasTokenInfo
@@ -984,40 +979,4 @@ class SasTokenInfo
     public string SasToken { get; set; } = "";
     public string BlobEndpoint { get; set; } = "";
     public string Container { get; set; } = "";
-}
-
-class SasTokenManager
-{
-    private readonly CorrelationManager<SasTokenInfo> _correlation = new();
-
-    public async Task<SasTokenInfo> RequestSasTokenAsync(
-        AgentContext ctx, string? containerName = null)
-    {
-        return await _correlation.RequestAsync(ctx, "request_sas_token",
-            cid => string.IsNullOrEmpty(containerName)
-                ? JsonSerializer.Serialize(new CorrelationOnly(cid), AgentJsonContext.Default.CorrelationOnly)
-                : JsonSerializer.Serialize(new CorrelationWithContainer(cid, containerName), AgentJsonContext.Default.CorrelationWithContainer));
-    }
-
-    public void HandleSasTokenResponse(string payload)
-    {
-        try
-        {
-            using var doc = JsonDocument.Parse(payload);
-            var correlationId = doc.RootElement.TryGetProperty("correlationId", out var cidEl)
-                ? cidEl.GetString() ?? "" : "";
-
-            var info = new SasTokenInfo
-            {
-                SasToken = doc.RootElement.TryGetProperty("sasToken", out var st) ? st.GetString() ?? "" : "",
-                BlobEndpoint = doc.RootElement.TryGetProperty("blobEndpoint", out var be) ? be.GetString() ?? "" : "",
-                Container = doc.RootElement.TryGetProperty("container", out var ct) ? ct.GetString() ?? "" : ""
-            };
-            _correlation.TryComplete(correlationId, info);
-        }
-        catch (Exception ex)
-        {
-            Console.Error.WriteLine($"[SasTokenMgr] Failed to handle SAS token response: {ex.Message}");
-        }
-    }
 }
