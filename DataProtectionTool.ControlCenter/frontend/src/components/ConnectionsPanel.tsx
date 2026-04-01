@@ -58,6 +58,8 @@ interface ConnectionsPanelProps {
   onSwitchPanel: (panel: "connections" | "flows") => void;
   onWidthChange?: (width: number) => void;
   flowsBadgeCount?: number;
+  connectionsBadgeCount?: number;
+  newConnectionRowKeys?: Set<string>;
 }
 
 const MIN_WIDTH = 200;
@@ -85,6 +87,8 @@ export default function ConnectionsPanel({
   onSwitchPanel,
   onWidthChange,
   flowsBadgeCount,
+  connectionsBadgeCount,
+  newConnectionRowKeys,
 }: ConnectionsPanelProps) {
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
   const isResizing = useRef(false);
@@ -163,6 +167,13 @@ export default function ConnectionsPanel({
       if (!groups[type]) groups[type] = [];
       groups[type].push(conn);
     }
+    for (const type of Object.keys(groups)) {
+      groups[type].sort((a, b) => {
+        const ta = a.createdAt ?? "";
+        const tb = b.createdAt ?? "";
+        return tb.localeCompare(ta);
+      });
+    }
     return groups;
   }, [connections]);
 
@@ -191,6 +202,7 @@ export default function ConnectionsPanel({
             className="panel-switch-btn panel-switch-btn-active"
             title="Connections"
             aria-label="Connections"
+            data-connections-btn
             onClick={() => onSwitchPanel("connections")}
           >
             <svg width="24" height="24" viewBox="0 0 16 16" fill="none">
@@ -199,6 +211,9 @@ export default function ConnectionsPanel({
               <circle cx="8" cy="12" r="2" stroke="currentColor" strokeWidth="1.3" />
               <path d="M4 6V9L8 10M12 6V9L8 10" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round" />
             </svg>
+            {!!connectionsBadgeCount && connectionsBadgeCount > 0 && (
+              <span className="connections-badge">{connectionsBadgeCount}</span>
+            )}
           </button>
           <button
             className="panel-switch-btn"
@@ -245,6 +260,9 @@ export default function ConnectionsPanel({
                           <span className="conn-db">{conn.databaseName}</span>
                         )}
                       </div>
+                      {newConnectionRowKeys?.has(conn.rowKey) && (
+                        <span className="conn-new-badge">new</span>
+                      )}
                     </div>
                     {isExpanded(conn.rowKey) && (
                       <div className="conn-tables">

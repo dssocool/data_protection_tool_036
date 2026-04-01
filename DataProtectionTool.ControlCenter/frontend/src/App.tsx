@@ -82,6 +82,10 @@ export default function App() {
   const [allFrameworks, setAllFrameworks] = useState<Record<string, unknown>[]>([]);
   const [dryRunningTables, setDryRunningTables] = useState<Set<string>>(new Set());
   const [mismatchedColumns, setMismatchedColumns] = useState<Map<string, { maskType: string; sqlType: string }>>(new Map());
+  const [sqlModalMinimizing, setSqlModalMinimizing] = useState(false);
+  const [unseenConnectionCount, setUnseenConnectionCount] = useState(0);
+  const [newConnectionRowKeys, setNewConnectionRowKeys] = useState<Set<string>>(new Set());
+  const pendingSqlSaveRowKeyRef = useRef<string | null>(null);
   const previewCacheRef = useRef<Map<string, string[]>>(new Map());
   const tableCacheRef = useRef<Map<string, TablePreviewCache>>(new Map());
   const selectedTableRef = useRef(selectedTable);
@@ -195,6 +199,7 @@ export default function App() {
 
   function handleViewConnections() {
     setLeftPanel("connections");
+    setUnseenConnectionCount(0);
   }
 
   function handleViewFlows() {
@@ -215,9 +220,23 @@ export default function App() {
     if (res.ok) {
       const result = await res.json();
       if (result.event) addLocalEvent(result.event);
+      if (result.rowKey) pendingSqlSaveRowKeyRef.current = result.rowKey;
+      setSqlModalMinimizing(true);
+    } else {
+      setShowSqlModal(false);
+      fetchConnections();
     }
+  }
 
+  function handleSqlMinimizeEnd() {
+    setSqlModalMinimizing(false);
     setShowSqlModal(false);
+    const rowKey = pendingSqlSaveRowKeyRef.current;
+    pendingSqlSaveRowKeyRef.current = null;
+    if (rowKey) {
+      setNewConnectionRowKeys((prev) => new Set(prev).add(rowKey));
+    }
+    setUnseenConnectionCount((c) => c + 1);
     fetchConnections();
   }
 
@@ -1395,7 +1414,8 @@ export default function App() {
           <FlowsPanel
             agentPath={getAgentPath() ?? ""}
             statusEvents={statusEvents}
-            onSwitchPanel={setLeftPanel}
+            connectionsBadgeCount={unseenConnectionCount}
+            onSwitchPanel={(p) => { setLeftPanel(p); if (p === "connections") setUnseenConnectionCount(0); }}
             onRunFlows={handleRunFlows}
           />
         ) : (
@@ -1414,6 +1434,8 @@ export default function App() {
                 onExpandedChange={setExpandedConnections}
                 width={connectionsPanelWidth}
                 flowsBadgeCount={unseenFlowCount}
+                connectionsBadgeCount={unseenConnectionCount}
+                newConnectionRowKeys={newConnectionRowKeys}
                 onExpandConnection={handleExpandConnection}
                 onTableClick={handleTableClick}
                 onQueryClick={handleQueryClick}
@@ -1421,7 +1443,7 @@ export default function App() {
                 onRefreshConnection={handleRefreshConnection}
                 onDryRun={handleDryRun}
                 onFullRun={handleFullRunOpen}
-                onSwitchPanel={(p) => { setLeftPanel(p); if (p === "flows") setUnseenFlowCount(0); }}
+                onSwitchPanel={(p) => { setLeftPanel(p); if (p === "flows") setUnseenFlowCount(0); if (p === "connections") setUnseenConnectionCount(0); }}
                 onWidthChange={setConnectionsPanelWidth}
               />
             )}
@@ -1540,6 +1562,8 @@ export default function App() {
           onClose={() => setShowSqlModal(false)}
           onSave={handleSave}
           onValidate={handleValidate}
+          minimizing={sqlModalMinimizing}
+          onMinimizeEnd={handleSqlMinimizeEnd}
         />
       )}
       {showQueryModal && (

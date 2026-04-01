@@ -61,6 +61,24 @@
   box-sizing: border-box;
 }
 
+.connections-badge {
+  position: absolute;
+  top: 1px;
+  right: 1px;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  border-radius: 8px;
+  background: #0078d4;
+  color: #fff;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 16px;
+  text-align: center;
+  pointer-events: none;
+  box-sizing: border-box;
+}
+
 .panel-switch-btn:hover {
   color: #555;
   background: #f0f0f0;
@@ -384,6 +402,19 @@
   font-weight: 600;
   white-space: nowrap;
   flex-shrink: 0;
+}
+
+.conn-new-badge {
+  margin-left: auto;
+  padding: 1px 8px;
+  border-radius: 8px;
+  background: #0078d4;
+  color: #fff;
+  font-size: 10px;
+  font-weight: 700;
+  white-space: nowrap;
+  flex-shrink: 0;
+  line-height: 16px;
 }
 
 .conn-query-item {

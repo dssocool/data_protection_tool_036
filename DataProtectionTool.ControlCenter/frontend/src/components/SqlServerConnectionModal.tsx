@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import "./SqlServerConnectionModal.css";
 
 export interface ValidateResult {
@@ -10,6 +10,8 @@ interface SqlServerConnectionModalProps {
   onClose: () => void;
   onSave: (data: SqlServerConnectionData) => void;
   onValidate: (data: SqlServerConnectionData) => Promise<ValidateResult>;
+  minimizing?: boolean;
+  onMinimizeEnd?: () => void;
 }
 
 export interface SqlServerConnectionData {
@@ -30,6 +32,8 @@ export default function SqlServerConnectionModal({
   onClose,
   onSave,
   onValidate,
+  minimizing,
+  onMinimizeEnd,
 }: SqlServerConnectionModalProps) {
   const [serverName, setServerName] = useState("");
   const [authentication, setAuthentication] = useState(AUTH_OPTIONS[0]);
@@ -41,6 +45,24 @@ export default function SqlServerConnectionModal({
   const [status, setStatus] = useState("");
   const [validating, setValidating] = useState(false);
   const [validated, setValidated] = useState(false);
+
+  const dialogRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!minimizing || !dialogRef.current) return;
+    const dialog = dialogRef.current;
+    const connBtn = document.querySelector<HTMLElement>("[data-connections-btn]");
+    if (!connBtn) return;
+
+    const dr = dialog.getBoundingClientRect();
+    const cr = connBtn.getBoundingClientRect();
+
+    const dx = (cr.left + cr.width / 2) - (dr.left + dr.width / 2);
+    const dy = (cr.top + cr.height / 2) - (dr.top + dr.height / 2);
+
+    dialog.style.setProperty("--minimize-tx", `${dx}px`);
+    dialog.style.setProperty("--minimize-ty", `${dy}px`);
+  }, [minimizing]);
 
   const credentialsDisabled = authentication === "Microsoft Entra Integrated";
 
@@ -85,8 +107,12 @@ export default function SqlServerConnectionModal({
   }
 
   return (
-    <div className="modal-overlay">
-      <div className="modal-dialog">
+    <div className={`modal-overlay${minimizing ? " sql-overlay-minimizing" : ""}`}>
+      <div
+        ref={dialogRef}
+        className={`modal-dialog${minimizing ? " sql-modal-minimizing" : ""}`}
+        onAnimationEnd={minimizing ? onMinimizeEnd : undefined}
+      >
         <div className="modal-header">
           <h2>SQL Server Connection</h2>
         </div>
