@@ -20,4 +20,15 @@ FROM mcr.microsoft.com/dotnet/aspnet:9.0 AS runtime
 WORKDIR /app
 COPY --from=dotnet-build /app/publish .
 EXPOSE 8190
+ENV RpcServer__Address=""
+ENV AzureTableStorage__ConnectionString=""
+ENV AzureBlobStorage__StorageAccount=""
+ENV AzureBlobStorage__Container=""
+ENV AzureBlobStorage__AccessKey=""
+ENV AzureBlobStorage__PreviewContainer=""
+ENV DataEngine__EngineUrl=""
+ENV DataEngine__AuthorizationToken=""
+ENV DataEngine__EnvironmentId=""
+ENV DataEngine__ConnectorId=""
+ENV DataEngine__ProfileSetId=""
 ENTRYPOINT ["dotnet", "DataProtectionTool.ControlCenter.HttpServer.dll"]

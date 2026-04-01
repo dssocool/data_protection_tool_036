@@ -13,4 +13,9 @@ WORKDIR /app
 COPY --from=build /app/publish .
 EXPOSE 5000
 ENV ASPNETCORE_URLS=http://+:5000
+ENV AzureTableStorage__ConnectionString=""
+ENV AzureBlobStorage__StorageAccount=""
+ENV AzureBlobStorage__Container=""
+ENV AzureBlobStorage__AccessKey=""
+ENV AzureBlobStorage__PreviewContainer=""
 ENTRYPOINT ["dotnet", "DataProtectionTool.ControlCenter.RpcServer.dll"]
