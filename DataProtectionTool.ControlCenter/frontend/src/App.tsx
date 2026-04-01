@@ -855,45 +855,46 @@ export default function App() {
       setPreviewLoading(true);
     }
 
-    let filenames = currentSamples.length > 0 ? currentSamples[0].blobFilenames : [];
+    let filenames: string[] = [];
 
     try {
-      if (filenames.length === 0) {
+      if (currentSamples.length === 0) {
         setSamples([]);
         setDryRuns([]);
         setActivePreviewTab("Sample 1");
         setDiffTab(null);
-
-        const previewRes = await fetch(`/api/agents/${agentPath}/sample-table`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ rowKey, schema, tableName }),
-        });
-
-        if (!previewRes.ok) {
-          setPreviewError(`Preview failed: server error ${previewRes.status}`);
-          setPreviewLoading(false);
-          return;
-        }
-
-        const previewResult = await previewRes.json();
-        if (previewResult.event) addLocalEvent(previewResult.event);
-        if (!previewResult.success) {
-          setPreviewError(previewResult.message ?? "Preview failed.");
-          setPreviewLoading(false);
-          return;
-        }
-
-        filenames = previewResult.filenames ?? (previewResult.filename ? [previewResult.filename] : []);
-        const preview = await fetchPreviewFromFilenames(filenames);
-        if (preview) {
-          const newSample: SampleResult = { label: "Sample 1", data: preview, blobFilenames: filenames };
-          currentSamples = [newSample];
-          setSamples([newSample]);
-        }
       }
 
-      const sampleData = currentSamples[0]?.data ?? null;
+      const previewRes = await fetch(`/api/agents/${agentPath}/sample-table`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ rowKey, schema, tableName }),
+      });
+
+      if (!previewRes.ok) {
+        setPreviewError(`Preview failed: server error ${previewRes.status}`);
+        setPreviewLoading(false);
+        return;
+      }
+
+      const previewResult = await previewRes.json();
+      if (previewResult.event) addLocalEvent(previewResult.event);
+      if (!previewResult.success) {
+        setPreviewError(previewResult.message ?? "Preview failed.");
+        setPreviewLoading(false);
+        return;
+      }
+
+      filenames = previewResult.filenames ?? (previewResult.filename ? [previewResult.filename] : []);
+      const preview = await fetchPreviewFromFilenames(filenames);
+      if (preview) {
+        const newLabel = currentSamples.length === 0 ? "Sample 1" : `Sample ${currentSamples.length + 1}`;
+        const newSample: SampleResult = { label: newLabel, data: preview, blobFilenames: filenames };
+        currentSamples = [...currentSamples, newSample];
+        setSamples(currentSamples);
+      }
+
+      const sampleData = currentSamples[currentSamples.length - 1]?.data ?? null;
 
       const currentCached = tableCacheRef.current.get(key);
       const prevDryRuns = currentCached?.dryRuns ?? dryRuns;
