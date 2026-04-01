@@ -1,12 +1,8 @@
-using DataProtectionTool.RpcServer.Interceptors;
 using DataProtectionTool.RpcServer.Services;
 
 var builder = WebApplication.CreateBuilder(args);
 
-builder.Services.AddGrpc(options =>
-{
-    options.Interceptors.Add<SecretValidationInterceptor>();
-});
+builder.Services.AddGrpc();
 
 builder.Services.AddSingleton<AgentRegistry>();
 

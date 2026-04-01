@@ -3,11 +3,19 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 AZURITE_DATA="$SCRIPT_DIR/.azurite"
+FRONTEND_DIR="$SCRIPT_DIR/DataProtectionTool.HttpServer/frontend"
+RPC_PROJ="$SCRIPT_DIR/DataProtectionTool.RpcServer/DataProtectionTool.RpcServer.csproj"
+HTTP_PROJ="$SCRIPT_DIR/DataProtectionTool.HttpServer/DataProtectionTool.HttpServer.csproj"
+AGENT_PROJ="$SCRIPT_DIR/DataProtectionTool.Agent/DataProtectionTool.Agent.csproj"
 
 NO_AZURITE=false
+NO_TEST=false
 for arg in "$@"; do
     if [ "$arg" = "--no-azurite" ]; then
         NO_AZURITE=true
+    fi
+    if [ "$arg" = "--agent-no-test-mode" ]; then
+        NO_TEST=true
     fi
 done
 
@@ -20,17 +28,32 @@ echo "========================================="
 echo ""
 
 AZURITE_PID=""
+RPC_PID=""
+HTTP_PID=""
+AGENT_PID=""
+
+cleanup() {
+    echo ""
+    echo "Shutting down..."
+    [ -n "$AGENT_PID" ] && kill "$AGENT_PID" 2>/dev/null || true
+    [ -n "$HTTP_PID" ]  && kill "$HTTP_PID"  2>/dev/null || true
+    [ -n "$RPC_PID" ]   && kill "$RPC_PID"   2>/dev/null || true
+    [ -n "$AZURITE_PID" ] && kill "$AZURITE_PID" 2>/dev/null || true
+    wait 2>/dev/null || true
+    echo "All services stopped."
+}
+
+trap cleanup SIGINT SIGTERM
 
 if [ "$NO_AZURITE" = false ]; then
-    # --- Azurite (Azure Storage Emulator) ---
-    echo "[1/4] Starting Azurite (Azure Storage Emulator)..."
+    # --- [1/5] Azurite ---
+    echo "[1/5] Starting Azurite (Azure Storage Emulator)..."
 
     if ! command -v azurite &>/dev/null; then
         echo "      Azurite not found. Installing via npm..."
         npm install -g azurite
     fi
 
-    # Kill any leftover Azurite from a previous run to avoid EADDRINUSE
     if pgrep -f azurite >/dev/null 2>&1; then
         echo "      Killing stale Azurite process..."
         pkill -f azurite 2>/dev/null || true
@@ -51,12 +74,11 @@ if [ "$NO_AZURITE" = false ]; then
         exit 1
     fi
 else
-    echo "[1/4] Skipping Azurite (--no-azurite flag set)"
+    echo "[1/5] Skipping Azurite (--no-azurite flag set)"
 fi
 
-# --- Build Frontend ---
-echo "[2/4] Building Frontend..."
-FRONTEND_DIR="$SCRIPT_DIR/DataProtectionTool.ControlCenter/frontend"
+# --- [2/5] Build Frontend ---
+echo "[2/5] Building Frontend..."
 
 if [ ! -d "$FRONTEND_DIR/node_modules" ]; then
     echo "      node_modules not found. Running npm install..."
@@ -65,32 +87,46 @@ fi
 
 npm run build --prefix "$FRONTEND_DIR"
 
-# --- Control Center ---
-echo "[3/4] Starting ControlCenter (HTTP on port 8190, gRPC on port 8191)..."
-
 if [ "$NO_AZURITE" = false ]; then
-    # Override storage settings to point to Azurite
     export AzureTableStorage__ConnectionString="UseDevelopmentStorage=true"
     export AzureTableStorage__TableName="Clients"
-    export AzureBlobStorage__StorageAccount="devstoreaccount1"
-    export AzureBlobStorage__Container="preview"
-    export AzureBlobStorage__AccessKey="Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw=="
     echo "      Using Azurite (local emulator) for storage"
 else
     echo "      Using appsettings.Development.json for cloud Azure storage"
 fi
 
-dotnet run --project "$SCRIPT_DIR/DataProtectionTool.ControlCenter/DataProtectionTool.ControlCenter.csproj" &
-CC_PID=$!
-echo "      ControlCenter PID: $CC_PID"
+# --- [3/5] RpcServer ---
+echo "[3/5] Starting RpcServer (gRPC on port 8191)..."
+
+dotnet run --project "$RPC_PROJ" &
+RPC_PID=$!
+echo "      RpcServer PID: $RPC_PID"
 
 echo ""
-echo "Waiting 5 seconds for ControlCenter to initialize..."
+echo "Waiting 5 seconds for RpcServer to initialize..."
 sleep 5
 
-# --- Agent ---
-echo "[4/4] Starting Agent (gRPC client) in test mode..."
-dotnet run --project "$SCRIPT_DIR/DataProtectionTool.Agent/DataProtectionTool.Agent.csproj" -- test &
+# --- [4/5] HttpServer ---
+export RpcServer__Address="http://localhost:5000"
+
+echo "[4/5] Starting HttpServer (HTTP on port 8190)..."
+
+dotnet run --project "$HTTP_PROJ" &
+HTTP_PID=$!
+echo "      HttpServer PID: $HTTP_PID"
+
+echo ""
+echo "Waiting 3 seconds for HttpServer to initialize..."
+sleep 3
+
+# --- [5/5] Agent ---
+if [ "$NO_TEST" = true ]; then
+    echo "[5/5] Starting Agent (gRPC client) without test mode..."
+    dotnet run --project "$AGENT_PROJ" &
+else
+    echo "[5/5] Starting Agent (gRPC client) in test mode..."
+    dotnet run --project "$AGENT_PROJ" -- test &
+fi
 AGENT_PID=$!
 echo "      Agent PID: $AGENT_PID"
 
@@ -98,28 +134,13 @@ echo ""
 echo "========================================="
 echo " All services started"
 if [ -n "$AZURITE_PID" ]; then
-    echo "   Azurite PID:       $AZURITE_PID"
+    echo "   Azurite PID:    $AZURITE_PID"
 fi
-echo "   ControlCenter PID: $CC_PID"
-echo "   Agent PID:         $AGENT_PID"
+echo "   RpcServer PID:  $RPC_PID"
+echo "   HttpServer PID: $HTTP_PID"
+echo "   Agent PID:      $AGENT_PID"
 echo "========================================="
 echo ""
 echo "Press Ctrl+C to stop all services."
-
-cleanup() {
-    echo ""
-    echo "Shutting down..."
-    kill "$AGENT_PID" 2>/dev/null || true
-    kill "$CC_PID" 2>/dev/null || true
-    if [ -n "$AZURITE_PID" ]; then
-        kill "$AZURITE_PID" 2>/dev/null || true
-        wait "$AZURITE_PID" 2>/dev/null || true
-    fi
-    wait "$AGENT_PID" 2>/dev/null || true
-    wait "$CC_PID" 2>/dev/null || true
-    echo "All services stopped."
-}
-
-trap cleanup SIGINT SIGTERM
 
 wait
