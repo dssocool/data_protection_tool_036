@@ -80,9 +80,6 @@ Pop-Location
 if (-not $noAzurite) {
     $env:AzureTableStorage__ConnectionString = "UseDevelopmentStorage=true"
     $env:AzureTableStorage__TableName = "Clients"
-    $env:AzureBlobStorage__StorageAccount = "devstoreaccount1"
-    $env:AzureBlobStorage__Container = "preview"
-    $env:AzureBlobStorage__AccessKey = "Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw=="
     Write-Host "      Using Azurite (local emulator) for storage"
 } else {
     Write-Host "      Using appsettings.Development.json for cloud Azure storage"
@@ -101,6 +98,12 @@ Write-Host "      Waiting 5 seconds for RpcServer to initialize..."
 Start-Sleep -Seconds 5
 
 # --- [4/5] HttpServer ---
+if (-not $noAzurite) {
+    $env:AzureBlobStorage__StorageAccount = "devstoreaccount1"
+    $env:AzureBlobStorage__Container = "preview"
+    $env:AzureBlobStorage__AccessKey = "Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw=="
+}
+
 Write-Host "[4/5] Starting HttpServer (HTTP on port 8190)..."
 
 $http = Start-Process -FilePath "dotnet" `
