@@ -56,6 +56,12 @@ var blobStorageConfig = new BlobStorageConfig
 };
 builder.Services.AddSingleton(blobStorageConfig);
 
+var httpServerConfig = new HttpServerConfig
+{
+    BaseUrl = builder.Configuration.GetSection("HttpServer")["BaseUrl"] ?? ""
+};
+builder.Services.AddSingleton(httpServerConfig);
+
 StorageSharedKeyCredential? blobCredential = null;
 
 if (string.IsNullOrEmpty(blobStorageConfig.StorageAccount))

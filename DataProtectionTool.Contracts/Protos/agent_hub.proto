@@ -16,6 +16,7 @@ message RegisterResponse {
   string path = 2;
   string error = 3;
   string connections_json = 4;
+  string url = 5;
 }
 
 message HeartbeatRequest {

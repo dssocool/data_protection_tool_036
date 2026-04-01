@@ -15,11 +15,13 @@ public class AgentHubService : AgentHub.AgentHubBase
     private readonly BlobStorageConfig _blobStorageConfig;
     private readonly StorageSharedKeyCredential? _blobCredential;
     private readonly CenterHealthStatus _healthStatus;
+    private readonly HttpServerConfig _httpServerConfig;
 
     public AgentHubService(
         ILogger<AgentHubService> logger,
         AgentRegistry registry,
         BlobStorageConfig blobStorageConfig,
+        HttpServerConfig httpServerConfig,
         CenterHealthStatus healthStatus,
         ClientTableService? clientTableService = null,
         StorageSharedKeyCredential? blobCredential = null)
@@ -28,6 +30,7 @@ public class AgentHubService : AgentHub.AgentHubBase
         _registry = registry;
         _clientTableService = clientTableService;
         _blobStorageConfig = blobStorageConfig;
+        _httpServerConfig = httpServerConfig;
         _blobCredential = blobCredential;
         _healthStatus = healthStatus;
     }
@@ -100,15 +103,20 @@ public class AgentHubService : AgentHub.AgentHubBase
             _logger.LogWarning(ex, "Failed to fetch connections for agent {AgentId}", request.AgentId);
         }
 
+        var url = string.IsNullOrEmpty(_httpServerConfig.BaseUrl)
+            ? ""
+            : $"{_httpServerConfig.BaseUrl.TrimEnd('/')}/agents/{path}";
+
         _logger.LogInformation(
-            "Agent {AgentId} registered — oid={Oid}, tid={Tid}, path={Path}",
-            request.AgentId, oid, tid, path);
+            "Agent {AgentId} registered — oid={Oid}, tid={Tid}, path={Path}, url={Url}",
+            request.AgentId, oid, tid, path, url);
 
         return new RegisterResponse
         {
             Success = true,
             Path = path,
-            ConnectionsJson = connectionsJson
+            ConnectionsJson = connectionsJson,
+            Url = url
         };
     }
 
