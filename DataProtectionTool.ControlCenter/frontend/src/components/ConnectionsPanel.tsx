@@ -204,6 +204,7 @@ export default function ConnectionsPanel({
             className="panel-switch-btn"
             title="Flows"
             aria-label="Flows"
+            data-flows-btn
             onClick={() => onSwitchPanel("flows")}
           >
             <svg width="24" height="24" viewBox="0 0 16 16" fill="none">

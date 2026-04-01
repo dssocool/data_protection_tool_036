@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { SavedConnection } from "./ConnectionsPanel";
 import "./FullRunModal.css";
 
@@ -79,6 +79,29 @@ export default function FullRunModal({
     return () => { cancelled = true; };
   }, [selectedConnection, agentPath]);
 
+  const dialogRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!minimizing || !dialogRef.current) return;
+    const dialog = dialogRef.current;
+    const flowsBtn = document.querySelector<HTMLElement>("[data-flows-btn]");
+    if (!flowsBtn) return;
+
+    const dr = dialog.getBoundingClientRect();
+    const fr = flowsBtn.getBoundingClientRect();
+
+    const dialogCenterX = dr.left + dr.width / 2;
+    const dialogCenterY = dr.top + dr.height / 2;
+    const targetX = fr.left + fr.width / 2;
+    const targetY = fr.top + fr.height / 2;
+
+    const dx = targetX - dialogCenterX;
+    const dy = targetY - dialogCenterY;
+
+    dialog.style.setProperty("--minimize-tx", `${dx}px`);
+    dialog.style.setProperty("--minimize-ty", `${dy}px`);
+  }, [minimizing]);
+
   const destConn = connections.find((c) => c.rowKey === selectedConnection);
   const canSubmit = !!selectedConnection && !!selectedSchema;
 
@@ -127,6 +150,7 @@ export default function FullRunModal({
   return (
     <div className={`fullrun-modal-overlay${minimizing ? " fullrun-overlay-minimizing" : ""}`}>
       <div
+        ref={dialogRef}
         className={`fullrun-modal-dialog${minimizing ? " fullrun-modal-minimizing" : ""}`}
         onAnimationEnd={minimizing ? onMinimizeEnd : undefined}
       >
