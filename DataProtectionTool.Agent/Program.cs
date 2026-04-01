@@ -80,19 +80,7 @@ while (!cts.Token.IsCancellationRequested)
 
     try
     {
-        var handler = new SocketsHttpHandler
-        {
-            EnableMultipleHttp2Connections = true,
-            PooledConnectionIdleTimeout = Timeout.InfiniteTimeSpan,
-            KeepAlivePingDelay = TimeSpan.FromSeconds(60),
-            KeepAlivePingTimeout = TimeSpan.FromSeconds(30),
-        };
-
-        using var channel = GrpcChannel.ForAddress(serverAddress, new GrpcChannelOptions
-        {
-            HttpHandler = handler,
-            DisposeHttpClient = true,
-        });
+        using var channel = GrpcChannel.ForAddress(serverAddress);
         var client = new AgentHub.AgentHubClient(channel);
 
         using var call = client.Connect(headers: headers, cancellationToken: cts.Token);
