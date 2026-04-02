@@ -1674,7 +1674,6 @@ export default function App() {
           if (!sampleRes.ok) return;
           const sampleResult = await sampleRes.json();
           if (!sampleResult.success) return;
-          if (sampleResult.event) addLocalEvent(sampleResult.event);
           const filenames: string[] = sampleResult.filenames ?? (sampleResult.filename ? [sampleResult.filename] : []);
           if (filenames.length === 0) return;
           const mergeRes = await fetch("/api/blob/preview-merge", {

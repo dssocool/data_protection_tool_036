@@ -236,7 +236,17 @@ const DiffView = forwardRef<HTMLTableElement, DiffViewProps>(
 
       if (columnWidths.length === 0 && innerRef.current) {
         const ths = innerRef.current.querySelectorAll("thead th");
-        const measured = Array.from(ths).map((th) => th.getBoundingClientRect().width);
+        const headerWidths = Array.from(ths).map((th) => th.getBoundingClientRect().width);
+        const rows = innerRef.current.querySelectorAll("tbody tr");
+        const measured = [...headerWidths];
+        rows.forEach((row) => {
+          const tds = row.querySelectorAll("td");
+          tds.forEach((td, i) => {
+            if (i < measured.length) {
+              measured[i] = Math.max(measured[i], td.getBoundingClientRect().width);
+            }
+          });
+        });
         measured.forEach((w, i) => onColumnResize(i, w));
       }
 
