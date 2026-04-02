@@ -194,7 +194,7 @@
   content: attr(data-tooltip);
   position: absolute;
   left: 50%;
-  top: calc(100% + 6px);
+  bottom: calc(100% + 6px);
   transform: translateX(-50%);
   padding: 4px 8px;
   background: #333;
@@ -233,6 +233,7 @@
 
 .conn-select-split {
   position: relative;
+  margin-right: 8px;
 }
 
 .conn-select-arrow-btn {
@@ -261,6 +262,24 @@
 
 .conn-select-checkbox-btn:hover {
   background: #e4e4e4;
+}
+
+.conn-select-badge {
+  position: absolute;
+  top: -5px;
+  right: -14px;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  border-radius: 8px;
+  background: #0078d4;
+  color: #fff;
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 16px;
+  text-align: center;
+  pointer-events: none;
+  z-index: 2;
 }
 
 .conn-icon-btn-caret {
@@ -379,6 +398,7 @@
 }
 
 .conn-details {
+  position: relative;
   display: flex;
   flex-direction: column;
   gap: 2px;
@@ -713,11 +733,21 @@
   color: #888;
 }
 
-.conn-selected-count {
-  margin-left: auto;
-  font-size: 12px;
-  color: #555;
-  font-weight: 500;
-  white-space: nowrap;
-  flex-shrink: 0;
+.conn-db-checked-badge {
+  position: absolute;
+  top: -9px;
+  left: -16px;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  border-radius: 8px;
+  background: #0078d4;
+  color: #fff;
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 16px;
+  text-align: center;
+  pointer-events: none;
+  z-index: 1;
 }
+

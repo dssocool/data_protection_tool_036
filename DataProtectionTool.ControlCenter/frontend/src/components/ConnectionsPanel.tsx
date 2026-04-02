@@ -265,6 +265,25 @@ export default function ConnectionsPanel({
 
   const searchLower = searchText.toLowerCase();
 
+  useEffect(() => {
+    if (!searchText) return;
+    const toExpand: string[] = [];
+    for (const conn of connections) {
+      if (expanded.has(conn.rowKey)) continue;
+      const tables = connectionTables[conn.rowKey];
+      if (!tables) continue;
+      const hasMatch = tables.some(t =>
+        `${t.schema}.${t.name}`.toLowerCase().includes(searchText.toLowerCase())
+      );
+      if (hasMatch) toExpand.push(conn.rowKey);
+    }
+    if (toExpand.length > 0) {
+      const next = new Set(expanded);
+      for (const rk of toExpand) next.add(rk);
+      onExpandedChange(next);
+    }
+  }, [searchText]);
+
   function filteredTables(rowKey: string) {
     const t = connectionTables[rowKey];
     if (!t || !searchText) return t;
@@ -280,15 +299,16 @@ export default function ConnectionsPanel({
   const visibleTableKeys = useMemo(() => {
     const keys: string[] = [];
     for (const conn of connections) {
-      if (!expanded.has(conn.rowKey)) continue;
-      const tables = filteredTables(conn.rowKey);
+      const tables = connectionTables[conn.rowKey];
       if (!tables) continue;
-      for (const t of tables) {
+      const filtered = filteredTables(conn.rowKey);
+      if (!filtered) continue;
+      for (const t of filtered) {
         keys.push(`${conn.rowKey}:${t.schema}:${t.name}`);
       }
     }
     return keys;
-  }, [connections, connectionTables, expanded, searchText]);
+  }, [connections, connectionTables, searchText]);
 
   function handleSelectAll() {
     onCheckedTablesChange?.(new Set(allTableKeys));
@@ -444,6 +464,9 @@ export default function ConnectionsPanel({
               )}
             </svg>
           </button>
+          {(checkedTables?.size ?? 0) > 0 && (
+            <span className="conn-select-badge">{checkedTables!.size}</span>
+          )}
           {selectMenuOpen && (
             <div className="conn-icon-dropdown">
               <div className="conn-icon-dropdown-item" onClick={handleSelectAll}>All</div>
@@ -524,9 +547,6 @@ export default function ConnectionsPanel({
             </div>
           )}
         </div>
-        <span className="conn-selected-count">
-          {checkedTables?.size ?? 0} {(checkedTables?.size ?? 0) === 1 ? "item" : "items"} selected
-        </span>
         </div>
       </div>
       {connections.length === 0 ? (
@@ -542,6 +562,10 @@ export default function ConnectionsPanel({
                 {visibleConns.map((conn) => {
                   const fTables = filteredTables(conn.rowKey);
                   const fQueries = filteredQueries(conn.rowKey);
+                  const tablesForConn = connectionTables[conn.rowKey];
+                  const checkedCountForConn = tablesForConn
+                    ? tablesForConn.filter(t => checkedTables?.has(`${conn.rowKey}:${t.schema}:${t.name}`)).length
+                    : 0;
                   return (
                   <li key={conn.rowKey} className="connections-list-entry">
                     <div
@@ -558,6 +582,9 @@ export default function ConnectionsPanel({
                         </svg>
                       </button>
                       <div className="conn-details">
+                        {checkedCountForConn > 0 && (
+                          <span className="conn-db-checked-badge">{checkedCountForConn}</span>
+                        )}
                         <span className="conn-server">{conn.serverName}</span>
                         {conn.databaseName && (
                           <span className="conn-db">{conn.databaseName}</span>
