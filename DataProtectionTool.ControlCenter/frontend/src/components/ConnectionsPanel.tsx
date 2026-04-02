@@ -528,7 +528,6 @@ export default function ConnectionsPanel({
                                         key={`${t.schema}.${t.name}`}
                                         className={`conn-table-item${isSelected ? " conn-table-item-selected" : ""}`}
                                         onClick={() => onTableClick(conn.rowKey, t.schema, t.name)}
-                                        onContextMenu={(e) => handleTableContextMenu(e, conn.rowKey, t.schema, t.name)}
                                       >
                                         <input
                                           type="checkbox"
