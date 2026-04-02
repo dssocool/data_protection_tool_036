@@ -70,6 +70,12 @@ interface ConnectionsPanelProps {
   onApplySanitization?: (tableKeys: string[]) => void;
   starredTables?: Set<string>;
   onStarredTablesChange?: (next: Set<string>) => void;
+  checkedQueries?: Set<string>;
+  onCheckedQueriesChange?: (next: Set<string>) => void;
+  starredQueries?: Set<string>;
+  onStarredQueriesChange?: (next: Set<string>) => void;
+  queryColumns?: Record<string, { name: string; type: string }[]>;
+  onFetchQueryColumns?: (connectionRowKey: string, queryRowKey: string, queryText: string) => void;
   tableColumns?: Record<string, { name: string; type: string }[]>;
   onFetchTableColumns?: (rowKey: string, schema: string, tableName: string) => void;
   tableColumnRules?: Record<string, Record<string, unknown>[]>;
@@ -124,6 +130,12 @@ export default function ConnectionsPanel({
   onApplySanitization,
   starredTables,
   onStarredTablesChange,
+  checkedQueries,
+  onCheckedQueriesChange,
+  starredQueries,
+  onStarredQueriesChange,
+  queryColumns,
+  onFetchQueryColumns,
   tableColumns,
   onFetchTableColumns,
   tableColumnRules,
@@ -144,6 +156,7 @@ export default function ConnectionsPanel({
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
   const [searchText, setSearchText] = useState("");
   const [expandedTables, setExpandedTables] = useState<Set<string>>(new Set());
+  const [expandedQueries, setExpandedQueries] = useState<Set<string>>(new Set());
   const [actionsOpen, setActionsOpen] = useState(false);
   const [selectMenuOpen, setSelectMenuOpen] = useState(false);
   const [columnRuleModal, setColumnRuleModal] = useState<{ rule: Record<string, unknown>; tKey: string } | null>(null);
@@ -449,6 +462,42 @@ export default function ConnectionsPanel({
     setExpandedTables(next);
   }
 
+  function handleQueryStarToggle(e: React.MouseEvent, key: string) {
+    e.stopPropagation();
+    const next = new Set(starredQueries);
+    if (next.has(key)) {
+      next.delete(key);
+    } else {
+      next.add(key);
+    }
+    onStarredQueriesChange?.(next);
+  }
+
+  function handleQueryCheckboxToggle(e: React.MouseEvent, key: string) {
+    e.stopPropagation();
+    const next = new Set(checkedQueries);
+    if (next.has(key)) {
+      next.delete(key);
+    } else {
+      next.add(key);
+    }
+    onCheckedQueriesChange?.(next);
+  }
+
+  function handleQueryExpandToggle(qKey: string, connectionRowKey: string, queryRowKey: string, queryText: string) {
+    const next = new Set(expandedQueries);
+    if (next.has(qKey)) {
+      next.delete(qKey);
+    } else {
+      next.add(qKey);
+      if (!queryColumns?.[qKey]) {
+        onFetchQueryColumns?.(connectionRowKey, queryRowKey, queryText);
+      }
+    }
+    setExpandedQueries(next);
+    onQueryClick(connectionRowKey, queryRowKey, queryText);
+  }
+
   const isExpanded = (rowKey: string) => expanded.has(rowKey);
   const isLoading = (rowKey: string) => loadingTables.has(rowKey);
 
@@ -456,7 +505,7 @@ export default function ConnectionsPanel({
     <>
     <div ref={panelRef} className="connections-panel" style={{ width }}>
       <div className="connections-panel-header">
-        <span className="panel-title-text">Connections</span>
+        <span className="panel-title-text">Connections and Data Items</span>
       </div>
       <div className="conn-google-search-box">
         <div className="conn-toolbar">
@@ -654,23 +703,69 @@ export default function ConnectionsPanel({
                             {fQueries && fQueries.length > 0 && (
                               <ul className="conn-tables-list">
                                 {fQueries.map((q) => {
+                                  const qKey = `${conn.rowKey}:${q.rowKey}`;
                                   const isSelected = selectedQuery?.connectionRowKey === conn.rowKey
                                     && selectedQuery?.queryRowKey === q.rowKey;
+                                  const isChecked = checkedQueries?.has(qKey) ?? false;
+                                  const isQueryExpanded = expandedQueries.has(qKey);
+                                  const qCols = queryColumns?.[qKey];
                                   const label = q.queryText.length > 40
                                     ? q.queryText.substring(0, 40) + "..."
                                     : q.queryText;
                                   return (
                                     <li
                                       key={q.rowKey}
-                                      className={`conn-table-item conn-query-item${isSelected ? " conn-table-item-selected" : ""}`}
-                                      onClick={() => onQueryClick(conn.rowKey, q.rowKey, q.queryText)}
-                                      onContextMenu={(e) => handleTableContextMenu(e, conn.rowKey, "", q.rowKey, true)}
+                                      className={`conn-table-entry conn-query-entry${isQueryExpanded ? " conn-table-entry-expanded" : ""}${isChecked ? " conn-table-entry-checked" : ""}`}
                                     >
-                                      <svg className="conn-table-icon conn-query-icon" width="14" height="14" viewBox="0 0 14 14">
-                                        <path d="M2 2 L12 2 L12 12 L2 12 Z" fill="none" stroke="currentColor" strokeWidth="1" rx="1" />
-                                        <path d="M4 5 L10 5 M4 7 L9 7 M4 9 L7 9" stroke="currentColor" strokeWidth="0.8" strokeLinecap="round" />
-                                      </svg>
-                                      <span className="conn-table-name" title={q.queryText}>{label}</span>
+                                      <div
+                                        className={`conn-table-item conn-query-item${isSelected ? " conn-table-item-selected" : ""}`}
+                                        onClick={() => handleQueryExpandToggle(qKey, conn.rowKey, q.rowKey, q.queryText)}
+                                        onContextMenu={(e) => handleTableContextMenu(e, conn.rowKey, "", q.rowKey, true)}
+                                      >
+                                        <input
+                                          type="checkbox"
+                                          className="conn-table-checkbox"
+                                          checked={isChecked}
+                                          onClick={(e) => handleQueryCheckboxToggle(e as unknown as React.MouseEvent, qKey)}
+                                          onChange={() => {}}
+                                        />
+                                        <svg
+                                          className={`conn-table-star${starredQueries?.has(qKey) ? " conn-table-star-active" : ""}`}
+                                          width="14"
+                                          height="14"
+                                          viewBox="0 0 14 14"
+                                          onClick={(e) => handleQueryStarToggle(e, qKey)}
+                                        >
+                                          <path
+                                            d="M7 1.5L8.76 5.1L12.7 5.64L9.85 8.42L10.52 12.34L7 10.48L3.48 12.34L4.15 8.42L1.3 5.64L5.24 5.1L7 1.5Z"
+                                            fill={starredQueries?.has(qKey) ? "#f5c518" : "#fff"}
+                                            stroke={starredQueries?.has(qKey) ? "#f5c518" : "#555"}
+                                            strokeWidth="1"
+                                            strokeLinejoin="round"
+                                          />
+                                        </svg>
+                                        <span className="conn-table-icon-wrapper">
+                                          <svg className="conn-table-icon conn-query-icon" width="14" height="14" viewBox="0 0 14 14">
+                                            <path d="M2 2 L12 2 L12 12 L2 12 Z" fill="none" stroke="currentColor" strokeWidth="1" rx="1" />
+                                            <path d="M4 5 L10 5 M4 7 L9 7 M4 9 L7 9" stroke="currentColor" strokeWidth="0.8" strokeLinecap="round" />
+                                          </svg>
+                                        </span>
+                                        <span className="conn-table-name" title={q.queryText}>{label}</span>
+                                      </div>
+                                      {isQueryExpanded && (
+                                        <ul className="conn-table-columns">
+                                          {qCols ? (
+                                            qCols.map((col) => (
+                                              <li key={col.name} className="conn-table-column-row">
+                                                <span className="conn-table-column-name">{col.name}</span>
+                                                <span className="conn-table-column-type">{col.type}</span>
+                                              </li>
+                                            ))
+                                          ) : (
+                                            <li className="conn-table-column-row conn-table-columns-loading">Loading columns...</li>
+                                          )}
+                                        </ul>
+                                      )}
                                     </li>
                                   );
                                 })}

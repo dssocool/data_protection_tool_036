@@ -33,6 +33,7 @@ import {
   MOCK_STATUS_EVENTS,
   MOCK_FLOWS,
   MOCK_TABLE_COLUMNS,
+  MOCK_QUERY_COLUMNS,
   MOCK_COLUMN_RULES_BY_FORMAT,
 } from "./mockData";
 import "./App.css";
@@ -52,6 +53,10 @@ interface TablePreviewCache {
 
 function tableKey(rowKey: string, schema: string, tableName: string) {
   return `${rowKey}:${schema}:${tableName}`;
+}
+
+function queryKey(connectionRowKey: string, queryRowKey: string) {
+  return `${connectionRowKey}:${queryRowKey}`;
 }
 
 function safeJsonParse<T>(json: string): T | null {
@@ -126,8 +131,11 @@ export default function App() {
   const [newFlowRowKeys, setNewFlowRowKeys] = useState<Set<string>>(new Set());
   const [checkedTables, setCheckedTables] = useState<Set<string>>(new Set());
   const [starredTables, setStarredTables] = useState<Set<string>>(new Set());
+  const [checkedQueries, setCheckedQueries] = useState<Set<string>>(new Set());
+  const [starredQueries, setStarredQueries] = useState<Set<string>>(new Set());
   const [profileResultActiveTable, setProfileResultActiveTable] = useState<string | null>(null);
   const [tableColumns, setTableColumns] = useState<Record<string, { name: string; type: string }[]>>({});
+  const [queryColumns, setQueryColumns] = useState<Record<string, { name: string; type: string }[]>>({});
   const [tableColumnRules, setTableColumnRules] = useState<Record<string, Record<string, unknown>[]>>({});
   const [hoveredColumn, setHoveredColumn] = useState<string | null>(null);
   const [clickedColumn, setClickedColumn] = useState<string | null>(null);
@@ -449,6 +457,42 @@ export default function App() {
       }
     } catch {
       setTableColumns((prev) => ({ ...prev, [key]: [] }));
+    }
+  }
+
+  async function handleFetchQueryColumns(connectionRowKey: string, queryRowKey: string, queryText: string) {
+    const key = queryKey(connectionRowKey, queryRowKey);
+    if (queryColumns[key]) return;
+
+    if (_demoMode) {
+      const mock = MOCK_QUERY_COLUMNS[key];
+      if (mock) {
+        setQueryColumns((prev) => ({ ...prev, [key]: mock }));
+      } else {
+        setQueryColumns((prev) => ({ ...prev, [key]: [] }));
+      }
+      return;
+    }
+
+    const agentPath = getAgentPath();
+    if (!agentPath) return;
+
+    try {
+      const res = await fetch(`/api/agents/${agentPath}/list-query-columns`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ connectionRowKey, queryText }),
+      });
+      if (res.ok) {
+        const result = await res.json();
+        if (result.success && Array.isArray(result.columns)) {
+          setQueryColumns((prev) => ({ ...prev, [key]: result.columns }));
+        } else {
+          setQueryColumns((prev) => ({ ...prev, [key]: [] }));
+        }
+      }
+    } catch {
+      setQueryColumns((prev) => ({ ...prev, [key]: [] }));
     }
   }
 
@@ -2180,6 +2224,12 @@ export default function App() {
                 onApplySanitization={(keys) => setApplySanTableKeys(keys)}
                 starredTables={starredTables}
                 onStarredTablesChange={setStarredTables}
+                checkedQueries={checkedQueries}
+                onCheckedQueriesChange={setCheckedQueries}
+                starredQueries={starredQueries}
+                onStarredQueriesChange={setStarredQueries}
+                queryColumns={queryColumns}
+                onFetchQueryColumns={handleFetchQueryColumns}
                 tableColumns={tableColumns}
                 onFetchTableColumns={handleFetchTableColumns}
                 tableColumnRules={tableColumnRules}

@@ -153,6 +153,78 @@ public static class QueryEndpoints
             }
         });
 
+        app.MapPost("/api/agents/{path}/list-query-columns", async (string path, HttpRequest request, AgentRegistry registry) =>
+        {
+            if (!registry.TryGetConnection(path, out var connection) || connection is null)
+                return Results.NotFound(new { error = "Agent not found or not connected." });
+
+            var body = await request.ReadBodyAsync();
+
+            string connectionRowKey;
+            string queryText;
+            try
+            {
+                using var bodyDoc = JsonDocument.Parse(body);
+                connectionRowKey = bodyDoc.RootElement.TryGetProperty("connectionRowKey", out var crkEl) ? crkEl.GetString() ?? "" : "";
+                queryText = bodyDoc.RootElement.TryGetProperty("queryText", out var qtEl) ? qtEl.GetString() ?? "" : "";
+            }
+            catch
+            {
+                return Results.BadRequest(new { error = "Invalid request body." });
+            }
+
+            if (string.IsNullOrEmpty(connectionRowKey) || string.IsNullOrEmpty(queryText))
+                return Results.BadRequest(new { error = "connectionRowKey and queryText are required." });
+
+            try
+            {
+                var payload = JsonSerializer.Serialize(new
+                {
+                    rowKey = connectionRowKey,
+                    sqlStatement = $"SELECT TOP 0 * FROM ({queryText}) AS _q"
+                });
+                var result = await connection.SendCommandAsync("execute_sql", payload, TimeSpan.FromSeconds(30));
+
+                using var doc = JsonDocument.Parse(result);
+                if (doc.RootElement.TryGetProperty("success", out var successEl) && successEl.GetBoolean()
+                    && doc.RootElement.TryGetProperty("columns", out var colsEl) && colsEl.ValueKind == JsonValueKind.Array)
+                {
+                    var columns = new List<object>();
+                    foreach (var item in colsEl.EnumerateArray())
+                    {
+                        var colName = item.TryGetProperty("name", out var cnEl) ? cnEl.GetString() ?? "" : "";
+                        var colType = item.TryGetProperty("type", out var ctEl) ? ctEl.GetString() ?? "" : "";
+                        columns.Add(new { name = colName, type = colType });
+                    }
+                    return Results.Ok(new { success = true, columns });
+                }
+
+                if (doc.RootElement.TryGetProperty("success", out var successEl2) && successEl2.GetBoolean()
+                    && doc.RootElement.TryGetProperty("rows", out var rowsEl) && rowsEl.ValueKind == JsonValueKind.Array)
+                {
+                    if (rowsEl.GetArrayLength() == 0)
+                        return Results.Ok(new { success = true, columns = Array.Empty<object>() });
+
+                    var columns = new List<object>();
+                    foreach (var prop in rowsEl[0].EnumerateObject())
+                    {
+                        columns.Add(new { name = prop.Name, type = "unknown" });
+                    }
+                    return Results.Ok(new { success = true, columns });
+                }
+
+                return Results.Content(result, "application/json");
+            }
+            catch (TimeoutException)
+            {
+                return Results.Ok(new { success = false, message = "Agent did not respond within 30 seconds." });
+            }
+            catch (Exception ex)
+            {
+                return Results.Ok(new { success = false, message = $"List query columns error: {ex.Message}" });
+            }
+        });
+
         app.MapGet("/api/agents/{path}/queries", async (string path, string connectionRowKey, AgentRegistry registry, ClientTableService clientTableService) =>
         {
             if (!registry.TryGet(path, out var info) || info is null)

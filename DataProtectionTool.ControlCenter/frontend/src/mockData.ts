@@ -178,6 +178,20 @@ export const MOCK_CONNECTION_QUERIES: Record<string, QueryInfo[]> = {
 };
 
 // ---------------------------------------------------------------------------
+// Query columns (for expand/collapse in sidebar)
+// ---------------------------------------------------------------------------
+
+export const MOCK_QUERY_COLUMNS: Record<string, { name: string; type: string }[]> = {
+  "conn-001:query-001": [
+    { name: "CustomerID", type: "int" },
+    { name: "FirstName", type: "nvarchar" },
+    { name: "LastName", type: "nvarchar" },
+    { name: "Email", type: "nvarchar" },
+    { name: "Country", type: "nvarchar" },
+  ],
+};
+
+// ---------------------------------------------------------------------------
 // Sample preview data (PII-rich for demo)
 // ---------------------------------------------------------------------------
 
