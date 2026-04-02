@@ -98,15 +98,10 @@
 
 .data-preview-body {
   flex: 1;
-  overflow-x: auto;
+  overflow-x: scroll;
   overflow-y: auto;
   padding: 0;
   min-height: 0;
-  scrollbar-width: none;
-}
-
-.data-preview-body::-webkit-scrollbar {
-  display: none;
 }
 
 .data-preview-column-rules {
