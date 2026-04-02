@@ -249,6 +249,67 @@ public static class AgentEndpoints
             }
         });
 
+        app.MapPost("/api/agents/{path}/list-columns", async (string path, HttpRequest request, AgentRegistry registry) =>
+        {
+            if (!registry.TryGetConnection(path, out var connection) || connection is null)
+                return Results.NotFound(new { error = "Agent not found or not connected." });
+
+            var body = await request.ReadBodyAsync();
+
+            string rowKey;
+            string schema;
+            string tableName;
+            try
+            {
+                using var bodyDoc = JsonDocument.Parse(body);
+                rowKey = bodyDoc.RootElement.TryGetProperty("rowKey", out var rkEl) ? rkEl.GetString() ?? "" : "";
+                schema = bodyDoc.RootElement.TryGetProperty("schema", out var sEl) ? sEl.GetString() ?? "" : "";
+                tableName = bodyDoc.RootElement.TryGetProperty("tableName", out var tnEl) ? tnEl.GetString() ?? "" : "";
+            }
+            catch
+            {
+                return Results.BadRequest(new { error = "Invalid request body." });
+            }
+
+            if (string.IsNullOrEmpty(rowKey) || string.IsNullOrEmpty(schema) || string.IsNullOrEmpty(tableName))
+                return Results.BadRequest(new { error = "rowKey, schema and tableName are required." });
+
+            try
+            {
+                var payload = JsonSerializer.Serialize(new
+                {
+                    rowKey,
+                    sqlStatement = "SELECT COLUMN_NAME, DATA_TYPE FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = @schema AND TABLE_NAME = @tableName ORDER BY ORDINAL_POSITION",
+                    sqlParams = new Dictionary<string, string> { ["@schema"] = schema, ["@tableName"] = tableName }
+                });
+                var result = await connection.SendCommandAsync("execute_sql", payload, TimeSpan.FromSeconds(30));
+
+                using var doc = JsonDocument.Parse(result);
+                if (doc.RootElement.TryGetProperty("success", out var successEl) && successEl.GetBoolean()
+                    && doc.RootElement.TryGetProperty("rows", out var rowsEl) && rowsEl.ValueKind == JsonValueKind.Array)
+                {
+                    var columns = new List<object>();
+                    foreach (var item in rowsEl.EnumerateArray())
+                    {
+                        var colName = item.TryGetProperty("COLUMN_NAME", out var cnEl) ? cnEl.GetString() ?? "" : "";
+                        var colType = item.TryGetProperty("DATA_TYPE", out var ctEl) ? ctEl.GetString() ?? "" : "";
+                        columns.Add(new { name = colName, type = colType });
+                    }
+                    return Results.Ok(new { success = true, columns });
+                }
+
+                return Results.Content(result, "application/json");
+            }
+            catch (TimeoutException)
+            {
+                return Results.Ok(new { success = false, message = "Agent did not respond within 30 seconds." });
+            }
+            catch (Exception ex)
+            {
+                return Results.Ok(new { success = false, message = $"List columns error: {ex.Message}" });
+            }
+        });
+
         app.MapGet("/api/agents/{path}/list-schemas", async (string path, string rowKey, AgentRegistry registry) =>
         {
             if (!registry.TryGetConnection(path, out var connection) || connection is null)

@@ -105,6 +105,62 @@ export const MOCK_CONNECTION_TABLES: Record<string, TableInfo[]> = {
 };
 
 // ---------------------------------------------------------------------------
+// Table columns (for expand/collapse in sidebar)
+// ---------------------------------------------------------------------------
+
+export const MOCK_TABLE_COLUMNS: Record<string, { name: string; type: string }[]> = {
+  "conn-001:dbo:Customers": [
+    { name: "CustomerID", type: "int" },
+    { name: "FirstName", type: "nvarchar" },
+    { name: "LastName", type: "nvarchar" },
+    { name: "Email", type: "nvarchar" },
+    { name: "Phone", type: "nvarchar" },
+    { name: "SSN", type: "nvarchar" },
+    { name: "DateOfBirth", type: "date" },
+    { name: "Address", type: "nvarchar" },
+    { name: "City", type: "nvarchar" },
+    { name: "State", type: "nvarchar" },
+    { name: "ZipCode", type: "nvarchar" },
+  ],
+  "conn-001:dbo:Orders": [
+    { name: "OrderID", type: "int" },
+    { name: "CustomerID", type: "int" },
+    { name: "OrderDate", type: "datetime" },
+    { name: "TotalAmount", type: "decimal" },
+    { name: "Status", type: "nvarchar" },
+  ],
+  "conn-001:dbo:Payments": [
+    { name: "PaymentID", type: "int" },
+    { name: "OrderID", type: "int" },
+    { name: "Amount", type: "decimal" },
+    { name: "PaymentMethod", type: "nvarchar" },
+    { name: "PaymentDate", type: "datetime" },
+  ],
+  "conn-002:hr:Employees": [
+    { name: "EmployeeID", type: "int" },
+    { name: "FullName", type: "nvarchar" },
+    { name: "Email", type: "nvarchar" },
+    { name: "Department", type: "nvarchar" },
+    { name: "Salary", type: "decimal" },
+    { name: "HireDate", type: "date" },
+    { name: "ManagerID", type: "int" },
+  ],
+  "conn-002:hr:Departments": [
+    { name: "DepartmentID", type: "int" },
+    { name: "DepartmentName", type: "nvarchar" },
+    { name: "ManagerID", type: "int" },
+    { name: "Budget", type: "decimal" },
+  ],
+  "conn-002:hr:Salaries": [
+    { name: "SalaryID", type: "int" },
+    { name: "EmployeeID", type: "int" },
+    { name: "BasePay", type: "decimal" },
+    { name: "Bonus", type: "decimal" },
+    { name: "EffectiveDate", type: "date" },
+  ],
+};
+
+// ---------------------------------------------------------------------------
 // Queries
 // ---------------------------------------------------------------------------
 

@@ -67,6 +67,8 @@ interface ConnectionsPanelProps {
   onApplySanitization?: (tableKeys: string[]) => void;
   starredTables?: Set<string>;
   onStarredTablesChange?: (next: Set<string>) => void;
+  tableColumns?: Record<string, { name: string; type: string }[]>;
+  onFetchTableColumns?: (rowKey: string, schema: string, tableName: string) => void;
 }
 
 const MIN_WIDTH = 200;
@@ -85,7 +87,7 @@ export default function ConnectionsPanel({
   onExpandedChange,
   width,
   onExpandConnection,
-  onTableClick,
+  onTableClick: _onTableClick,
   onQueryClick,
   onReloadPreview,
   onRefreshConnection,
@@ -103,9 +105,12 @@ export default function ConnectionsPanel({
   onApplySanitization,
   starredTables,
   onStarredTablesChange,
+  tableColumns,
+  onFetchTableColumns,
 }: ConnectionsPanelProps) {
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
   const [searchText, setSearchText] = useState("");
+  const [expandedTables, setExpandedTables] = useState<Set<string>>(new Set());
   const [actionsOpen, setActionsOpen] = useState(false);
   const [selectMenuOpen, setSelectMenuOpen] = useState(false);
   const actionsRef = useRef<HTMLDivElement>(null);
@@ -244,6 +249,19 @@ export default function ConnectionsPanel({
     return keys;
   }, [connections, connectionTables]);
 
+  const visibleTableKeys = useMemo(() => {
+    const keys: string[] = [];
+    for (const conn of connections) {
+      if (!expanded.has(conn.rowKey)) continue;
+      const tables = filteredTables(conn.rowKey);
+      if (!tables) continue;
+      for (const t of tables) {
+        keys.push(`${conn.rowKey}:${t.schema}:${t.name}`);
+      }
+    }
+    return keys;
+  }, [connections, connectionTables, expanded, searchText]);
+
   function handleSelectAll() {
     onCheckedTablesChange?.(new Set(allTableKeys));
     setSelectMenuOpen(false);
@@ -252,6 +270,14 @@ export default function ConnectionsPanel({
   function handleSelectNone() {
     onCheckedTablesChange?.(new Set());
     setSelectMenuOpen(false);
+  }
+
+  function handleSelectCheckboxClick() {
+    if (hasChecked) {
+      onCheckedTablesChange?.(new Set());
+    } else {
+      onCheckedTablesChange?.(new Set(visibleTableKeys));
+    }
   }
 
   function handleSelectStarred() {
@@ -298,6 +324,21 @@ export default function ConnectionsPanel({
       next.add(key);
     }
     onCheckedTablesChange?.(next);
+  }
+
+  const hasChecked = (checkedTables?.size ?? 0) > 0;
+
+  function handleTableExpandToggle(tKey: string, rowKey: string, schema: string, tableName: string) {
+    const next = new Set(expandedTables);
+    if (next.has(tKey)) {
+      next.delete(tKey);
+    } else {
+      next.add(tKey);
+      if (!tableColumns?.[tKey]) {
+        onFetchTableColumns?.(rowKey, schema, tableName);
+      }
+    }
+    setExpandedTables(next);
   }
 
   const isExpanded = (rowKey: string) => expanded.has(rowKey);
@@ -363,17 +404,27 @@ export default function ConnectionsPanel({
           </div>
         </div>
         <div className="conn-icon-bar">
-        <div className="conn-icon-btn-wrapper" ref={selectRef} data-tooltip="Select">
+        <div className="conn-icon-btn-wrapper conn-select-split" ref={selectRef} data-tooltip="Select">
           <button
-            className="conn-icon-btn"
-            aria-label="Select"
+            className="conn-icon-btn conn-select-arrow-btn"
+            aria-label="Select options"
             onClick={() => setSelectMenuOpen((v) => !v)}
+          >
+            <span className="conn-select-arrow-checkbox-space" />
+            <svg className="conn-icon-btn-caret" width="12" height="12" viewBox="0 0 12 12" fill="none">
+              <path d="M1.5 3.5L6 8.5L10.5 3.5" fill="currentColor" />
+            </svg>
+          </button>
+          <button
+            className="conn-icon-btn conn-select-checkbox-btn"
+            aria-label={hasChecked ? "Deselect all" : "Select all visible"}
+            onClick={(e) => { e.stopPropagation(); handleSelectCheckboxClick(); }}
           >
             <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
               <rect x="2" y="3" width="10" height="10" rx="1.5" stroke="currentColor" strokeWidth="1.4" fill="none" />
-            </svg>
-            <svg className="conn-icon-btn-caret" width="8" height="8" viewBox="0 0 8 8" fill="none">
-              <path d="M1.5 3L4 5.5L6.5 3" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round" />
+              {hasChecked && (
+                <line x1="4.5" y1="8" x2="9.5" y2="8" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+              )}
             </svg>
           </button>
           {selectMenuOpen && (
@@ -385,20 +436,50 @@ export default function ConnectionsPanel({
             </div>
           )}
         </div>
-        <div className="conn-icon-btn-wrapper" data-tooltip="Refresh">
-          <button
-            className="conn-icon-btn"
-            aria-label="Refresh"
-            onClick={handleRefreshAll}
-          >
-            <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
-              <path d="M13.5 8A5.5 5.5 0 0 1 3.05 10" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
-              <path d="M2.5 8A5.5 5.5 0 0 1 12.95 6" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
-              <path d="M12.95 3V6H9.95" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
-              <path d="M3.05 13V10H6.05" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
-            </svg>
-          </button>
-        </div>
+        {hasChecked ? (
+          <>
+            <div className="conn-icon-btn-wrapper" data-tooltip="Profile Data">
+              <button
+                className="conn-icon-btn"
+                aria-label="Profile Data"
+                onClick={() => onProfileData?.(Array.from(checkedTables ?? []))}
+              >
+                <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+                  <circle cx="6.5" cy="6.5" r="4.8" stroke="currentColor" strokeWidth="1.4" />
+                  <circle cx="6.5" cy="6.5" r="3.2" stroke="currentColor" strokeWidth="0.8" opacity="0.45" />
+                  <path d="M10.2 10.2L14.5 14.5" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" />
+                </svg>
+              </button>
+            </div>
+            <div className="conn-icon-btn-wrapper" data-tooltip="Apply Sanitization">
+              <button
+                className="conn-icon-btn"
+                aria-label="Apply Sanitization"
+                onClick={() => onApplySanitization?.(Array.from(checkedTables ?? []))}
+              >
+                <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+                  <path d="M8 1.5L2.5 4.5V7.5C2.5 11 5 13.5 8 14.5C11 13.5 13.5 11 13.5 7.5V4.5L8 1.5Z" stroke="currentColor" strokeWidth="1.3" strokeLinejoin="round" fill="none" />
+                  <path d="M5.5 8L7.2 9.7L10.5 6.3" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" />
+                </svg>
+              </button>
+            </div>
+          </>
+        ) : (
+          <div className="conn-icon-btn-wrapper" data-tooltip="Refresh">
+            <button
+              className="conn-icon-btn"
+              aria-label="Refresh"
+              onClick={handleRefreshAll}
+            >
+              <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+                <path d="M13.5 8A5.5 5.5 0 0 1 3.05 10" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
+                <path d="M2.5 8A5.5 5.5 0 0 1 12.95 6" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
+                <path d="M12.95 3V6H9.95" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
+                <path d="M3.05 13V10H6.05" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
+            </button>
+          </div>
+        )}
         <div className="conn-icon-btn-wrapper" ref={actionsRef} data-tooltip="Action">
           <button
             className="conn-icon-btn"
@@ -523,52 +604,72 @@ export default function ConnectionsPanel({
                                       && selectedTable?.tableName === t.name;
                                     const isDryRunning = dryRunningTables.has(tKey);
                                     const isChecked = checkedTables?.has(tKey) ?? false;
+                                    const isTableExpanded = expandedTables.has(tKey);
+                                    const cols = tableColumns?.[tKey];
                                     return (
                                       <li
                                         key={`${t.schema}.${t.name}`}
-                                        className={`conn-table-item${isSelected ? " conn-table-item-selected" : ""}`}
-                                        onClick={() => onTableClick(conn.rowKey, t.schema, t.name)}
+                                        className={`conn-table-entry${isTableExpanded ? " conn-table-entry-expanded" : ""}`}
                                       >
-                                        <input
-                                          type="checkbox"
-                                          className="conn-table-checkbox"
-                                          checked={isChecked}
-                                          onClick={(e) => handleCheckboxToggle(e as unknown as React.MouseEvent, tKey)}
-                                          onChange={() => {}}
-                                        />
-                                        <svg
-                                          className={`conn-table-star${starredTables?.has(tKey) ? " conn-table-star-active" : ""}`}
-                                          width="14"
-                                          height="14"
-                                          viewBox="0 0 14 14"
-                                          onClick={(e) => handleStarToggle(e, tKey)}
+                                        <div
+                                          className={`conn-table-item${isSelected ? " conn-table-item-selected" : ""}`}
+                                          onClick={() => handleTableExpandToggle(tKey, conn.rowKey, t.schema, t.name)}
                                         >
-                                          <path
-                                            d="M7 1.5L8.76 5.1L12.7 5.64L9.85 8.42L10.52 12.34L7 10.48L3.48 12.34L4.15 8.42L1.3 5.64L5.24 5.1L7 1.5Z"
-                                            fill={starredTables?.has(tKey) ? "#f5c518" : "#fff"}
-                                            stroke={starredTables?.has(tKey) ? "#f5c518" : "#555"}
-                                            strokeWidth="1"
-                                            strokeLinejoin="round"
+                                          <input
+                                            type="checkbox"
+                                            className="conn-table-checkbox"
+                                            checked={isChecked}
+                                            onClick={(e) => handleCheckboxToggle(e as unknown as React.MouseEvent, tKey)}
+                                            onChange={() => {}}
                                           />
-                                        </svg>
-                                        <span className="conn-table-icon-wrapper">
-                                          {isDryRunning && (
-                                            <svg className="conn-table-running-icon" width="14" height="14" viewBox="0 0 14 14">
-                                              <circle cx="7" cy="7" r="5.5" fill="none" stroke="currentColor" strokeWidth="1.5" strokeDasharray="20 12" />
-                                            </svg>
-                                          )}
-                                          <svg className="conn-table-icon" width="14" height="14" viewBox="0 0 14 14">
-                                            <rect x="1" y="1" width="12" height="12" rx="1.5" fill="none" stroke="currentColor" strokeWidth="1" />
-                                            <line x1="1" y1="5" x2="13" y2="5" stroke="currentColor" strokeWidth="1" />
-                                            <line x1="1" y1="9" x2="13" y2="9" stroke="currentColor" strokeWidth="1" />
-                                            <line x1="5" y1="5" x2="5" y2="13" stroke="currentColor" strokeWidth="1" />
+                                          <svg
+                                            className={`conn-table-star${starredTables?.has(tKey) ? " conn-table-star-active" : ""}`}
+                                            width="14"
+                                            height="14"
+                                            viewBox="0 0 14 14"
+                                            onClick={(e) => handleStarToggle(e, tKey)}
+                                          >
+                                            <path
+                                              d="M7 1.5L8.76 5.1L12.7 5.64L9.85 8.42L10.52 12.34L7 10.48L3.48 12.34L4.15 8.42L1.3 5.64L5.24 5.1L7 1.5Z"
+                                              fill={starredTables?.has(tKey) ? "#f5c518" : "#fff"}
+                                              stroke={starredTables?.has(tKey) ? "#f5c518" : "#555"}
+                                              strokeWidth="1"
+                                              strokeLinejoin="round"
+                                            />
                                           </svg>
-                                        </span>
-                                        <span className="conn-table-name">{t.schema}.{t.name}</span>
-                                        {tableTabCounts[tKey] && (
-                                          <span className="conn-table-tab-badge">
-                                            {tableTabCounts[tKey] === 1 ? "1 tab" : `${tableTabCounts[tKey]} tabs`}
+                                          <span className="conn-table-icon-wrapper">
+                                            {isDryRunning && (
+                                              <svg className="conn-table-running-icon" width="14" height="14" viewBox="0 0 14 14">
+                                                <circle cx="7" cy="7" r="5.5" fill="none" stroke="currentColor" strokeWidth="1.5" strokeDasharray="20 12" />
+                                              </svg>
+                                            )}
+                                            <svg className="conn-table-icon" width="14" height="14" viewBox="0 0 14 14">
+                                              <rect x="1" y="1" width="12" height="12" rx="1.5" fill="none" stroke="currentColor" strokeWidth="1" />
+                                              <line x1="1" y1="5" x2="13" y2="5" stroke="currentColor" strokeWidth="1" />
+                                              <line x1="1" y1="9" x2="13" y2="9" stroke="currentColor" strokeWidth="1" />
+                                              <line x1="5" y1="5" x2="5" y2="13" stroke="currentColor" strokeWidth="1" />
+                                            </svg>
                                           </span>
+                                          <span className="conn-table-name">{t.schema}.{t.name}</span>
+                                          {tableTabCounts[tKey] && (
+                                            <span className="conn-table-tab-badge">
+                                              {tableTabCounts[tKey] === 1 ? "1 tab" : `${tableTabCounts[tKey]} tabs`}
+                                            </span>
+                                          )}
+                                        </div>
+                                        {isTableExpanded && (
+                                          <ul className="conn-table-columns">
+                                            {cols ? (
+                                              cols.map((col) => (
+                                                <li key={col.name} className="conn-table-column-row">
+                                                  <span className="conn-table-column-name">{col.name}</span>
+                                                  <span className="conn-table-column-type">{col.type}</span>
+                                                </li>
+                                              ))
+                                            ) : (
+                                              <li className="conn-table-column-row conn-table-columns-loading">Loading columns...</li>
+                                            )}
+                                          </ul>
                                         )}
                                       </li>
                                     );

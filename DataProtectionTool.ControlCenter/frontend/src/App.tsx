@@ -31,6 +31,7 @@ import {
   MOCK_ALL_FRAMEWORKS,
   MOCK_STATUS_EVENTS,
   MOCK_FLOWS,
+  MOCK_TABLE_COLUMNS,
 } from "./mockData";
 import "./App.css";
 
@@ -109,6 +110,7 @@ export default function App() {
   const [newFlowRowKeys, setNewFlowRowKeys] = useState<Set<string>>(new Set());
   const [checkedTables, setCheckedTables] = useState<Set<string>>(new Set());
   const [starredTables, setStarredTables] = useState<Set<string>>(new Set());
+  const [tableColumns, setTableColumns] = useState<Record<string, { name: string; type: string }[]>>({});
   const pendingSqlSaveRowKeyRef = useRef<string | null>(null);
   const pendingFlowRowKeyRef = useRef<string | null>(null);
   const previewCacheRef = useRef<Map<string, string[]>>(new Map());
@@ -362,6 +364,42 @@ export default function App() {
         next.delete(rowKey);
         return next;
       });
+    }
+  }
+
+  async function handleFetchTableColumns(rowKey: string, schema: string, tableName: string) {
+    const key = tableKey(rowKey, schema, tableName);
+    if (tableColumns[key]) return;
+
+    if (_demoMode) {
+      const mock = MOCK_TABLE_COLUMNS[key];
+      if (mock) {
+        setTableColumns((prev) => ({ ...prev, [key]: mock }));
+      } else {
+        setTableColumns((prev) => ({ ...prev, [key]: [] }));
+      }
+      return;
+    }
+
+    const agentPath = getAgentPath();
+    if (!agentPath) return;
+
+    try {
+      const res = await fetch(`/api/agents/${agentPath}/list-columns`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ rowKey, schema, tableName }),
+      });
+      if (res.ok) {
+        const result = await res.json();
+        if (result.success && Array.isArray(result.columns)) {
+          setTableColumns((prev) => ({ ...prev, [key]: result.columns }));
+        } else {
+          setTableColumns((prev) => ({ ...prev, [key]: [] }));
+        }
+      }
+    } catch {
+      setTableColumns((prev) => ({ ...prev, [key]: [] }));
     }
   }
 
@@ -1552,6 +1590,8 @@ export default function App() {
                 onApplySanitization={() => {}}
                 starredTables={starredTables}
                 onStarredTablesChange={setStarredTables}
+                tableColumns={tableColumns}
+                onFetchTableColumns={handleFetchTableColumns}
               />
             )}
             {(selectedTable || selectedQuery) && (
