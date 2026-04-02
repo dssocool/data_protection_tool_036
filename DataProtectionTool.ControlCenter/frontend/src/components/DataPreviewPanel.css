@@ -360,10 +360,6 @@
   cursor: default;
 }
 
-.data-preview-diff-table.data-preview-table-fixed {
-  min-width: 100%;
-}
-
 .data-preview-diff-table.data-preview-table-fixed td {
   overflow: hidden;
   text-overflow: ellipsis;
@@ -376,7 +372,6 @@
 }
 
 .data-preview-diff-cell-changed {
-  background: #fffbe6;
 }
 
 .data-preview-diff-old {

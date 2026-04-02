@@ -311,9 +311,14 @@ const DiffView = forwardRef<HTMLTableElement, DiffViewProps>(
     }, [columnWidths, onColumnResize]);
 
     const hasWidths = columnWidths.length > 0;
+    const totalWidth = hasWidths ? columnWidths.reduce((s, w) => s + w, 0) : undefined;
 
     return (
-      <table className={`data-preview-table data-preview-diff-table${hasWidths ? " data-preview-table-fixed" : ""}`} ref={setRefs}>
+      <table
+        className={`data-preview-table data-preview-diff-table${hasWidths ? " data-preview-table-fixed" : ""}`}
+        ref={setRefs}
+        style={totalWidth ? { width: totalWidth } : undefined}
+      >
         {hasWidths && (
           <colgroup>
             {columnWidths.map((w, i) => (
