@@ -404,6 +404,489 @@ public static class EngineEndpoints
             }
         });
 
+        app.MapPost("/api/agents/{path}/dp-preview-multi", async (string path, HttpContext httpContext, AgentRegistry registry,
+            ClientTableService clientTableService, DataEngineConfig dataEngineConfig,
+            BlobServiceClient blobClient, BlobStorageConfig blobConfig,
+            EngineApiClient engineApi, EngineMetadataService metadataService) =>
+        {
+            var response = httpContext.Response;
+            var request = httpContext.Request;
+
+            if (!registry.TryGetConnection(path, out var connection) || connection is null)
+            {
+                response.StatusCode = 404;
+                await response.WriteAsJsonAsync(new { error = "Agent not found or not connected." });
+                return;
+            }
+
+            var partitionKey = ClientEntity.BuildPartitionKey(connection.Info.Oid, connection.Info.Tid);
+            var body = await request.ReadBodyAsync();
+
+            SseWriter.SetupHeaders(response);
+            var statusSteps = new List<string>();
+            var sseLock = new SemaphoreSlim(1, 1);
+
+            async Task WriteStatus(string msg)
+            {
+                await EngineRelayService.WriteStatusThreadSafeAsync(response, sseLock, statusSteps, msg);
+            }
+
+            try
+            {
+                using var bodyDoc = JsonDocument.Parse(body);
+                var root = bodyDoc.RootElement;
+
+                if (!root.TryGetProperty("tables", out var tablesEl) || tablesEl.ValueKind != JsonValueKind.Array)
+                {
+                    await SseWriter.WriteErrorAsync(response, "Request must include a 'tables' array.");
+                    return;
+                }
+
+                var tables = new List<(string rowKey, string schema, string tableName)>();
+                foreach (var tEl in tablesEl.EnumerateArray())
+                {
+                    var rk = tEl.TryGetProperty("rowKey", out var rkEl) ? rkEl.GetString() ?? "" : "";
+                    var sc = tEl.TryGetProperty("schema", out var scEl) ? scEl.GetString() ?? "" : "";
+                    var tn = tEl.TryGetProperty("tableName", out var tnEl) ? tnEl.GetString() ?? "" : "";
+                    if (!string.IsNullOrEmpty(rk) && !string.IsNullOrEmpty(sc) && !string.IsNullOrEmpty(tn))
+                        tables.Add((rk, sc, tn));
+                }
+
+                if (tables.Count == 0)
+                {
+                    await SseWriter.WriteErrorAsync(response, "No valid tables provided.");
+                    return;
+                }
+
+                if (!await EngineRelayService.ValidateEngineConfigAsync(dataEngineConfig, response, requireProfileSetId: true))
+                    return;
+
+                var engineBaseUrl = engineApi.BaseUrl;
+                var previewContainerClient = blobClient.GetBlobContainerClient(blobConfig.PreviewContainer);
+                var engineContainerClient = blobClient.GetBlobContainerClient(blobConfig.Container);
+                var dryRunUuid = Guid.NewGuid().ToString("N");
+
+                // ---- Group 2: create ruleset + profile job + masking job (runs once, independent of Group 1) ----
+                var group2Tcs = new TaskCompletionSource<(string fileRulesetId, string profileJobId, string maskingJobId)>(
+                    TaskCreationOptions.RunContinuationsAsynchronously);
+
+                var group2Task = Task.Run(async () =>
+                {
+                    try
+                    {
+                        await WriteStatus("Creating file ruleset...");
+                        var rulesetName = $"ruleset_{dryRunUuid}";
+                        var (rulesetSuccess, fileRulesetId, _) = await engineApi.CreateFileRulesetAsync(rulesetName, dataEngineConfig.ConnectorId);
+                        if (!rulesetSuccess)
+                        {
+                            group2Tcs.TrySetException(new InvalidOperationException("File ruleset creation failed."));
+                            return;
+                        }
+
+                        await WriteStatus("Creating profile job...");
+                        using var profileJobResp = await EngineRelayService.RelayHttpAsync(connection, engineBaseUrl, dataEngineConfig.AuthorizationToken, "POST", "profile-jobs", new
+                        {
+                            jobName = $"profile_{dryRunUuid}",
+                            profileSetId = int.Parse(dataEngineConfig.ProfileSetId),
+                            rulesetId = int.Parse(fileRulesetId)
+                        });
+
+                        if (!(profileJobResp.RootElement.TryGetProperty("success", out var pjSuccessEl) && pjSuccessEl.GetBoolean()))
+                        {
+                            var msg = profileJobResp.RootElement.TryGetProperty("message", out var m) ? m.GetString() : "Profile job creation failed.";
+                            group2Tcs.TrySetException(new InvalidOperationException(msg ?? "Profile job creation failed."));
+                            return;
+                        }
+
+                        var profileJobId = EngineRelayService.ExtractBodyField(profileJobResp, "profileJobId");
+                        if (string.IsNullOrEmpty(profileJobId))
+                        {
+                            group2Tcs.TrySetException(new InvalidOperationException("Profile job creation returned no profileJobId."));
+                            return;
+                        }
+
+                        await WriteStatus("Creating masking job...");
+                        using var maskingJobResp = await EngineRelayService.RelayHttpAsync(connection, engineBaseUrl, dataEngineConfig.AuthorizationToken, "POST", "masking-jobs", new
+                        {
+                            jobName = $"masking_{dryRunUuid}",
+                            rulesetId = int.Parse(fileRulesetId),
+                            onTheFlyMasking = false
+                        });
+
+                        if (!(maskingJobResp.RootElement.TryGetProperty("success", out var mjSuccessEl) && mjSuccessEl.GetBoolean()))
+                        {
+                            var msg = maskingJobResp.RootElement.TryGetProperty("message", out var m) ? m.GetString() : "Masking job creation failed.";
+                            group2Tcs.TrySetException(new InvalidOperationException(msg ?? "Masking job creation failed."));
+                            return;
+                        }
+
+                        var maskingJobId = EngineRelayService.ExtractBodyField(maskingJobResp, "maskingJobId");
+                        if (string.IsNullOrEmpty(maskingJobId))
+                        {
+                            group2Tcs.TrySetException(new InvalidOperationException("Masking job creation returned no maskingJobId."));
+                            return;
+                        }
+
+                        group2Tcs.TrySetResult((fileRulesetId, profileJobId, maskingJobId));
+                    }
+                    catch (Exception ex)
+                    {
+                        group2Tcs.TrySetException(ex);
+                    }
+                });
+
+                // ---- Per-table result holder ----
+                var tableResults = new TablePrepResult[tables.Count];
+
+                // ---- Group 1 + Group 3 pipeline per table (parallel across tables) ----
+                var perTableTasks = tables.Select((table, idx) => Task.Run(async () =>
+                {
+                    var (rowKey, schema, tableName) = table;
+                    var tableLabel = $"{schema}.{tableName}";
+
+                    // -- Group 1: sample, copy blobs, fetch SQL types, create file format --
+                    await WriteStatus($"[{tableLabel}] Sampling table...");
+                    var uniqueId = await clientTableService.GetUserIdAsync(partitionKey);
+                    var samplePayload = JsonSerializer.Serialize(new
+                    {
+                        rowKey, schema, tableName, uniqueId,
+                        sqlStatement = $"SELECT * FROM [{schema}].[{tableName}] TABLESAMPLE (200 ROWS)"
+                    });
+                    var sampleResult = await connection.SendCommandAsync("sample_table", samplePayload, TimeSpan.FromSeconds(120));
+                    using var sampleDoc = JsonDocument.Parse(sampleResult);
+                    var sampleRoot = sampleDoc.RootElement;
+
+                    if (!(sampleRoot.TryGetProperty("success", out var ssEl) && ssEl.GetBoolean()))
+                    {
+                        var msg = sampleRoot.TryGetProperty("message", out var mEl) ? mEl.GetString() : "Sample failed.";
+                        throw new InvalidOperationException($"[{tableLabel}] Sample failed: {msg}");
+                    }
+
+                    var filenames = new List<string>();
+                    if (sampleRoot.TryGetProperty("filenames", out var fnEl) && fnEl.ValueKind == JsonValueKind.Array)
+                        filenames = fnEl.EnumerateArray().Select(e => e.GetString() ?? "").Where(f => f != "").ToList();
+                    else if (sampleRoot.TryGetProperty("filename", out var fEl))
+                    {
+                        var fn = fEl.GetString() ?? "";
+                        if (!string.IsNullOrEmpty(fn)) filenames.Add(fn);
+                    }
+
+                    if (filenames.Count == 0)
+                        throw new InvalidOperationException($"[{tableLabel}] Sample produced no files.");
+
+                    // Copy preview blobs to engine container
+                    await WriteStatus($"[{tableLabel}] Copying preview files...");
+                    foreach (var previewFile in filenames)
+                    {
+                        var sourceBlob = previewContainerClient.GetBlobClient(previewFile);
+                        var destBlob = engineContainerClient.GetBlobClient(previewFile);
+                        using var stream = new MemoryStream();
+                        await sourceBlob.DownloadToAsync(stream);
+                        stream.Position = 0;
+                        await destBlob.UploadAsync(stream, overwrite: true);
+                    }
+
+                    // Fetch SQL column types
+                    await WriteStatus($"[{tableLabel}] Fetching SQL column types...");
+                    var previewHeaders = new List<string>();
+                    var sqlColumnTypes = new List<string>();
+                    try
+                    {
+                        var fetchTypesPayload = JsonSerializer.Serialize(new
+                        {
+                            rowKey,
+                            sqlStatement = "SELECT COLUMN_NAME, DATA_TYPE FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = @schema AND TABLE_NAME = @tableName ORDER BY ORDINAL_POSITION",
+                            sqlParams = new Dictionary<string, string> { ["@schema"] = schema, ["@tableName"] = tableName }
+                        });
+                        var fetchTypesResult = await connection.SendCommandAsync("execute_sql", fetchTypesPayload, TimeSpan.FromSeconds(120));
+                        using var fetchTypesDoc = JsonDocument.Parse(fetchTypesResult);
+                        var fetchTypesRoot = fetchTypesDoc.RootElement;
+
+                        if (fetchTypesRoot.TryGetProperty("success", out var ftSuccessEl) && ftSuccessEl.GetBoolean()
+                            && fetchTypesRoot.TryGetProperty("rows", out var columnsEl) && columnsEl.ValueKind == JsonValueKind.Array)
+                        {
+                            foreach (var col in columnsEl.EnumerateArray())
+                            {
+                                var colName = col.GetProperty("COLUMN_NAME").GetString() ?? "";
+                                var colType = col.GetProperty("DATA_TYPE").GetString() ?? "";
+                                if (!string.IsNullOrEmpty(colName))
+                                {
+                                    previewHeaders.Add(colName);
+                                    sqlColumnTypes.Add(colType);
+                                }
+                            }
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        Console.Error.WriteLine($"[DpPreviewMulti] Failed to fetch SQL types for {tableLabel}: {ex.Message}");
+                    }
+
+                    // Get or create file format
+                    var connEntity = await clientTableService.GetConnectionByRowKeyAsync(partitionKey, rowKey);
+                    DataItemEntity? dataItem = null;
+                    string fileFormatId = "";
+
+                    if (connEntity != null)
+                    {
+                        dataItem = await clientTableService.GetDataItemByTableAsync(
+                            partitionKey, connEntity.ServerName, connEntity.DatabaseName, schema, tableName);
+                        if (dataItem != null && !string.IsNullOrEmpty(dataItem.FileFormatId))
+                            fileFormatId = dataItem.FileFormatId;
+                    }
+
+                    if (string.IsNullOrEmpty(fileFormatId))
+                    {
+                        await WriteStatus($"[{tableLabel}] Creating file format...");
+                        var containerClient = blobClient.GetBlobContainerClient(blobConfig.Container);
+                        var blobRef = containerClient.GetBlobClient(filenames[0]);
+                        using var downloadStream = new MemoryStream();
+                        await blobRef.DownloadToAsync(downloadStream);
+                        var fileBytes = downloadStream.ToArray();
+
+                        var (formatSuccess, newFileFormatId, _) = await engineApi.CreateFileFormatAsync(fileBytes, filenames[0]);
+                        if (!formatSuccess)
+                            throw new InvalidOperationException($"[{tableLabel}] File format creation failed.");
+
+                        fileFormatId = newFileFormatId;
+                        if (!string.IsNullOrEmpty(fileFormatId) && dataItem != null)
+                            await clientTableService.UpdateFileFormatIdAsync(dataItem, fileFormatId);
+                    }
+                    else
+                    {
+                        await WriteStatus($"[{tableLabel}] File format already exists.");
+                    }
+
+                    // -- Group 3: wait for Group 2, then create file metadata --
+                    var (rulesetId, _, _) = await group2Tcs.Task;
+
+                    await WriteStatus($"[{tableLabel}] Creating file metadata...");
+                    var allMetadataIds = new List<string>();
+                    for (var fi = 0; fi < filenames.Count; fi++)
+                    {
+                        var (metaSuccess, fileMetadataId, _) = await engineApi.CreateFileMetadataAsync(filenames[fi], rulesetId, fileFormatId);
+                        if (!metaSuccess)
+                            throw new InvalidOperationException($"[{tableLabel}] File metadata creation failed for {filenames[fi]}.");
+                        allMetadataIds.Add(fileMetadataId);
+                    }
+
+                    await WriteStatus($"[{tableLabel}] Table preparation complete.");
+
+                    tableResults[idx] = new TablePrepResult
+                    {
+                        RowKey = rowKey,
+                        Schema = schema,
+                        TableName = tableName,
+                        Filenames = filenames,
+                        FileFormatId = fileFormatId,
+                        PreviewHeaders = previewHeaders,
+                        SqlColumnTypes = sqlColumnTypes,
+                        FileMetadataIds = allMetadataIds,
+                    };
+                })).ToArray();
+
+                // Await all per-table tasks (Groups 1+3) and Group 2
+                await Task.WhenAll(perTableTasks);
+                await group2Task;
+
+                var (g2RulesetId, g2ProfileJobId, g2MaskingJobId) = await group2Tcs.Task;
+
+                // ---- Group 4: run profile, fix mappings, run masking, copy results ----
+                await WriteStatus("Running profile job...");
+                using var profileExecResp = await EngineRelayService.RelayHttpAsync(connection, engineBaseUrl, dataEngineConfig.AuthorizationToken, "POST", "executions", new
+                {
+                    jobId = int.Parse(g2ProfileJobId)
+                });
+
+                if (!(profileExecResp.RootElement.TryGetProperty("success", out var peSuccessEl) && peSuccessEl.GetBoolean()))
+                {
+                    var msg = profileExecResp.RootElement.TryGetProperty("message", out var m) ? m.GetString() : "Profile job execution failed to start.";
+                    await SseWriter.WriteErrorAsync(response, msg ?? "Profile job execution failed to start.");
+                    return;
+                }
+
+                var profileExecId = EngineRelayService.ExtractBodyField(profileExecResp, "executionId");
+                if (string.IsNullOrEmpty(profileExecId))
+                {
+                    await SseWriter.WriteErrorAsync(response, "Profile job execution returned no executionId.");
+                    return;
+                }
+
+                var profileStatus = await EngineRelayService.PollExecutionAsync(
+                    connection, engineBaseUrl, dataEngineConfig.AuthorizationToken,
+                    profileExecId, response, "profile job", statusSteps: statusSteps);
+
+                if (profileStatus is not ("SUCCEEDED" or "WARNING"))
+                {
+                    await SseWriter.WriteErrorAsync(response, $"Profile job did not succeed. Final status: {profileStatus}");
+                    return;
+                }
+
+                // Apply mapping rules per table
+                await metadataService.EnsureLoadedAsync();
+                foreach (var tr in tableResults)
+                {
+                    if (tr.PreviewHeaders.Count == 0 || tr.SqlColumnTypes.Count != tr.PreviewHeaders.Count)
+                        continue;
+
+                    var tableLabel = $"{tr.Schema}.{tr.TableName}";
+                    await WriteStatus($"[{tableLabel}] Applying mapping rules...");
+
+                    var sqlTypeByColumn = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+                    for (var i = 0; i < tr.PreviewHeaders.Count; i++)
+                        sqlTypeByColumn[tr.PreviewHeaders[i]] = tr.SqlColumnTypes[i];
+
+                    try
+                    {
+                        var columnRules = await engineApi.FetchColumnRulesAsync(tr.FileFormatId);
+                        var enriched = engineApi.EnrichColumnRules(columnRules, metadataService.Algorithms, metadataService.Domains, metadataService.Frameworks);
+
+                        var algMaskTypes = new Dictionary<string, string>();
+                        foreach (var alg in enriched.Algorithms)
+                        {
+                            var aName = alg.TryGetProperty("algorithmName", out var anEl) ? anEl.GetString() ?? "" : "";
+                            var aMaskType = alg.TryGetProperty("maskType", out var mtEl) ? mtEl.GetString() ?? "" : "";
+                            if (!string.IsNullOrEmpty(aName))
+                                algMaskTypes[aName] = aMaskType;
+                        }
+
+                        var fixedCount = 0;
+                        foreach (var rule in enriched.Rules)
+                        {
+                            var fieldName = rule.TryGetProperty("fieldName", out var fnEl) ? fnEl.GetString() ?? "" : "";
+                            var algName = rule.TryGetProperty("algorithmName", out var anEl) ? anEl.GetString() ?? "" : "";
+                            var metadataId = rule.TryGetProperty("fileFieldMetadataId", out var idEl) ? idEl.ToString() : "";
+                            var isMasked = !rule.TryGetProperty("isMasked", out var imEl) || imEl.ValueKind != JsonValueKind.False;
+
+                            if (string.IsNullOrEmpty(fieldName) || string.IsNullOrEmpty(algName)
+                                || string.IsNullOrEmpty(metadataId) || !isMasked)
+                                continue;
+
+                            if (!sqlTypeByColumn.TryGetValue(fieldName, out var sqlType))
+                                continue;
+
+                            var allowedTypes = EndpointHelpers.GetAllowedAlgorithmTypes(sqlType);
+                            if (!algMaskTypes.TryGetValue(algName, out var maskType))
+                                continue;
+                            if (allowedTypes.Contains(maskType))
+                                continue;
+
+                            await WriteStatus($"[{tableLabel}] Fixing type mismatch: {fieldName} ({sqlType})...");
+                            using var fixResp = await EngineRelayService.RelayHttpAsync(connection, engineBaseUrl, dataEngineConfig.AuthorizationToken, "PUT", $"file-field-metadata/{metadataId}", new
+                            {
+                                isMasked = false,
+                                isProfilerWritable = false
+                            });
+                            fixedCount++;
+                        }
+
+                        if (fixedCount > 0)
+                            await WriteStatus($"[{tableLabel}] Fixed {fixedCount} column rule(s).");
+                    }
+                    catch (Exception ex)
+                    {
+                        await WriteStatus($"[{tableLabel}] Warning: Could not apply mapping rules: {ex.Message}");
+                    }
+                }
+
+                // Run masking job
+                await WriteStatus("Running masking job...");
+                using var maskingExecResp = await EngineRelayService.RelayHttpAsync(connection, engineBaseUrl, dataEngineConfig.AuthorizationToken, "POST", "executions", new
+                {
+                    jobId = int.Parse(g2MaskingJobId)
+                });
+
+                if (!(maskingExecResp.RootElement.TryGetProperty("success", out var meSuccessEl) && meSuccessEl.GetBoolean()))
+                {
+                    var msg = maskingExecResp.RootElement.TryGetProperty("message", out var m) ? m.GetString() : "Masking job execution failed to start.";
+                    await SseWriter.WriteErrorAsync(response, msg ?? "Masking job execution failed to start.");
+                    return;
+                }
+
+                var maskingExecId = EngineRelayService.ExtractBodyField(maskingExecResp, "executionId");
+                if (string.IsNullOrEmpty(maskingExecId))
+                {
+                    await SseWriter.WriteErrorAsync(response, "Masking job execution returned no executionId.");
+                    return;
+                }
+
+                var maskingStatus = await EngineRelayService.PollExecutionAsync(
+                    connection, engineBaseUrl, dataEngineConfig.AuthorizationToken,
+                    maskingExecId, response, "masking job", statusSteps: statusSteps);
+
+                if (maskingStatus is not ("SUCCEEDED" or "WARNING"))
+                {
+                    await SseWriter.WriteErrorAsync(response, $"Masking job did not succeed. Final status: {maskingStatus}");
+                    return;
+                }
+
+                // Copy masked files back per table
+                await WriteStatus("Copying masked results...");
+                var perTableComplete = new List<object>();
+                foreach (var tr in tableResults)
+                {
+                    var maskedFilenames = new List<string>();
+                    foreach (var previewFile in tr.Filenames)
+                    {
+                        var maskedBlob = engineContainerClient.GetBlobClient(previewFile);
+                        var maskedName = $"dryrun_{dryRunUuid}_{previewFile}";
+                        var destBlob = previewContainerClient.GetBlobClient(maskedName);
+                        using var maskedStream = new MemoryStream();
+                        await maskedBlob.DownloadToAsync(maskedStream);
+                        maskedStream.Position = 0;
+                        await destBlob.UploadAsync(maskedStream, overwrite: true);
+                        maskedFilenames.Add(maskedName);
+                    }
+
+                    perTableComplete.Add(new
+                    {
+                        rowKey = tr.RowKey,
+                        schema = tr.Schema,
+                        tableName = tr.TableName,
+                        fileFormatId = tr.FileFormatId,
+                        maskedFilenames,
+                        sqlColumnTypes = tr.SqlColumnTypes,
+                    });
+                }
+
+                var evtSummary = $"DP preview (multi) completed: {tables.Count} table(s), " +
+                    $"fileRulesetId={g2RulesetId}, profileJobId={g2ProfileJobId} ({profileStatus}), " +
+                    $"maskingJobId={g2MaskingJobId} ({maskingStatus})";
+                var stepsDetail = JsonSerializer.Serialize(statusSteps);
+                _ = clientTableService.AppendEventAsync(partitionKey, "dp_preview_multi", evtSummary, stepsDetail);
+                await SseWriter.WriteEventAsync(response, "event", JsonSerializer.Serialize(new { timestamp = DateTime.UtcNow.ToString("O"), type = "dp_preview_multi", summary = evtSummary, detail = "" }));
+
+                var completeJson = JsonSerializer.Serialize(new
+                {
+                    success = true,
+                    fileRulesetId = g2RulesetId,
+                    profileJobId = g2ProfileJobId,
+                    profileStatus,
+                    maskingJobId = g2MaskingJobId,
+                    maskingStatus,
+                    tables = perTableComplete,
+                });
+                await SseWriter.WriteEventAsync(response, "complete", completeJson);
+            }
+            catch (TimeoutException)
+            {
+                var evtSummary = "DP preview (multi): timeout";
+                var stepsDetail = JsonSerializer.Serialize(statusSteps);
+                _ = clientTableService.AppendEventAsync(partitionKey, "dp_preview_multi", evtSummary, stepsDetail);
+                await SseWriter.WriteEventAsync(response, "event", JsonSerializer.Serialize(new { timestamp = DateTime.UtcNow.ToString("O"), type = "dp_preview_multi", summary = evtSummary, detail = "" }));
+                await SseWriter.WriteErrorAsync(response, "Agent did not respond within the timeout period.");
+            }
+            catch (Exception ex)
+            {
+                var errMsg = ex is AggregateException agg ? agg.InnerExceptions[0].Message : ex.Message;
+                var evtSummary = $"DP preview (multi) error: {errMsg}";
+                var stepsDetail = JsonSerializer.Serialize(statusSteps);
+                _ = clientTableService.AppendEventAsync(partitionKey, "dp_preview_multi", evtSummary, stepsDetail);
+                await SseWriter.WriteEventAsync(response, "event", JsonSerializer.Serialize(new { timestamp = DateTime.UtcNow.ToString("O"), type = "dp_preview_multi", summary = evtSummary, detail = "" }));
+                await SseWriter.WriteErrorAsync(response, $"DP preview (multi) error: {errMsg}");
+            }
+        });
+
         app.MapPost("/api/agents/{path}/dp-run", async (string path, HttpContext httpContext, AgentRegistry registry,
             ClientTableService clientTableService, DataEngineConfig dataEngineConfig,
             BlobServiceClient blobClient, BlobStorageConfig blobConfig,
@@ -779,5 +1262,17 @@ public static class EngineEndpoints
             }
         }
         return list;
+    }
+
+    private class TablePrepResult
+    {
+        public string RowKey { get; set; } = "";
+        public string Schema { get; set; } = "";
+        public string TableName { get; set; } = "";
+        public List<string> Filenames { get; set; } = new();
+        public string FileFormatId { get; set; } = "";
+        public List<string> PreviewHeaders { get; set; } = new();
+        public List<string> SqlColumnTypes { get; set; } = new();
+        public List<string> FileMetadataIds { get; set; } = new();
     }
 }

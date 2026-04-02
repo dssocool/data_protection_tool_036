@@ -1287,6 +1287,206 @@ export default function App() {
     }
   }
 
+  async function handleProfileData(checkedKeys: string[]) {
+    const agentPath = getAgentPath();
+    if (!agentPath || checkedKeys.length === 0) return;
+
+    const tables = checkedKeys.map((key) => {
+      const parts = key.split(":");
+      return { rowKey: parts[0], schema: parts[1], tableName: parts[2], key };
+    }).filter((t) => t.rowKey && t.schema && t.tableName);
+
+    if (tables.length === 0) return;
+
+    const trackedTs = new Date().toISOString();
+    const tableLabels = tables.map((t) => `${t.schema}.${t.tableName}`).join(", ");
+    const trackedEvent: StatusEvent = {
+      timestamp: trackedTs,
+      type: "dp_preview_multi",
+      summary: `DP preview (multi) started: ${tableLabels}`,
+      detail: "",
+      steps: [],
+    };
+    addLocalEvent(trackedEvent);
+
+    for (const t of tables) {
+      setDryRunningTables((prev) => new Set(prev).add(t.key));
+    }
+
+    const updateTrackedSteps = (stepMsg: string, stepStatus: "running" | "done" | "error") => {
+      setStatusEvents((prev) =>
+        prev.map((evt) => {
+          if (evt.timestamp !== trackedTs || evt.type !== "dp_preview_multi" || !evt.steps) return evt;
+          const steps = evt.steps.map((s) => {
+            if (s.status !== "running") return s;
+            const closedStatus = s.message.includes("(skipped") ? ("skipped" as const) : ("done" as const);
+            return { ...s, status: closedStatus };
+          });
+          if (stepStatus !== "done" || stepMsg) {
+            steps.push({ timestamp: new Date().toISOString(), message: stepMsg, status: stepStatus });
+          }
+          return { ...evt, steps };
+        }),
+      );
+    };
+
+    const finalizeTrackedEvent = (summary: string, lastStepStatus: "done" | "error") => {
+      setStatusEvents((prev) =>
+        prev.map((evt) => {
+          if (evt.timestamp !== trackedTs || evt.type !== "dp_preview_multi" || !evt.steps) return evt;
+          const steps = evt.steps.map((s) => {
+            if (s.status !== "running") return s;
+            if (s.message.includes("(skipped")) return { ...s, status: "skipped" as const };
+            return { ...s, status: lastStepStatus };
+          });
+          return { ...evt, summary, steps };
+        }),
+      );
+    };
+
+    try {
+      const res = await fetch(`/api/agents/${agentPath}/dp-preview-multi`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          tables: tables.map((t) => ({ rowKey: t.rowKey, schema: t.schema, tableName: t.tableName })),
+        }),
+      });
+
+      if (!res.ok) {
+        finalizeTrackedEvent(`DP preview (multi) failed: server error ${res.status}`, "error");
+        for (const t of tables) {
+          setDryRunningTables((prev) => { const next = new Set(prev); next.delete(t.key); return next; });
+        }
+        return;
+      }
+
+      const sseReader = res.body!.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      let completed = false;
+
+      while (true) {
+        const { done, value } = await sseReader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const parts = buffer.split("\n\n");
+        buffer = parts.pop() ?? "";
+
+        for (const part of parts) {
+          const lines = part.split("\n");
+          let eventType = "";
+          let eventData = "";
+          for (const line of lines) {
+            if (line.startsWith("event: ")) eventType = line.slice(7);
+            else if (line.startsWith("data: ")) eventData = line.slice(6);
+          }
+
+          if (eventType === "event") {
+            try {
+              const parsed = JSON.parse(eventData);
+              finalizeTrackedEvent(
+                parsed.summary ?? `DP preview (multi) completed: ${tableLabels}`,
+                "done",
+              );
+            } catch { /* ignore parse errors */ }
+          } else if (eventType === "status") {
+            updateTrackedSteps(eventData, "running");
+          } else if (eventType === "complete") {
+            completed = true;
+            try {
+              const completeData = JSON.parse(eventData);
+              if (Array.isArray(completeData.tables)) {
+                for (const tResult of completeData.tables) {
+                  const { rowKey, schema, tableName: tName, fileFormatId, maskedFilenames, sqlColumnTypes: completeSqlColumnTypes } = tResult;
+                  const key = tableKey(rowKey, schema, tName);
+
+                  if (Array.isArray(maskedFilenames) && maskedFilenames.length > 0) {
+                    try {
+                      const mergeRes = await fetch("/api/blob/preview-merge", {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ filenames: maskedFilenames }),
+                      });
+                      if (mergeRes.ok) {
+                        const maskedPreview = (await mergeRes.json()) as PreviewData;
+                        if (Array.isArray(completeSqlColumnTypes) && completeSqlColumnTypes.length > 0) {
+                          maskedPreview.columnTypes = completeSqlColumnTypes;
+                        }
+
+                        const cachedEntry = tableCacheRef.current.get(key);
+                        const prevDryRuns = cachedEntry?.dryRuns ?? [];
+                        const newLabel = `DP Preview ${prevDryRuns.length + 1}`;
+                        const newDryRun: DryRunResult = { label: newLabel, data: maskedPreview, inProgress: false };
+
+                        tableCacheRef.current.set(key, {
+                          ...(cachedEntry ?? {
+                            samples: [], dryRuns: [], activePreviewTab: "Sample 1",
+                            diffTab: null, previewError: null, dryRunInProgress: false,
+                            columnRules: [], columnRuleAlgorithms: [], columnRuleDomains: [], columnRuleFrameworks: [],
+                          }),
+                          dryRuns: [...prevDryRuns, newDryRun],
+                          activePreviewTab: newLabel,
+                          dryRunInProgress: false,
+                        });
+
+                        if (isViewingTable(rowKey, schema, tName)) {
+                          setDryRuns((prev) => [...prev, newDryRun]);
+                          setActivePreviewTab(newLabel);
+                        }
+                      }
+                    } catch { /* merge failed for one table, continue */ }
+                  }
+
+                  if (fileFormatId) {
+                    setConnectionTables((prev) => {
+                      const tblList = prev[rowKey];
+                      if (!tblList) return prev;
+                      return {
+                        ...prev,
+                        [rowKey]: tblList.map((t) =>
+                          t.schema === schema && t.name === tName
+                            ? { ...t, fileFormatId }
+                            : t,
+                        ),
+                      };
+                    });
+                  }
+
+                  setDryRunningTables((prev) => { const next = new Set(prev); next.delete(key); return next; });
+                }
+              }
+            } catch { /* parse error */ }
+          } else if (eventType === "error") {
+            let errMsg = "DP preview (multi) failed.";
+            try {
+              const parsed = JSON.parse(eventData);
+              errMsg = parsed.message ?? errMsg;
+            } catch { /* use default */ }
+            finalizeTrackedEvent(errMsg, "error");
+            for (const t of tables) {
+              setDryRunningTables((prev) => { const next = new Set(prev); next.delete(t.key); return next; });
+            }
+          }
+        }
+      }
+
+      if (!completed) {
+        finalizeTrackedEvent("DP preview (multi) stream ended unexpectedly.", "error");
+        for (const t of tables) {
+          setDryRunningTables((prev) => { const next = new Set(prev); next.delete(t.key); return next; });
+        }
+      }
+    } catch (e) {
+      const errMsg = `DP preview (multi) failed: ${e instanceof Error ? e.message : String(e)}`;
+      finalizeTrackedEvent(errMsg, "error");
+      for (const t of tables) {
+        setDryRunningTables((prev) => { const next = new Set(prev); next.delete(t.key); return next; });
+      }
+    }
+  }
+
   function handleFullRunOpen(rowKey: string, schema: string, tableName: string) {
     setFullRunTarget({ rowKey, schema, tableName });
   }
@@ -1586,7 +1786,7 @@ export default function App() {
                 onWidthChange={setConnectionsPanelWidth}
                 checkedTables={checkedTables}
                 onCheckedTablesChange={setCheckedTables}
-                onProfileData={() => {}}
+                onProfileData={handleProfileData}
                 onApplySanitization={() => {}}
                 starredTables={starredTables}
                 onStarredTablesChange={setStarredTables}

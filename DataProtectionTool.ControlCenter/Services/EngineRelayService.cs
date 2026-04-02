@@ -110,4 +110,55 @@ public static class EngineRelayService
 
         return (true, fileMetadataIds);
     }
+
+    public static async Task WriteStatusThreadSafeAsync(
+        HttpResponse response, SemaphoreSlim sseLock, List<string> statusSteps, string msg)
+    {
+        await sseLock.WaitAsync();
+        try
+        {
+            await SseWriter.WriteEventAsync(response, "status", msg);
+            statusSteps.Add(msg);
+        }
+        finally
+        {
+            sseLock.Release();
+        }
+    }
+
+    public static async Task<string> PollExecutionThreadSafeAsync(
+        AgentConnection connection, string engineBaseUrl, string authorizationToken,
+        string executionId, HttpResponse response, SemaphoreSlim sseLock,
+        string statusLabel, int maxIterations = 300, List<string>? statusSteps = null)
+    {
+        var status = "";
+        for (var i = 0; i < maxIterations; i++)
+        {
+            await Task.Delay(2000);
+
+            using var statusResp = await RelayHttpAsync(connection, engineBaseUrl, authorizationToken, "GET", $"executions/{executionId}");
+            if (!(statusResp.RootElement.TryGetProperty("success", out var sSuccessEl) && sSuccessEl.GetBoolean()))
+                continue;
+
+            status = ExtractBodyField(statusResp, "status");
+            if (!string.IsNullOrEmpty(statusLabel))
+            {
+                var msg = $"Polling {statusLabel}: {status}...";
+                await sseLock.WaitAsync();
+                try
+                {
+                    await SseWriter.WriteEventAsync(response, "status", msg);
+                    statusSteps?.Add(msg);
+                }
+                finally
+                {
+                    sseLock.Release();
+                }
+            }
+            if (status is "SUCCEEDED" or "WARNING" or "FAILED" or "CANCELLED")
+                break;
+        }
+
+        return status;
+    }
 }
