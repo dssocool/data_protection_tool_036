@@ -1,0 +1,147 @@
+.apply-san-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.4);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 2000;
+}
+
+.apply-san-dialog {
+  background: #fff;
+  border-radius: 6px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.25);
+  width: 520px;
+  max-width: 95vw;
+  max-height: 90vh;
+  display: flex;
+  flex-direction: column;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  font-size: 14px;
+}
+
+.apply-san-header {
+  padding: 16px 20px 8px;
+  border-bottom: 1px solid #e0e0e0;
+}
+
+.apply-san-header h2 {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+  color: #333;
+}
+
+.apply-san-body {
+  padding: 16px 20px;
+  overflow-y: auto;
+  flex: 1;
+}
+
+.apply-san-summary {
+  margin-bottom: 16px;
+  font-size: 13px;
+  color: #555;
+}
+
+.apply-san-dropdowns {
+  display: flex;
+  gap: 16px;
+}
+
+.apply-san-dropdown-group {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.apply-san-label {
+  font-size: 13px;
+  font-weight: 500;
+  color: #333;
+}
+
+.apply-san-select {
+  padding: 7px 10px;
+  border: 1px solid #bbb;
+  border-radius: 4px;
+  font-size: 14px;
+  color: #333;
+  background: #fff;
+  outline: none;
+  transition: border-color 0.15s;
+  appearance: auto;
+  width: 100%;
+}
+
+.apply-san-select:focus {
+  border-color: #0078d4;
+}
+
+.apply-san-select:disabled {
+  background: #e8e8e8;
+  color: #999;
+  cursor: not-allowed;
+}
+
+.apply-san-footer {
+  display: flex;
+  justify-content: space-between;
+  padding: 12px 20px;
+  border-top: 1px solid #e0e0e0;
+}
+
+.apply-san-footer-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.apply-san-btn {
+  padding: 7px 24px;
+  font-size: 14px;
+  border-radius: 4px;
+  cursor: pointer;
+  border: 1px solid #bbb;
+  font-family: inherit;
+}
+
+.apply-san-btn-cancel {
+  background: #f5f5f5;
+  color: #333;
+}
+
+.apply-san-btn-cancel:hover {
+  background: #e0e0e0;
+}
+
+.apply-san-btn-save {
+  background: #fff;
+  color: #0078d4;
+  border-color: #0078d4;
+}
+
+.apply-san-btn-save:hover:not(:disabled) {
+  background: #e8f0fe;
+}
+
+.apply-san-btn-save:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.apply-san-btn-run {
+  background: #0078d4;
+  color: #fff;
+  border-color: #0078d4;
+}
+
+.apply-san-btn-run:hover:not(:disabled) {
+  background: #006abc;
+}
+
+.apply-san-btn-run:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}

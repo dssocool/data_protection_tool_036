@@ -13,6 +13,7 @@ import type { StatusEvent } from "./components/StatusBar";
 import EventDialog from "./components/EventDialog";
 import FullRunModal from "./components/FullRunModal";
 import type { FlowSource, FlowDest } from "./components/FullRunModal";
+import ApplySanitizationModal from "./components/ApplySanitizationModal";
 import FlowsPanel from "./components/FlowsPanel";
 import type { FlowItem } from "./components/FlowsPanel";
 import {
@@ -104,6 +105,7 @@ export default function App() {
   const [userUniqueId, setUserUniqueId] = useState<string | null>(null);
   const [fullRunTarget, setFullRunTarget] = useState<{ rowKey: string; schema: string; tableName: string } | null>(null);
   const [fullRunMinimizing, setFullRunMinimizing] = useState(false);
+  const [applySanTableKeys, setApplySanTableKeys] = useState<string[] | null>(null);
   const [unseenFlowCount, setUnseenFlowCount] = useState(0);
   const [columnRules, setColumnRules] = useState<Record<string, unknown>[]>([]);
   const [columnRuleAlgorithms, setColumnRuleAlgorithms] = useState<Record<string, unknown>[]>([]);
@@ -2031,7 +2033,7 @@ export default function App() {
                 onProfileData={handleProfileData}
                 profiledTables={profiledTables}
                 profileFailedTables={profileFailedTables}
-                onApplySanitization={() => {}}
+                onApplySanitization={(keys) => setApplySanTableKeys(keys)}
                 starredTables={starredTables}
                 onStarredTablesChange={setStarredTables}
                 tableColumns={tableColumns}
@@ -2172,6 +2174,73 @@ export default function App() {
           onClose={() => setShowQueryModal(false)}
           onSave={handleSaveQuery}
           onValidate={handleValidateQuery}
+        />
+      )}
+      {applySanTableKeys && (
+        <ApplySanitizationModal
+          connections={connections}
+          checkedTableKeys={applySanTableKeys}
+          agentPath={getAgentPath() ?? ""}
+          onClose={() => setApplySanTableKeys(null)}
+          onSave={async (destRowKey, destSchema, tableKeys) => {
+            setApplySanTableKeys(null);
+            const agentPath = getAgentPath();
+            if (!agentPath) return;
+            const destConn = connections.find((c) => c.rowKey === destRowKey);
+            if (!destConn) return;
+            for (const key of tableKeys) {
+              const [rowKey, schema, tableName] = key.split(":");
+              if (!rowKey || !schema || !tableName) continue;
+              const sourceConn = connections.find((c) => c.rowKey === rowKey);
+              if (!sourceConn) continue;
+              try {
+                const res = await fetch(`/api/agents/${agentPath}/save-flow`, {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({
+                    sourceJson: JSON.stringify({ connectionRowKey: rowKey, serverName: sourceConn.serverName, databaseName: sourceConn.databaseName, schema, tableName }),
+                    destJson: JSON.stringify({ connectionRowKey: destRowKey, serverName: destConn.serverName, databaseName: destConn.databaseName, schema: destSchema, tableName }),
+                  }),
+                });
+                if (res.ok) {
+                  const result = await res.json();
+                  if (result.success) setUnseenFlowCount((c) => c + 1);
+                }
+              } catch { /* best-effort */ }
+            }
+          }}
+          onSaveAndRun={async (destRowKey, destSchema, tableKeys) => {
+            setApplySanTableKeys(null);
+            const agentPath = getAgentPath();
+            if (!agentPath) return;
+            const destConn = connections.find((c) => c.rowKey === destRowKey);
+            if (!destConn) return;
+            for (const key of tableKeys) {
+              const [rowKey, schema, tableName] = key.split(":");
+              if (!rowKey || !schema || !tableName) continue;
+              const sourceConn = connections.find((c) => c.rowKey === rowKey);
+              if (!sourceConn) continue;
+              let flowRowKey = "";
+              try {
+                const res = await fetch(`/api/agents/${agentPath}/save-flow`, {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({
+                    sourceJson: JSON.stringify({ connectionRowKey: rowKey, serverName: sourceConn.serverName, databaseName: sourceConn.databaseName, schema, tableName }),
+                    destJson: JSON.stringify({ connectionRowKey: destRowKey, serverName: destConn.serverName, databaseName: destConn.databaseName, schema: destSchema, tableName }),
+                  }),
+                });
+                if (res.ok) {
+                  const result = await res.json();
+                  if (result.success) {
+                    setUnseenFlowCount((c) => c + 1);
+                    flowRowKey = result.rowKey ?? "";
+                  }
+                }
+              } catch { /* best-effort */ }
+              handleFullRunExecute(destRowKey, destSchema, rowKey, schema, tableName, flowRowKey || undefined);
+            }
+          }}
         />
       )}
       {fullRunTarget && (
