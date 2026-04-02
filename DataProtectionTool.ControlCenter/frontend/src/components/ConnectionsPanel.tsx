@@ -515,6 +515,9 @@ export default function ConnectionsPanel({
             </div>
           )}
         </div>
+        <span className="conn-selected-count">
+          {checkedTables?.size ?? 0} {(checkedTables?.size ?? 0) === 1 ? "item" : "items"} selected
+        </span>
         </div>
       </div>
       {connections.length === 0 ? (
