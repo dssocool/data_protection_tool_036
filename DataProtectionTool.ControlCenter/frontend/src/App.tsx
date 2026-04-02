@@ -108,6 +108,7 @@ export default function App() {
   const [newConnectionRowKeys, setNewConnectionRowKeys] = useState<Set<string>>(new Set());
   const [newFlowRowKeys, setNewFlowRowKeys] = useState<Set<string>>(new Set());
   const [checkedTables, setCheckedTables] = useState<Set<string>>(new Set());
+  const [starredTables, setStarredTables] = useState<Set<string>>(new Set());
   const pendingSqlSaveRowKeyRef = useRef<string | null>(null);
   const pendingFlowRowKeyRef = useRef<string | null>(null);
   const previewCacheRef = useRef<Map<string, string[]>>(new Map());
@@ -1549,6 +1550,8 @@ export default function App() {
                 onCheckedTablesChange={setCheckedTables}
                 onProfileData={() => {}}
                 onApplySanitization={() => {}}
+                starredTables={starredTables}
+                onStarredTablesChange={setStarredTables}
               />
             )}
             {(selectedTable || selectedQuery) && (

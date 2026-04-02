@@ -65,6 +65,8 @@ interface ConnectionsPanelProps {
   onCheckedTablesChange?: (next: Set<string>) => void;
   onProfileData?: (tableKeys: string[]) => void;
   onApplySanitization?: (tableKeys: string[]) => void;
+  starredTables?: Set<string>;
+  onStarredTablesChange?: (next: Set<string>) => void;
 }
 
 const MIN_WIDTH = 200;
@@ -99,11 +101,15 @@ export default function ConnectionsPanel({
   onCheckedTablesChange,
   onProfileData,
   onApplySanitization,
+  starredTables,
+  onStarredTablesChange,
 }: ConnectionsPanelProps) {
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
   const [searchText, setSearchText] = useState("");
   const [actionsOpen, setActionsOpen] = useState(false);
+  const [selectMenuOpen, setSelectMenuOpen] = useState(false);
   const actionsRef = useRef<HTMLDivElement>(null);
+  const selectRef = useRef<HTMLDivElement>(null);
   const isResizing = useRef(false);
   const panelRef = useRef<HTMLDivElement>(null);
 
@@ -215,6 +221,74 @@ export default function ConnectionsPanel({
     return () => document.removeEventListener("mousedown", dismiss);
   }, [actionsOpen]);
 
+  useEffect(() => {
+    if (!selectMenuOpen) return;
+    function dismiss(e: MouseEvent) {
+      if (selectRef.current && !selectRef.current.contains(e.target as Node)) {
+        setSelectMenuOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", dismiss);
+    return () => document.removeEventListener("mousedown", dismiss);
+  }, [selectMenuOpen]);
+
+  const allTableKeys = useMemo(() => {
+    const keys: string[] = [];
+    for (const conn of connections) {
+      const tables = connectionTables[conn.rowKey];
+      if (!tables) continue;
+      for (const t of tables) {
+        keys.push(`${conn.rowKey}:${t.schema}:${t.name}`);
+      }
+    }
+    return keys;
+  }, [connections, connectionTables]);
+
+  function handleSelectAll() {
+    onCheckedTablesChange?.(new Set(allTableKeys));
+    setSelectMenuOpen(false);
+  }
+
+  function handleSelectNone() {
+    onCheckedTablesChange?.(new Set());
+    setSelectMenuOpen(false);
+  }
+
+  function handleSelectStarred() {
+    const next = new Set<string>();
+    for (const key of allTableKeys) {
+      if (starredTables?.has(key)) next.add(key);
+    }
+    onCheckedTablesChange?.(next);
+    setSelectMenuOpen(false);
+  }
+
+  function handleSelectUnstarred() {
+    const next = new Set<string>();
+    for (const key of allTableKeys) {
+      if (!starredTables?.has(key)) next.add(key);
+    }
+    onCheckedTablesChange?.(next);
+    setSelectMenuOpen(false);
+  }
+
+  function handleRefreshAll() {
+    for (const conn of connections) {
+      onRefreshConnection(conn.rowKey);
+    }
+  }
+
+  function handleStarToggle(e: React.MouseEvent, key: string) {
+    e.stopPropagation();
+    const next = new Set(starredTables);
+    if (next.has(key)) {
+      next.delete(key);
+    } else {
+      next.add(key);
+    }
+    onStarredTablesChange?.(next);
+  }
+
   function handleCheckboxToggle(e: React.MouseEvent, key: string) {
     e.stopPropagation();
     const next = new Set(checkedTables);
@@ -286,20 +360,60 @@ export default function ConnectionsPanel({
             onChange={(e) => setSearchText(e.target.value)}
           />
         </div>
-        <div className="conn-actions-wrapper" ref={actionsRef}>
+      </div>
+      <div className="conn-icon-bar">
+        <div className="conn-icon-btn-wrapper" ref={selectRef} data-tooltip="Select">
           <button
-            className="conn-actions-btn"
+            className="conn-icon-btn"
+            aria-label="Select"
+            onClick={() => setSelectMenuOpen((v) => !v)}
+          >
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+              <rect x="2" y="3" width="10" height="10" rx="1.5" stroke="currentColor" strokeWidth="1.4" fill="none" />
+            </svg>
+            <svg className="conn-icon-btn-caret" width="8" height="8" viewBox="0 0 8 8" fill="none">
+              <path d="M1.5 3L4 5.5L6.5 3" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+          </button>
+          {selectMenuOpen && (
+            <div className="conn-icon-dropdown">
+              <div className="conn-icon-dropdown-item" onClick={handleSelectAll}>All</div>
+              <div className="conn-icon-dropdown-item" onClick={handleSelectNone}>None</div>
+              <div className="conn-icon-dropdown-item" onClick={handleSelectStarred}>Starred</div>
+              <div className="conn-icon-dropdown-item" onClick={handleSelectUnstarred}>Unstarred</div>
+            </div>
+          )}
+        </div>
+        <div className="conn-icon-btn-wrapper" data-tooltip="Refresh">
+          <button
+            className="conn-icon-btn"
+            aria-label="Refresh"
+            onClick={handleRefreshAll}
+          >
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+              <path d="M13.5 8A5.5 5.5 0 0 1 3.05 10" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
+              <path d="M2.5 8A5.5 5.5 0 0 1 12.95 6" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
+              <path d="M12.95 3V6H9.95" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
+              <path d="M3.05 13V10H6.05" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+          </button>
+        </div>
+        <div className="conn-icon-btn-wrapper" ref={actionsRef} data-tooltip="Action">
+          <button
+            className="conn-icon-btn"
+            aria-label="Action"
             onClick={() => setActionsOpen((v) => !v)}
           >
-            Actions
-            <svg width="10" height="10" viewBox="0 0 10 10" fill="none">
-              <path d="M2 4L5 7L8 4" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" />
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+              <circle cx="8" cy="3.5" r="1.2" fill="currentColor" />
+              <circle cx="8" cy="8" r="1.2" fill="currentColor" />
+              <circle cx="8" cy="12.5" r="1.2" fill="currentColor" />
             </svg>
           </button>
           {actionsOpen && (
-            <div className="conn-actions-dropdown">
+            <div className="conn-icon-dropdown">
               <div
-                className="conn-actions-dropdown-item"
+                className="conn-icon-dropdown-item"
                 onClick={() => {
                   setActionsOpen(false);
                   onProfileData?.(Array.from(checkedTables ?? []));
@@ -308,7 +422,7 @@ export default function ConnectionsPanel({
                 Data Sanitize - Profile Data
               </div>
               <div
-                className="conn-actions-dropdown-item"
+                className="conn-icon-dropdown-item"
                 onClick={() => {
                   setActionsOpen(false);
                   onApplySanitization?.(Array.from(checkedTables ?? []));
@@ -421,6 +535,21 @@ export default function ConnectionsPanel({
                                           onClick={(e) => handleCheckboxToggle(e as unknown as React.MouseEvent, tKey)}
                                           onChange={() => {}}
                                         />
+                                        <svg
+                                          className={`conn-table-star${starredTables?.has(tKey) ? " conn-table-star-active" : ""}`}
+                                          width="14"
+                                          height="14"
+                                          viewBox="0 0 14 14"
+                                          onClick={(e) => handleStarToggle(e, tKey)}
+                                        >
+                                          <path
+                                            d="M7 1.5L8.76 5.1L12.7 5.64L9.85 8.42L10.52 12.34L7 10.48L3.48 12.34L4.15 8.42L1.3 5.64L5.24 5.1L7 1.5Z"
+                                            fill={starredTables?.has(tKey) ? "#f5c518" : "#fff"}
+                                            stroke={starredTables?.has(tKey) ? "#f5c518" : "#555"}
+                                            strokeWidth="1"
+                                            strokeLinejoin="round"
+                                          />
+                                        </svg>
                                         <span className="conn-table-icon-wrapper">
                                           {isDryRunning && (
                                             <svg className="conn-table-running-icon" width="14" height="14" viewBox="0 0 14 14">
