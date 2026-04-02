@@ -14,7 +14,7 @@ interface MenuBarProps {
 
 export default function MenuBar({
   onSqlServerConnection,
-  onNewQuery: _onNewQuery,
+  onNewQuery,
   onViewConnections,
   onViewFlows,
   oid,
@@ -76,8 +76,8 @@ export default function MenuBar({
                     </li>
                   </ul>
                 </li>
-                <li className="menu-item disabled">
-                  <button disabled>
+                <li className="menu-item">
+                  <button onClick={() => handleAction(onNewQuery)}>
                     Query
                   </button>
                 </li>
