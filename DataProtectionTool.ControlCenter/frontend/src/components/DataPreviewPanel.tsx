@@ -217,6 +217,46 @@ interface DiffViewProps {
   onClickedColumnChange?: (col: string | null) => void;
 }
 
+function measureDiffColumnWidths(
+  headers: string[],
+  left: PreviewData,
+  right: PreviewData,
+): number[] {
+  const probe = document.createElement("div");
+  probe.style.cssText = "position:absolute;visibility:hidden;height:0;overflow:hidden;white-space:nowrap;font-size:12px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif";
+  document.body.appendChild(probe);
+
+  const span = document.createElement("span");
+  probe.appendChild(span);
+
+  const colCount = headers.length;
+  const widths = new Array<number>(colCount).fill(0);
+  const cellPadding = 24;
+
+  for (let ci = 0; ci < colCount; ci++) {
+    span.textContent = headers[ci];
+    widths[ci] = span.offsetWidth + cellPadding;
+  }
+
+  const maxRows = Math.max(left.rows.length, right.rows.length);
+  for (let ri = 0; ri < maxRows; ri++) {
+    for (let ci = 0; ci < colCount; ci++) {
+      const lv = left.rows[ri]?.[ci] ?? "";
+      const rv = right.rows[ri]?.[ci] ?? "";
+      if (lv === rv) {
+        span.textContent = lv;
+        widths[ci] = Math.max(widths[ci], span.offsetWidth + cellPadding);
+      } else {
+        span.textContent = lv + " \u2192 " + rv;
+        widths[ci] = Math.max(widths[ci], span.offsetWidth + cellPadding);
+      }
+    }
+  }
+
+  document.body.removeChild(probe);
+  return widths;
+}
+
 const DiffView = forwardRef<HTMLTableElement, DiffViewProps>(
   function DiffView({ left, right, sortColumnIndex, sortDirection, onHeaderClick, columnWidths, onColumnResize, hoveredColumn, clickedColumn, onHoveredColumnChange, onClickedColumnChange }, ref) {
     const headers = left.headers;
@@ -224,7 +264,6 @@ const DiffView = forwardRef<HTMLTableElement, DiffViewProps>(
 
     const resizing = useRef<{ colIndex: number; startX: number; startWidth: number } | null>(null);
     const innerRef = useRef<HTMLTableElement | null>(null);
-    const autoMeasured = useRef(false);
     const setRefs = useCallback((el: HTMLTableElement | null) => {
       innerRef.current = el;
       if (typeof ref === "function") ref(el);
@@ -232,25 +271,10 @@ const DiffView = forwardRef<HTMLTableElement, DiffViewProps>(
     }, [ref]);
 
     useEffect(() => {
-      autoMeasured.current = false;
-    }, [left, right]);
-
-    useEffect(() => {
-      if (columnWidths.length > 0 || autoMeasured.current) return;
-      const table = innerRef.current;
-      if (!table) return;
-      autoMeasured.current = true;
-      const colCount = headers.length;
-      const widths = new Array<number>(colCount).fill(0);
-      const allCells = table.querySelectorAll("thead th, tbody td");
-      allCells.forEach((cell) => {
-        const ci = Array.from(cell.parentElement!.children).indexOf(cell);
-        if (ci >= 0 && ci < colCount) {
-          widths[ci] = Math.max(widths[ci], (cell as HTMLElement).scrollWidth + 20);
-        }
-      });
-      widths.forEach((w, i) => onColumnResize(i, w));
-    });
+      if (columnWidths.length > 0) return;
+      const measured = measureDiffColumnWidths(headers, left, right);
+      measured.forEach((w, i) => onColumnResize(i, w));
+    }, [left, right, headers, columnWidths.length, onColumnResize]);
 
     const onResizeMouseDown = useCallback((e: React.MouseEvent, colIndex: number) => {
       e.stopPropagation();
