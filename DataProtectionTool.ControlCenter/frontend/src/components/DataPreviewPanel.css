@@ -293,7 +293,7 @@
   white-space: nowrap;
 }
 
-.data-preview-table:not(.data-preview-diff-table) td {
+.data-preview-table td {
   max-width: 300px;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -359,37 +359,6 @@
   opacity: 0.5;
   cursor: default;
 }
-
-.data-preview-diff-table.data-preview-table-fixed td {
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.data-preview-diff-table th {
-  white-space: nowrap;
-  overflow: visible;
-  text-overflow: unset;
-}
-
-.data-preview-diff-cell-changed {
-}
-
-.data-preview-diff-old {
-  color: #c44;
-  margin-right: 4px;
-}
-
-.data-preview-diff-arrow {
-  color: #999;
-  margin-right: 4px;
-  font-size: 11px;
-}
-
-.data-preview-diff-new {
-  color: #2a7b2a;
-  font-weight: 600;
-}
-
 
 .column-rule-loading {
   color: #000;

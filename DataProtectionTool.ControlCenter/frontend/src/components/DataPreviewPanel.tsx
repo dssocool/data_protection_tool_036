@@ -1,6 +1,7 @@
 import { forwardRef, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import "./DataPreviewPanel.css";
 import ColumnRuleModal from "./ColumnRuleModal";
+import DiffTableView from "./DiffTableView";
 
 export interface PreviewData {
   headers: string[];
@@ -197,203 +198,6 @@ const DataTable = forwardRef<HTMLTableElement, SortableTableProps>(
               })}
             </tr>
           ))}
-        </tbody>
-      </table>
-    );
-  },
-);
-
-interface DiffViewProps {
-  left: PreviewData;
-  right: PreviewData;
-  sortColumnIndex: number | null;
-  sortDirection: "asc" | "desc" | null;
-  onHeaderClick: (columnIndex: number) => void;
-  columnWidths: number[];
-  onColumnResize: (columnIndex: number, width: number) => void;
-  hoveredColumn?: string | null;
-  clickedColumn?: string | null;
-  onHoveredColumnChange?: (col: string | null) => void;
-  onClickedColumnChange?: (col: string | null) => void;
-}
-
-function measureDiffColumnWidths(
-  headers: string[],
-  left: PreviewData,
-  right: PreviewData,
-): number[] {
-  const probe = document.createElement("div");
-  probe.style.cssText = "position:absolute;visibility:hidden;height:0;overflow:hidden;white-space:nowrap;font-size:12px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif";
-  document.body.appendChild(probe);
-
-  const span = document.createElement("span");
-  probe.appendChild(span);
-
-  const colCount = headers.length;
-  const widths = new Array<number>(colCount).fill(0);
-  const cellPadding = 24;
-
-  for (let ci = 0; ci < colCount; ci++) {
-    span.textContent = headers[ci];
-    widths[ci] = span.offsetWidth + cellPadding;
-  }
-
-  const maxRows = Math.max(left.rows.length, right.rows.length);
-  for (let ri = 0; ri < maxRows; ri++) {
-    for (let ci = 0; ci < colCount; ci++) {
-      const lv = left.rows[ri]?.[ci] ?? "";
-      const rv = right.rows[ri]?.[ci] ?? "";
-      if (lv === rv) {
-        span.textContent = lv;
-        widths[ci] = Math.max(widths[ci], span.offsetWidth + cellPadding);
-      } else {
-        span.textContent = lv + " \u2192 " + rv;
-        widths[ci] = Math.max(widths[ci], span.offsetWidth + cellPadding);
-      }
-    }
-  }
-
-  document.body.removeChild(probe);
-  return widths;
-}
-
-const DiffView = forwardRef<HTMLTableElement, DiffViewProps>(
-  function DiffView({ left, right, sortColumnIndex, sortDirection, onHeaderClick, columnWidths, onColumnResize, hoveredColumn, clickedColumn, onHoveredColumnChange, onClickedColumnChange }, ref) {
-    const headers = left.headers;
-    const maxRows = Math.max(left.rows.length, right.rows.length);
-
-    const resizing = useRef<{ colIndex: number; startX: number; startWidth: number } | null>(null);
-    const innerRef = useRef<HTMLTableElement | null>(null);
-    const setRefs = useCallback((el: HTMLTableElement | null) => {
-      innerRef.current = el;
-      if (typeof ref === "function") ref(el);
-      else if (ref) (ref as React.MutableRefObject<HTMLTableElement | null>).current = el;
-    }, [ref]);
-
-    useEffect(() => {
-      if (columnWidths.length > 0) return;
-      const measured = measureDiffColumnWidths(headers, left, right);
-      measured.forEach((w, i) => onColumnResize(i, w));
-    }, [left, right, headers, columnWidths.length, onColumnResize]);
-
-    const onResizeMouseDown = useCallback((e: React.MouseEvent, colIndex: number) => {
-      e.stopPropagation();
-      e.preventDefault();
-
-      if (columnWidths.length === 0 && innerRef.current) {
-        const ths = innerRef.current.querySelectorAll("thead th");
-        const measured = Array.from(ths).map((th) => th.getBoundingClientRect().width);
-        measured.forEach((w, i) => onColumnResize(i, w));
-      }
-
-      const startX = e.clientX;
-      const startWidth = columnWidths[colIndex]
-        ?? innerRef.current?.querySelectorAll("thead th")[colIndex]?.getBoundingClientRect().width
-        ?? 150;
-      resizing.current = { colIndex, startX, startWidth };
-      document.body.style.cursor = "col-resize";
-      document.body.style.userSelect = "none";
-
-      const onMouseMove = (ev: MouseEvent) => {
-        if (!resizing.current) return;
-        const newWidth = Math.max(50, resizing.current.startWidth + (ev.clientX - resizing.current.startX));
-        onColumnResize(resizing.current.colIndex, newWidth);
-      };
-      const onMouseUp = () => {
-        resizing.current = null;
-        document.body.style.cursor = "";
-        document.body.style.userSelect = "";
-        document.removeEventListener("mousemove", onMouseMove);
-        document.removeEventListener("mouseup", onMouseUp);
-      };
-      document.addEventListener("mousemove", onMouseMove);
-      document.addEventListener("mouseup", onMouseUp);
-    }, [columnWidths, onColumnResize]);
-
-    const hasWidths = columnWidths.length > 0;
-    const totalWidth = hasWidths ? columnWidths.reduce((s, w) => s + w, 0) : undefined;
-
-    return (
-      <table
-        className={`data-preview-table data-preview-diff-table${hasWidths ? " data-preview-table-fixed" : ""}`}
-        ref={setRefs}
-        style={totalWidth ? { width: totalWidth } : undefined}
-      >
-        {hasWidths && (
-          <colgroup>
-            {columnWidths.map((w, i) => (
-              <col key={i} style={{ width: w }} />
-            ))}
-          </colgroup>
-        )}
-        <thead>
-          <tr>
-            {headers.map((h, i) => {
-              const isClicked = clickedColumn === h;
-              const isHovered = !isClicked && hoveredColumn === h;
-              return (
-                <th
-                  key={i}
-                  className={isClicked ? "column-highlight-click" : isHovered ? "column-highlight-hover" : ""}
-                  onClick={() => {
-                    onClickedColumnChange?.(clickedColumn === h ? null : h);
-                    onHeaderClick(i);
-                  }}
-                  onMouseEnter={() => onHoveredColumnChange?.(h)}
-                  onMouseLeave={() => onHoveredColumnChange?.(null)}
-                >
-                  <span className="column-header-content">
-                    {h}
-                    {sortColumnIndex === i && sortDirection && (
-                      <span className="column-sort-indicator">
-                        {sortDirection === "asc" ? "\u25B2" : "\u25BC"}
-                      </span>
-                    )}
-                  </span>
-                  {left.columnTypes?.[i] && (
-                    <span className="column-type-label">{left.columnTypes[i]}</span>
-                  )}
-                  <div
-                    className="column-resize-handle"
-                    onMouseDown={(e) => onResizeMouseDown(e, i)}
-                  />
-                </th>
-              );
-            })}
-          </tr>
-        </thead>
-        <tbody>
-          {Array.from({ length: maxRows }, (_, ri) => {
-            const leftRow = left.rows[ri];
-            const rightRow = right.rows[ri];
-            return (
-              <tr key={ri}>
-                {headers.map((h, ci) => {
-                  const lv = leftRow?.[ci] ?? "";
-                  const rv = rightRow?.[ci] ?? "";
-                  const changed = lv !== rv;
-                  const isClicked = clickedColumn === h;
-                  const isHovered = !isClicked && hoveredColumn === h;
-                  const hlClass = isClicked ? " column-highlight-click" : isHovered ? " column-highlight-hover" : "";
-                  const cellHandlers = {
-                    onMouseEnter: () => onHoveredColumnChange?.(h),
-                    onMouseLeave: () => onHoveredColumnChange?.(null),
-                    onClick: () => onClickedColumnChange?.(clickedColumn === h ? null : h),
-                  };
-                  if (!changed) {
-                    return <td key={ci} className={hlClass.trim() || undefined} {...cellHandlers}>{lv}</td>;
-                  }
-                  return (
-                    <td key={ci} className={`data-preview-diff-cell-changed${hlClass}`} {...cellHandlers}>
-                      <span className="data-preview-diff-old">{lv}</span>
-                      <span className="data-preview-diff-arrow">{"\u2192"}</span>
-                      <span className="data-preview-diff-new">{rv}</span>
-                    </td>
-                  );
-                })}
-              </tr>
-            );
-          })}
         </tbody>
       </table>
     );
@@ -690,61 +494,60 @@ export default function DataPreviewPanel({
           </div>
         )}
       </div>
-      <div className={`data-preview-body${isProfileResultMode ? " data-preview-body-no-hscroll" : ""}`} ref={dataBodyRef} onScroll={isProfileResultMode ? undefined : handleDataScroll}>
-        {(() => {
-          const activeDryRun = dryRuns.find((dr) => dr.label === activeTab);
-          if (activeDryRun?.inProgress && !activeData) {
-            return (
-              <div className="dry-run-status-view">
-                <div className="dry-run-status-spinner" />
-                <div className="dry-run-status-text">{activeDryRun.status ?? "Starting DP preview..."}</div>
-              </div>
-            );
-          }
-          if (loading) {
-            return <div className="data-preview-loading">Loading preview...</div>;
-          }
-          if (error) {
-            return <div className="data-preview-error">{error}</div>;
-          }
-          if (isDiffActive && sortedLeftData && sortedRightData) {
-            return (
-              <DiffView
-                left={sortedLeftData}
-                right={sortedRightData}
-                sortColumnIndex={sortState?.columnIndex ?? null}
-                sortDirection={sortState?.direction ?? null}
-                onHeaderClick={handleHeaderClick}
-                columnWidths={userColumnWidths}
-                onColumnResize={handleColumnResize}
-                hoveredColumn={hoveredColumn}
-                clickedColumn={clickedColumn}
-                onHoveredColumnChange={onHoveredColumnChange}
-                onClickedColumnChange={onClickedColumnChange}
-                ref={tableRef}
-              />
-            );
-          }
-          if (sortedActiveData) {
-            return (
-              <DataTable
-                data={sortedActiveData}
-                sortColumnIndex={sortState?.columnIndex ?? null}
-                sortDirection={sortState?.direction ?? null}
-                onHeaderClick={handleHeaderClick}
-                columnWidths={userColumnWidths}
-                onColumnResize={handleColumnResize}
-                hoveredColumn={hoveredColumn}
-                clickedColumn={clickedColumn}
-                onHoveredColumnChange={onHoveredColumnChange}
-                onClickedColumnChange={onClickedColumnChange}
-                ref={tableRef}
-              />
-            );
-          }
-          return null;
-        })()}
-      </div>
+      {isDiffActive && sortedLeftData && sortedRightData ? (
+        <DiffTableView
+          left={sortedLeftData}
+          right={sortedRightData}
+          sortColumnIndex={sortState?.columnIndex ?? null}
+          sortDirection={sortState?.direction ?? null}
+          onHeaderClick={handleHeaderClick}
+          hoveredColumn={hoveredColumn}
+          clickedColumn={clickedColumn}
+          onHoveredColumnChange={onHoveredColumnChange}
+          onClickedColumnChange={onClickedColumnChange}
+          tableRef={tableRef}
+          scrollRef={dataBodyRef}
+          onScroll={handleDataScroll}
+        />
+      ) : (
+        <div className={`data-preview-body${isProfileResultMode ? " data-preview-body-no-hscroll" : ""}`} ref={dataBodyRef} onScroll={isProfileResultMode ? undefined : handleDataScroll}>
+          {(() => {
+            const activeDryRun = dryRuns.find((dr) => dr.label === activeTab);
+            if (activeDryRun?.inProgress && !activeData) {
+              return (
+                <div className="dry-run-status-view">
+                  <div className="dry-run-status-spinner" />
+                  <div className="dry-run-status-text">{activeDryRun.status ?? "Starting DP preview..."}</div>
+                </div>
+              );
+            }
+            if (loading) {
+              return <div className="data-preview-loading">Loading preview...</div>;
+            }
+            if (error) {
+              return <div className="data-preview-error">{error}</div>;
+            }
+            if (sortedActiveData) {
+              return (
+                <DataTable
+                  data={sortedActiveData}
+                  sortColumnIndex={sortState?.columnIndex ?? null}
+                  sortDirection={sortState?.direction ?? null}
+                  onHeaderClick={handleHeaderClick}
+                  columnWidths={userColumnWidths}
+                  onColumnResize={handleColumnResize}
+                  hoveredColumn={hoveredColumn}
+                  clickedColumn={clickedColumn}
+                  onHoveredColumnChange={onHoveredColumnChange}
+                  onClickedColumnChange={onClickedColumnChange}
+                  ref={tableRef}
+                />
+              );
+            }
+            return null;
+          })()}
+        </div>
+      )}
       {currentHeaders.length > 0 && !isProfileResultMode && (
         <div className="data-preview-column-rules">
           <div className="data-preview-column-rules-header">
