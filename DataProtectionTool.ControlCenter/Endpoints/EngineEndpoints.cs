@@ -1223,8 +1223,13 @@ public static class EngineEndpoints
             using var bodyDoc = JsonDocument.Parse(body);
             var algorithmName = bodyDoc.RootElement.TryGetProperty("algorithmName", out var algEl) ? algEl.GetString() ?? "" : "";
             var domainName = bodyDoc.RootElement.TryGetProperty("domainName", out var domEl) ? domEl.GetString() ?? "" : "";
+            var hasIsMasked = bodyDoc.RootElement.TryGetProperty("isMasked", out var imEl) && imEl.ValueKind == JsonValueKind.False;
 
             var engineBaseUrl = $"{dataEngineConfig.EngineUrl.TrimEnd('/')}/masking/api/v5.1.44";
+
+            var engineBody = hasIsMasked
+                ? JsonSerializer.Serialize(new { isMasked = false, isProfilerWritable = false })
+                : JsonSerializer.Serialize(new { algorithmName, domainName, isProfilerWritable = false });
 
             var httpPayload = JsonSerializer.Serialize(new
             {
@@ -1236,12 +1241,7 @@ public static class EngineEndpoints
                     ["Authorization"] = dataEngineConfig.AuthorizationToken,
                     ["Content-Type"] = "application/json"
                 },
-                body = JsonSerializer.Serialize(new
-                {
-                    algorithmName,
-                    domainName,
-                    isProfilerWritable = false
-                })
+                body = engineBody
             });
 
             try

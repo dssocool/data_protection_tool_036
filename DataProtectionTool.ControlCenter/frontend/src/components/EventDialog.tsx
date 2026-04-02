@@ -5,6 +5,7 @@ import "./EventDialog.css";
 interface EventDialogProps {
   events: StatusEvent[];
   onClose: () => void;
+  onStopJob?: (eventTimestamp: string) => void;
 }
 
 interface ConsolidatedStep extends StatusEventStep {
@@ -86,7 +87,7 @@ function stepsMatchSearch(evt: StatusEvent, query: string): boolean {
   return evt.steps.some((s) => s.message.toLowerCase().includes(q));
 }
 
-export default function EventDialog({ events, onClose }: EventDialogProps) {
+export default function EventDialog({ events, onClose, onStopJob }: EventDialogProps) {
   const dialogRef = useRef<HTMLDivElement>(null);
   const [expandedIdx, setExpandedIdx] = useState<number | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
@@ -128,7 +129,7 @@ export default function EventDialog({ events, onClose }: EventDialogProps) {
       <div className="event-dialog-overlay" />
       <div className="event-dialog" ref={dialogRef}>
         <div className="event-dialog-header">
-          <span className="event-dialog-title">Event History</span>
+          <span className="event-dialog-title">Event Log</span>
           <div className="event-dialog-search">
             <svg className="event-dialog-search-icon" width="12" height="12" viewBox="0 0 12 12">
               <circle cx="5" cy="5" r="3.5" fill="none" stroke="currentColor" strokeWidth="1.2" />
@@ -188,6 +189,18 @@ export default function EventDialog({ events, onClose }: EventDialogProps) {
                       </span>
                       <span className="event-item-time">{formatTime(evt.timestamp)}</span>
                       <span className="event-item-type">{formatBadgeLabel(evt.type)}</span>
+                      {getEventStatus(evt) === "running" && onStopJob && (
+                        <button
+                          className="event-item-stop"
+                          title="Stop job"
+                          onClick={(e) => { e.stopPropagation(); onStopJob(evt.timestamp); }}
+                        >
+                          <svg width="12" height="12" viewBox="0 0 12 12">
+                            <circle cx="6" cy="6" r="5.5" fill="none" stroke="currentColor" strokeWidth="1" />
+                            <rect x="3.5" y="3.5" width="5" height="5" rx="0.5" fill="currentColor" />
+                          </svg>
+                        </button>
+                      )}
                     </div>
                     <div className="event-item-row2">
                       <span className="event-item-summary">{evt.summary}</span>

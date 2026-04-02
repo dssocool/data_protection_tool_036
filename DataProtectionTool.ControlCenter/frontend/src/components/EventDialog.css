@@ -196,6 +196,24 @@
   letter-spacing: 0.3px;
 }
 
+.event-item-stop {
+  flex-shrink: 0;
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: none;
+  border: none;
+  padding: 2px;
+  border-radius: 3px;
+  cursor: pointer;
+  color: #c62828;
+}
+
+.event-item-stop:hover {
+  background: rgba(198, 40, 40, 0.1);
+}
+
 .event-item-summary {
   color: #333;
   font-size: 11px;

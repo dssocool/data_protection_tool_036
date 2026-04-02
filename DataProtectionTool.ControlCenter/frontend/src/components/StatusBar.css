@@ -63,8 +63,45 @@
   cursor: pointer;
   border-radius: 3px;
   padding: 0 4px;
+  position: relative;
 }
 
 .status-bar-summary:hover {
   background: #d8d8d8;
+}
+
+.status-bar-summary-running {
+  background: rgba(76, 175, 80, 0.08);
+  background-image: linear-gradient(
+    90deg,
+    transparent 0%,
+    rgba(76, 175, 80, 0.28) 40%,
+    rgba(76, 175, 80, 0.5) 50%,
+    rgba(76, 175, 80, 0.28) 60%,
+    transparent 100%
+  );
+  background-size: 40% 100%;
+  background-repeat: no-repeat;
+  animation: status-bar-sweep-anim 2s ease-in-out infinite alternate;
+}
+
+.status-bar-summary-running:hover {
+  background-color: rgba(76, 175, 80, 0.15);
+}
+
+@keyframes status-bar-sweep-anim {
+  0% {
+    background-position: -40% 0;
+  }
+  100% {
+    background-position: 140% 0;
+  }
+}
+
+.status-bar-summary-error {
+  background: rgba(198, 40, 40, 0.12);
+}
+
+.status-bar-summary-error:hover {
+  background: rgba(198, 40, 40, 0.2);
 }

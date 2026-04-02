@@ -76,7 +76,11 @@ export default function StatusBar({ events, onIconClick }: StatusBarProps) {
   return (
     <div className="status-bar">
       {status && <StatusIcon status={status} />}
-      <span className="status-bar-summary" onClick={onIconClick} title="Show event history">
+      <span
+        className={`status-bar-summary${status === "running" ? " status-bar-summary-running" : ""}${status === "error" ? " status-bar-summary-error" : ""}`}
+        onClick={onIconClick}
+        title="Show event log"
+      >
         {latest ? latest.summary : "No recent activity"}
       </span>
     </div>

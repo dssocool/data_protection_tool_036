@@ -56,6 +56,17 @@ function safeJsonParse<T>(json: string): T | null {
   try { return JSON.parse(json); } catch { return null; }
 }
 
+function formatProfileTimestamp(iso: string): string {
+  const d = new Date(iso);
+  const yyyy = String(d.getFullYear());
+  const MM = String(d.getMonth() + 1).padStart(2, "0");
+  const dd = String(d.getDate()).padStart(2, "0");
+  const HH = String(d.getHours()).padStart(2, "0");
+  const mm = String(d.getMinutes()).padStart(2, "0");
+  const ss = String(d.getSeconds()).padStart(2, "0");
+  return `${yyyy}${MM}${dd}:${HH}${mm}${ss}`;
+}
+
 function getAgentPath(): string | null {
   const segments = window.location.pathname.split("/");
   const agentsIdx = segments.indexOf("agents");
@@ -103,6 +114,8 @@ export default function App() {
   const [allAlgorithms, setAllAlgorithms] = useState<Record<string, unknown>[]>([]);
   const [allFrameworks, setAllFrameworks] = useState<Record<string, unknown>[]>([]);
   const [dryRunningTables, setDryRunningTables] = useState<Set<string>>(new Set());
+  const [profiledTables, setProfiledTables] = useState<Set<string>>(new Set());
+  const [profileFailedTables, setProfileFailedTables] = useState<Set<string>>(new Set());
   const [mismatchedColumns, setMismatchedColumns] = useState<Map<string, { maskType: string; sqlType: string }>>(new Map());
   const [sqlModalMinimizing, setSqlModalMinimizing] = useState(false);
   const [unseenConnectionCount, setUnseenConnectionCount] = useState(0);
@@ -119,11 +132,12 @@ export default function App() {
   const selectedTableRef = useRef(selectedTable);
   selectedTableRef.current = selectedTable;
   const pendingSaveAndRunRef = useRef<{ destConnectionRowKey: string; destSchema: string; rowKey: string; schema: string; tableName: string; flowRowKey: string } | null>(null);
+  const activeJobControllersRef = useRef<Map<string, AbortController>>(new Map());
+  const demoTimersRef = useRef<Map<string, { timers: ReturnType<typeof setTimeout>[]; tableKeys: string[] }>>(new Map());
 
   useEffect(() => {
     if (!_demoMode) return;
     setConnections(MOCK_CONNECTIONS);
-    setConnectionTables(MOCK_CONNECTION_TABLES);
     setConnectionQueries(MOCK_CONNECTION_QUERIES);
     setStatusEvents(MOCK_STATUS_EVENTS);
     setAgentOid("demo-oid-00000000");
@@ -133,7 +147,6 @@ export default function App() {
     setAllAlgorithms(MOCK_ALL_ALGORITHMS);
     setAllDomains(MOCK_ALL_DOMAINS);
     setAllFrameworks(MOCK_ALL_FRAMEWORKS);
-    setExpandedConnections(new Set(["conn-001", "conn-002", "conn-003"]));
   }, []);
 
   const fetchEvents = useCallback(async () => {
@@ -186,6 +199,28 @@ export default function App() {
 
   const addLocalEvent = useCallback((evt: StatusEvent) => {
     setStatusEvents(prev => [...prev, evt]);
+  }, []);
+
+  const stopJob = useCallback((eventTimestamp: string) => {
+    const controller = activeJobControllersRef.current.get(eventTimestamp);
+    if (controller) {
+      controller.abort();
+      activeJobControllersRef.current.delete(eventTimestamp);
+    }
+    const demoEntry = demoTimersRef.current.get(eventTimestamp);
+    if (demoEntry) {
+      demoEntry.timers.forEach(clearTimeout);
+      for (const key of demoEntry.tableKeys) {
+        setDryRunningTables(prev => { const next = new Set(prev); next.delete(key); return next; });
+        setProfiledTables(prev => { const next = new Set(prev); next.delete(key); return next; });
+      }
+      demoTimersRef.current.delete(eventTimestamp);
+    }
+    setStatusEvents(prev => prev.map(evt => {
+      if (evt.timestamp !== eventTimestamp) return evt;
+      const steps = evt.steps?.map(s => s.status === "running" ? { ...s, status: "error" as const } : s);
+      return { ...evt, summary: evt.summary.replace("started", "cancelled"), steps };
+    }));
   }, []);
 
   useEffect(() => {
@@ -306,8 +341,15 @@ export default function App() {
 
   async function handleExpandConnection(rowKey: string) {
     if (_demoMode) {
+      if (connectionTables[rowKey]) {
+        setConnectionQueries((prev) => ({ ...prev, [rowKey]: MOCK_CONNECTION_QUERIES[rowKey] ?? [] }));
+        return;
+      }
+      setLoadingTables((prev) => new Set(prev).add(rowKey));
+      await new Promise((r) => setTimeout(r, 600));
       setConnectionTables((prev) => ({ ...prev, [rowKey]: MOCK_CONNECTION_TABLES[rowKey] ?? [] }));
       setConnectionQueries((prev) => ({ ...prev, [rowKey]: MOCK_CONNECTION_QUERIES[rowKey] ?? [] }));
+      setLoadingTables((prev) => { const next = new Set(prev); next.delete(rowKey); return next; });
       return;
     }
 
@@ -674,6 +716,66 @@ export default function App() {
   }
 
   async function handleSaveColumnRuleFromPanel(
+    tKey: string,
+    params: { fileFieldMetadataId: string; algorithmName: string; domainName: string },
+  ) {
+    await handleSaveColumnRule(params);
+    const parts = tKey.split(":");
+    if (parts.length >= 3) {
+      const rowKey = parts[0];
+      const tables = connectionTables[rowKey];
+      if (tables) {
+        const tableName = parts.slice(2).join(":");
+        const schema = parts[1];
+        const tableInfo = tables.find(t => t.schema === schema && t.name === tableName);
+        if (tableInfo?.fileFormatId) {
+          await handleFetchTableColumnRules(tKey, tableInfo.fileFormatId);
+        }
+      }
+    }
+  }
+
+  async function handleDisableColumnRule(fileFieldMetadataId: string) {
+    const agentPath = getAgentPath();
+    if (!agentPath) return;
+
+    const res = await fetch(
+      `/api/agents/${agentPath}/column-rule/${encodeURIComponent(fileFieldMetadataId)}`,
+      {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ isMasked: false }),
+      }
+    );
+
+    if (!res.ok) {
+      throw new Error(`Server error: ${res.status}`);
+    }
+
+    const result = await res.json();
+    if (result.success === false) {
+      throw new Error(result.message || "Failed to disable column rule.");
+    }
+  }
+
+  async function handleDisableColumnRuleFromPanel(tKey: string, fileFieldMetadataId: string) {
+    await handleDisableColumnRule(fileFieldMetadataId);
+    const parts = tKey.split(":");
+    if (parts.length >= 3) {
+      const rowKey = parts[0];
+      const tables = connectionTables[rowKey];
+      if (tables) {
+        const tableName = parts.slice(2).join(":");
+        const schema = parts[1];
+        const tableInfo = tables.find(t => t.schema === schema && t.name === tableName);
+        if (tableInfo?.fileFormatId) {
+          await handleFetchTableColumnRules(tKey, tableInfo.fileFormatId);
+        }
+      }
+    }
+  }
+
+  async function handleRestoreColumnRuleFromPanel(
     tKey: string,
     params: { fileFieldMetadataId: string; algorithmName: string; domainName: string },
   ) {
@@ -1140,6 +1242,9 @@ export default function App() {
         }));
       };
 
+      const dryRunAbort = new AbortController();
+      activeJobControllersRef.current.set(dryRunTrackedTs, dryRunAbort);
+
       try {
         const response = await fetch(`/api/agents/${agentPath}/dp-preview`, {
           method: "POST",
@@ -1149,6 +1254,7 @@ export default function App() {
             previewHeaders: sampleData?.headers ?? [],
             previewColumnTypes: sampleData?.columnTypes ?? [],
           }),
+          signal: dryRunAbort.signal,
         });
 
         if (!response.ok) {
@@ -1328,6 +1434,8 @@ export default function App() {
           }
           setDryRunningTables((prev) => { const next = new Set(prev); next.delete(key); return next; });
         }
+      } finally {
+        activeJobControllersRef.current.delete(dryRunTrackedTs);
       }
     } catch (e) {
       setPreviewError(`DP preview failed: ${e instanceof Error ? e.message : String(e)}`);
@@ -1346,6 +1454,57 @@ export default function App() {
 
     if (tables.length === 0) return;
 
+    if (_demoMode) {
+      const tableLabels = tables.map((t) => `${t.schema}.${t.tableName}`).join(", ");
+      for (const t of tables) {
+        setDryRunningTables((prev) => new Set(prev).add(t.key));
+      }
+      const demoTs = new Date().toISOString();
+      addLocalEvent({
+        timestamp: demoTs,
+        type: "dp_preview_multi",
+        summary: `Profile data started: ${tableLabels}`,
+        detail: "",
+        steps: [
+          { timestamp: demoTs, message: "Profiling columns...", status: "running" },
+        ],
+      });
+      const timerIds: ReturnType<typeof setTimeout>[] = [];
+      tables.forEach((t, i) => {
+        const tid = setTimeout(() => {
+          setDryRunningTables((prev) => { const next = new Set(prev); next.delete(t.key); return next; });
+          if (i === 0) {
+            setProfileFailedTables((prev) => new Set(prev).add(t.key));
+          } else {
+            setProfiledTables((prev) => new Set(prev).add(t.key));
+          }
+          if (i === tables.length - 1) {
+            demoTimersRef.current.delete(demoTs);
+            const hasFailure = tables.length > 0;
+            setStatusEvents((prev) =>
+              prev.map((evt) => {
+                if (evt.timestamp !== demoTs || evt.type !== "dp_preview_multi") return evt;
+                return {
+                  ...evt,
+                  summary: hasFailure
+                    ? `Profile data completed with errors: ${tableLabels}`
+                    : `Profile data completed: ${tableLabels}`,
+                  steps: [
+                    { timestamp: new Date().toISOString(), message: "Profiling columns...", status: "done" as const },
+                    { timestamp: new Date().toISOString(), message: `${tables[0].schema}.${tables[0].tableName} failed`, status: "error" as const },
+                    ...(tables.length > 1 ? [{ timestamp: new Date().toISOString(), message: "Profile complete", status: "done" as const }] : []),
+                  ],
+                };
+              }),
+            );
+          }
+        }, 3000 + i * 1500);
+        timerIds.push(tid);
+      });
+      demoTimersRef.current.set(demoTs, { timers: timerIds, tableKeys: tables.map(t => t.key) });
+      return;
+    }
+
     const trackedTs = new Date().toISOString();
     const tableLabels = tables.map((t) => `${t.schema}.${t.tableName}`).join(", ");
     const trackedEvent: StatusEvent = {
@@ -1359,6 +1518,7 @@ export default function App() {
 
     for (const t of tables) {
       setDryRunningTables((prev) => new Set(prev).add(t.key));
+      setProfileFailedTables((prev) => { const next = new Set(prev); next.delete(t.key); return next; });
     }
 
     const updateTrackedSteps = (stepMsg: string, stepStatus: "running" | "done" | "error") => {
@@ -1392,6 +1552,9 @@ export default function App() {
       );
     };
 
+    const multiAbort = new AbortController();
+    activeJobControllersRef.current.set(trackedTs, multiAbort);
+
     try {
       const res = await fetch(`/api/agents/${agentPath}/dp-preview-multi`, {
         method: "POST",
@@ -1399,12 +1562,14 @@ export default function App() {
         body: JSON.stringify({
           tables: tables.map((t) => ({ rowKey: t.rowKey, schema: t.schema, tableName: t.tableName })),
         }),
+        signal: multiAbort.signal,
       });
 
       if (!res.ok) {
         finalizeTrackedEvent(`DP preview (multi) failed: server error ${res.status}`, "error");
         for (const t of tables) {
           setDryRunningTables((prev) => { const next = new Set(prev); next.delete(t.key); return next; });
+          setProfileFailedTables((prev) => new Set(prev).add(t.key));
         }
         return;
       }
@@ -1465,8 +1630,14 @@ export default function App() {
 
                         const cachedEntry = tableCacheRef.current.get(key);
                         const prevDryRuns = cachedEntry?.dryRuns ?? [];
-                        const newLabel = `DP Preview ${prevDryRuns.length + 1}`;
+                        const newLabel = `Profile Data ${formatProfileTimestamp(trackedTs)}`;
                         const newDryRun: DryRunResult = { label: newLabel, data: maskedPreview, inProgress: false };
+
+                        const cachedSamples = cachedEntry?.samples ?? [];
+                        const sampleLabel = cachedSamples[0]?.label;
+                        const autoDiff = sampleLabel
+                          ? { name: `${sampleLabel} vs ${newLabel}`, leftTab: sampleLabel, rightTab: newLabel }
+                          : null;
 
                         tableCacheRef.current.set(key, {
                           ...(cachedEntry ?? {
@@ -1475,13 +1646,19 @@ export default function App() {
                             columnRules: [], columnRuleAlgorithms: [], columnRuleDomains: [], columnRuleFrameworks: [],
                           }),
                           dryRuns: [...prevDryRuns, newDryRun],
-                          activePreviewTab: newLabel,
+                          diffTab: autoDiff,
+                          activePreviewTab: autoDiff?.name ?? newLabel,
                           dryRunInProgress: false,
                         });
 
                         if (isViewingTable(rowKey, schema, tName)) {
                           setDryRuns((prev) => [...prev, newDryRun]);
-                          setActivePreviewTab(newLabel);
+                          if (autoDiff) {
+                            setDiffTab(autoDiff);
+                            setActivePreviewTab(autoDiff.name);
+                          } else {
+                            setActivePreviewTab(newLabel);
+                          }
                         }
                       }
                     } catch { /* merge failed for one table, continue */ }
@@ -1503,6 +1680,7 @@ export default function App() {
                   }
 
                   setDryRunningTables((prev) => { const next = new Set(prev); next.delete(key); return next; });
+                  setProfiledTables((prev) => new Set(prev).add(key));
                 }
               }
             } catch { /* parse error */ }
@@ -1515,6 +1693,8 @@ export default function App() {
             finalizeTrackedEvent(errMsg, "error");
             for (const t of tables) {
               setDryRunningTables((prev) => { const next = new Set(prev); next.delete(t.key); return next; });
+              setProfileFailedTables((prev) => new Set(prev).add(t.key));
+              setProfiledTables((prev) => { const next = new Set(prev); next.delete(t.key); return next; });
             }
           }
         }
@@ -1524,14 +1704,23 @@ export default function App() {
         finalizeTrackedEvent("DP preview (multi) stream ended unexpectedly.", "error");
         for (const t of tables) {
           setDryRunningTables((prev) => { const next = new Set(prev); next.delete(t.key); return next; });
+          setProfileFailedTables((prev) => new Set(prev).add(t.key));
+          setProfiledTables((prev) => { const next = new Set(prev); next.delete(t.key); return next; });
         }
       }
     } catch (e) {
-      const errMsg = `DP preview (multi) failed: ${e instanceof Error ? e.message : String(e)}`;
+      const isCancelled = e instanceof DOMException && e.name === "AbortError";
+      const errMsg = isCancelled
+        ? "DP preview (multi) cancelled."
+        : `DP preview (multi) failed: ${e instanceof Error ? e.message : String(e)}`;
       finalizeTrackedEvent(errMsg, "error");
       for (const t of tables) {
         setDryRunningTables((prev) => { const next = new Set(prev); next.delete(t.key); return next; });
+        setProfileFailedTables((prev) => new Set(prev).add(t.key));
+        setProfiledTables((prev) => { const next = new Set(prev); next.delete(t.key); return next; });
       }
+    } finally {
+      activeJobControllersRef.current.delete(trackedTs);
     }
   }
 
@@ -1592,6 +1781,9 @@ export default function App() {
       }));
     };
 
+    const runAbort = new AbortController();
+    activeJobControllersRef.current.set(trackedEvent.timestamp, runAbort);
+
     try {
       const response = await fetch(`/api/agents/${agentPath}/dp-run`, {
         method: "POST",
@@ -1604,6 +1796,7 @@ export default function App() {
           destSchema,
           flowRowKey: flowRowKey ?? "",
         }),
+        signal: runAbort.signal,
       });
 
       if (!response.ok) {
@@ -1659,6 +1852,7 @@ export default function App() {
     } catch (e) {
       finalizeTrackedEvent(`DP run failed: ${e instanceof Error ? e.message : String(e)}`, "error");
     } finally {
+      activeJobControllersRef.current.delete(trackedEvent.timestamp);
       setDryRunningTables((prev) => {
         const next = new Set(prev);
         next.delete(key);
@@ -1835,6 +2029,8 @@ export default function App() {
                 checkedTables={checkedTables}
                 onCheckedTablesChange={setCheckedTables}
                 onProfileData={handleProfileData}
+                profiledTables={profiledTables}
+                profileFailedTables={profileFailedTables}
                 onApplySanitization={() => {}}
                 starredTables={starredTables}
                 onStarredTablesChange={setStarredTables}
@@ -1846,6 +2042,8 @@ export default function App() {
                 allFrameworks={allFrameworks}
                 onFetchTableColumnRules={handleFetchTableColumnRules}
                 onSaveColumnRule={handleSaveColumnRuleFromPanel}
+                onDisableColumnRule={handleDisableColumnRuleFromPanel}
+                onRestoreColumnRule={handleRestoreColumnRuleFromPanel}
               />
             )}
             {(selectedTable || selectedQuery) && (
@@ -1956,6 +2154,7 @@ export default function App() {
         <EventDialog
           events={statusEvents}
           onClose={() => setShowEventDialog(false)}
+          onStopJob={stopJob}
         />
       )}
       {showSqlModal && (

@@ -65,6 +65,8 @@ interface ConnectionsPanelProps {
   checkedTables?: Set<string>;
   onCheckedTablesChange?: (next: Set<string>) => void;
   onProfileData?: (tableKeys: string[]) => void;
+  profiledTables?: Set<string>;
+  profileFailedTables?: Set<string>;
   onApplySanitization?: (tableKeys: string[]) => void;
   starredTables?: Set<string>;
   onStarredTablesChange?: (next: Set<string>) => void;
@@ -76,6 +78,8 @@ interface ConnectionsPanelProps {
   allFrameworks?: Record<string, unknown>[];
   onFetchTableColumnRules?: (tKey: string, fileFormatId: string) => void;
   onSaveColumnRule?: (tKey: string, params: { fileFieldMetadataId: string; algorithmName: string; domainName: string }) => Promise<void>;
+  onDisableColumnRule?: (tKey: string, fileFieldMetadataId: string) => Promise<void>;
+  onRestoreColumnRule?: (tKey: string, params: { fileFieldMetadataId: string; algorithmName: string; domainName: string }) => Promise<void>;
 }
 
 const MIN_WIDTH = 200;
@@ -89,26 +93,28 @@ export default function ConnectionsPanel({
   dryRunningTables,
   selectedTable,
   selectedQuery,
-  tableTabCounts,
+  tableTabCounts: _tableTabCounts,
   expanded,
   onExpandedChange,
   width,
   onExpandConnection,
-  onTableClick: _onTableClick,
+  onTableClick,
   onQueryClick,
   onReloadPreview,
   onRefreshConnection,
   onDryRun,
   onFullRun,
-  onSwitchPanel,
+  onSwitchPanel: _onSwitchPanel,
   onWidthChange,
-  flowsBadgeCount,
-  connectionsBadgeCount,
+  flowsBadgeCount: _flowsBadgeCount,
+  connectionsBadgeCount: _connectionsBadgeCount,
   newConnectionRowKeys,
   onDismissNewBadge,
   checkedTables,
   onCheckedTablesChange,
   onProfileData,
+  profiledTables,
+  profileFailedTables: _profileFailedTables,
   onApplySanitization,
   starredTables,
   onStarredTablesChange,
@@ -120,6 +126,8 @@ export default function ConnectionsPanel({
   allFrameworks,
   onFetchTableColumnRules,
   onSaveColumnRule,
+  onDisableColumnRule,
+  onRestoreColumnRule,
 }: ConnectionsPanelProps) {
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
   const [searchText, setSearchText] = useState("");
@@ -127,6 +135,10 @@ export default function ConnectionsPanel({
   const [actionsOpen, setActionsOpen] = useState(false);
   const [selectMenuOpen, setSelectMenuOpen] = useState(false);
   const [columnRuleModal, setColumnRuleModal] = useState<{ rule: Record<string, unknown>; tKey: string } | null>(null);
+  const [disabledRules, setDisabledRules] = useState<Map<string, { algorithmName: string; domainName: string }>>(new Map());
+  const [emptyTooltipVisible, setEmptyTooltipVisible] = useState(false);
+  const [emptyTooltipShake, setEmptyTooltipShake] = useState(false);
+  const emptyTooltipTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const actionsRef = useRef<HTMLDivElement>(null);
   const selectRef = useRef<HTMLDivElement>(null);
   const isResizing = useRef(false);
@@ -321,6 +333,21 @@ export default function ConnectionsPanel({
   }
 
   function handleSelectCheckboxClick() {
+    if (visibleTableKeys.length === 0) {
+      if (emptyTooltipVisible) {
+        setEmptyTooltipShake(false);
+        requestAnimationFrame(() => setEmptyTooltipShake(true));
+      } else {
+        setEmptyTooltipVisible(true);
+        setEmptyTooltipShake(false);
+      }
+      if (emptyTooltipTimer.current) clearTimeout(emptyTooltipTimer.current);
+      emptyTooltipTimer.current = setTimeout(() => {
+        setEmptyTooltipVisible(false);
+        setEmptyTooltipShake(false);
+      }, 2000);
+      return;
+    }
     if (hasChecked) {
       onCheckedTablesChange?.(new Set());
     } else {
@@ -399,30 +426,7 @@ export default function ConnectionsPanel({
     <>
     <div ref={panelRef} className="connections-panel" style={{ width }}>
       <div className="connections-panel-header">
-        <div className="panel-switch-icons">
-          <button
-            className="panel-switch-btn panel-switch-btn-active"
-            aria-label="Connections"
-            data-connections-btn
-            onClick={() => onSwitchPanel("connections")}
-          >
-            Connections
-            {!!connectionsBadgeCount && connectionsBadgeCount > 0 && (
-              <span className="connections-badge">{connectionsBadgeCount}</span>
-            )}
-          </button>
-          <button
-            className="panel-switch-btn"
-            aria-label="End-to-End Flows"
-            data-flows-btn
-            onClick={() => onSwitchPanel("flows")}
-          >
-            End-to-End Flows
-            {!!flowsBadgeCount && flowsBadgeCount > 0 && (
-              <span className="flows-badge">{flowsBadgeCount}</span>
-            )}
-          </button>
-        </div>
+        <span className="panel-title-text">Connections</span>
       </div>
       <div className="conn-google-search-box">
         <div className="conn-toolbar">
@@ -441,7 +445,7 @@ export default function ConnectionsPanel({
           </div>
         </div>
         <div className="conn-icon-bar">
-        <div className="conn-icon-btn-wrapper conn-select-split" ref={selectRef} data-tooltip={selectMenuOpen ? undefined : "Select"}>
+        <div className="conn-icon-btn-wrapper conn-select-split" ref={selectRef} data-tooltip={selectMenuOpen || emptyTooltipVisible ? undefined : "Select"}>
           <button
             className="conn-icon-btn conn-select-arrow-btn"
             aria-label="Select options"
@@ -464,6 +468,11 @@ export default function ConnectionsPanel({
               )}
             </svg>
           </button>
+          {emptyTooltipVisible && (
+            <span className={`conn-select-empty-tooltip${emptyTooltipShake ? " conn-select-empty-tooltip-shake" : ""}`}>
+              No items available
+            </span>
+          )}
           {(checkedTables?.size ?? 0) > 0 && (
             <span className="conn-select-badge">{checkedTables!.size}</span>
           )}
@@ -636,6 +645,7 @@ export default function ConnectionsPanel({
                                       && selectedTable?.schema === t.schema
                                       && selectedTable?.tableName === t.name;
                                     const isDryRunning = dryRunningTables.has(tKey);
+                                    const isProfiled = profiledTables?.has(tKey) ?? false;
                                     const isChecked = checkedTables?.has(tKey) ?? false;
                                     const isTableExpanded = expandedTables.has(tKey);
                                     const cols = tableColumns?.[tKey];
@@ -646,7 +656,9 @@ export default function ConnectionsPanel({
                                       >
                                         <div
                                           className={`conn-table-item${isSelected ? " conn-table-item-selected" : ""}`}
-                                          onClick={() => handleTableExpandToggle(tKey, conn.rowKey, t.schema, t.name, t.fileFormatId)}
+                                          onClick={() => {
+                                            handleTableExpandToggle(tKey, conn.rowKey, t.schema, t.name, t.fileFormatId);
+                                          }}
                                         >
                                           <input
                                             type="checkbox"
@@ -672,8 +684,9 @@ export default function ConnectionsPanel({
                                           </svg>
                                           <span className="conn-table-icon-wrapper">
                                             {isDryRunning && (
-                                              <svg className="conn-table-running-icon" width="14" height="14" viewBox="0 0 14 14">
-                                                <circle cx="7" cy="7" r="5.5" fill="none" stroke="currentColor" strokeWidth="1.5" strokeDasharray="20 12" />
+                                              <svg className="conn-table-profiling-icon" width="12" height="12" viewBox="0 0 16 16" fill="none">
+                                                <circle cx="6.5" cy="6.5" r="4.8" stroke="currentColor" strokeWidth="1.4" />
+                                                <path d="M10.2 10.2L14.5 14.5" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" />
                                               </svg>
                                             )}
                                             <svg className="conn-table-icon" width="14" height="14" viewBox="0 0 14 14">
@@ -684,9 +697,20 @@ export default function ConnectionsPanel({
                                             </svg>
                                           </span>
                                           <span className="conn-table-name">{t.schema}.{t.name}</span>
-                                          {tableTabCounts[tKey] && (
-                                            <span className="conn-table-tab-badge">
-                                              {tableTabCounts[tKey] === 1 ? "1 tab" : `${tableTabCounts[tKey]} tabs`}
+                                          {isProfiled && !isDryRunning && (
+                                            <span
+                                              className="conn-table-profile-result-badge"
+                                              onClick={(e) => {
+                                                e.stopPropagation();
+                                                onTableClick?.(conn.rowKey, t.schema, t.name);
+                                              }}
+                                              title="View profile result"
+                                            >
+                                              <svg width="10" height="10" viewBox="0 0 16 16" fill="none">
+                                                <circle cx="6.5" cy="6.5" r="4.8" stroke="currentColor" strokeWidth="1.6" />
+                                                <path d="M10.2 10.2L14.5 14.5" stroke="currentColor" strokeWidth="2.8" strokeLinecap="round" />
+                                              </svg>
+                                              profile result
                                             </span>
                                           )}
                                         </div>
@@ -707,14 +731,20 @@ export default function ConnectionsPanel({
                                                   const rule = rulesByField.get(col.name);
                                                   const algName = rule && rule.isMasked !== false && typeof rule.algorithmName === "string"
                                                     ? rule.algorithmName : "";
+                                                  const metaId = rule && typeof rule.fileFieldMetadataId === "string" ? rule.fileFieldMetadataId : "";
+                                                  const noRule = !rule || (rule as Record<string, unknown>)._noRule === true;
+                                                  const isDisabledByEngine = !!rule && rule.isMasked === false;
+                                                  const savedPrev = metaId ? disabledRules.get(metaId) : undefined;
+                                                  const isDisabled = isDisabledByEngine || !!savedPrev;
+                                                  const hasActiveAlg = !!algName && !isDisabled;
                                                   return (
                                                     <li key={col.name} className="conn-table-column-row">
                                                       <span className="conn-table-column-name">{col.name}</span>
                                                       <span className="conn-table-column-type">{col.type}</span>
                                                       {hasFormat && (
                                                         <span
-                                                          className={`conn-column-algo-badge${algName ? "" : " conn-column-algo-badge-empty"}`}
-                                                          title={algName || "No algorithm assigned"}
+                                                          className={`conn-column-algo-badge${hasActiveAlg ? "" : " conn-column-algo-badge-none"}`}
+                                                          title={hasActiveAlg ? algName : "None"}
                                                           onClick={(e) => {
                                                             e.stopPropagation();
                                                             setColumnRuleModal({
@@ -723,7 +753,52 @@ export default function ConnectionsPanel({
                                                             });
                                                           }}
                                                         >
-                                                          {algName || "\u00A0"}
+                                                          {hasActiveAlg ? algName : "None"}
+                                                          {hasActiveAlg && metaId && onDisableColumnRule && (
+                                                            <span
+                                                              className="conn-column-algo-badge-action"
+                                                              title="Disable rule"
+                                                              onClick={(e) => {
+                                                                e.stopPropagation();
+                                                                const prevAlg = rule && typeof rule.algorithmName === "string" ? rule.algorithmName : "";
+                                                                const prevDom = rule && typeof rule.domainName === "string" ? rule.domainName : "";
+                                                                setDisabledRules(prev => {
+                                                                  const next = new Map(prev);
+                                                                  next.set(metaId, { algorithmName: prevAlg, domainName: prevDom });
+                                                                  return next;
+                                                                });
+                                                                onDisableColumnRule(tKey, metaId);
+                                                              }}
+                                                            >
+                                                              <svg width="10" height="10" viewBox="0 0 12 12" fill="none">
+                                                                <path d="M3 3l6 6M9 3l-6 6" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
+                                                              </svg>
+                                                            </span>
+                                                          )}
+                                                          {isDisabled && !noRule && metaId && savedPrev && onRestoreColumnRule && (
+                                                            <span
+                                                              className="conn-column-algo-badge-action conn-column-algo-badge-restore"
+                                                              title="Restore rule"
+                                                              onClick={(e) => {
+                                                                e.stopPropagation();
+                                                                onRestoreColumnRule(tKey, {
+                                                                  fileFieldMetadataId: metaId,
+                                                                  algorithmName: savedPrev.algorithmName,
+                                                                  domainName: savedPrev.domainName,
+                                                                });
+                                                                setDisabledRules(prev => {
+                                                                  const next = new Map(prev);
+                                                                  next.delete(metaId);
+                                                                  return next;
+                                                                });
+                                                              }}
+                                                            >
+                                                              <svg width="10" height="10" viewBox="0 0 12 12" fill="none">
+                                                                <path d="M2 5.5a4 4 0 0 1 7.5-1.5M10 2v2.5H7.5" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round"/>
+                                                                <path d="M10 6.5a4 4 0 0 1-7.5 1.5M2 10V7.5h2.5" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round"/>
+                                                              </svg>
+                                                            </span>
+                                                          )}
                                                         </span>
                                                       )}
                                                     </li>

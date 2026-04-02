@@ -115,11 +115,11 @@ function formatHistoryTime(iso: string): string {
 export default function FlowsPanel({
   agentPath,
   statusEvents,
-  connectionsBadgeCount,
-  flowsBadgeCount,
+  connectionsBadgeCount: _connectionsBadgeCount,
+  flowsBadgeCount: _flowsBadgeCount,
   newFlowRowKeys,
   onDismissNewFlowBadge,
-  onSwitchPanel,
+  onSwitchPanel: _onSwitchPanel,
   onRunFlows,
   mockFlows,
 }: FlowsPanelProps) {
@@ -352,30 +352,7 @@ export default function FlowsPanel({
     <div className="flows-panel-full">
       <div className="flows-panel-header">
         <div className="flows-panel-header-left">
-          <div className="panel-switch-icons">
-            <button
-              className="panel-switch-btn"
-              aria-label="Connections"
-              data-connections-btn
-              onClick={() => onSwitchPanel("connections")}
-            >
-              Connections
-              {!!connectionsBadgeCount && connectionsBadgeCount > 0 && (
-                <span className="connections-badge">{connectionsBadgeCount}</span>
-              )}
-            </button>
-            <button
-              className="panel-switch-btn panel-switch-btn-active"
-              aria-label="End-to-End Flows"
-              data-flows-btn
-              onClick={() => onSwitchPanel("flows")}
-            >
-              End-to-End Flows
-              {!!flowsBadgeCount && flowsBadgeCount > 0 && (
-                <span className="flows-badge">{flowsBadgeCount}</span>
-              )}
-            </button>
-          </div>
+          <span className="panel-title-text">End-to-End Flows</span>
           <div className="flows-search-wrapper">
             <svg className="flows-search-icon" width="14" height="14" viewBox="0 0 14 14" fill="none">
               <circle cx="6" cy="6" r="4.5" stroke="currentColor" strokeWidth="1.3" />
