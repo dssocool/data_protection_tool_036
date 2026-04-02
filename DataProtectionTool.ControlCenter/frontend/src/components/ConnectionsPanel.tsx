@@ -609,7 +609,7 @@ export default function ConnectionsPanel({
                                     return (
                                       <li
                                         key={`${t.schema}.${t.name}`}
-                                        className={`conn-table-entry${isTableExpanded ? " conn-table-entry-expanded" : ""}`}
+                                        className={`conn-table-entry${isTableExpanded ? " conn-table-entry-expanded" : ""}${isChecked ? " conn-table-entry-checked" : ""}`}
                                       >
                                         <div
                                           className={`conn-table-item${isSelected ? " conn-table-item-selected" : ""}`}

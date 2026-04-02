@@ -437,11 +437,11 @@
 }
 
 .conn-table-item-selected {
-  background: #e0ecf8;
+  background: #d4e4f4;
 }
 
 .conn-table-item-selected:hover {
-  background: #d4e4f4;
+  background: #c8dcf0;
 }
 
 .conn-table-checkbox {
@@ -618,8 +618,14 @@
   list-style: none;
 }
 
-.conn-table-entry-expanded > .conn-table-item {
-  background: #f5f7fa;
+.conn-table-entry-expanded > .conn-table-item,
+.conn-table-entry-checked > .conn-table-item {
+  background: #e8ecf0;
+}
+
+.conn-table-entry-expanded > .conn-table-item:hover,
+.conn-table-entry-checked > .conn-table-item:hover {
+  background: #dce2e8;
 }
 
 .conn-table-columns {
