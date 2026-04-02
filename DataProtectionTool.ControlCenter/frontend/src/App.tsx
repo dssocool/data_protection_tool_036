@@ -129,7 +129,7 @@ export default function App() {
     setAllAlgorithms(MOCK_ALL_ALGORITHMS);
     setAllDomains(MOCK_ALL_DOMAINS);
     setAllFrameworks(MOCK_ALL_FRAMEWORKS);
-    setExpandedConnections(new Set(["conn-001"]));
+    setExpandedConnections(new Set(["conn-001", "conn-002", "conn-003"]));
   }, []);
 
   const fetchEvents = useCallback(async () => {
