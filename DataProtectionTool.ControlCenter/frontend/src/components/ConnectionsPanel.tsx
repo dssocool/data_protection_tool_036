@@ -346,22 +346,23 @@ export default function ConnectionsPanel({
           </button>
         </div>
       </div>
-      <div className="conn-toolbar">
-        <div className="conn-search-wrapper">
-          <svg className="conn-search-icon" width="14" height="14" viewBox="0 0 14 14" fill="none">
-            <circle cx="6" cy="6" r="4.5" stroke="currentColor" strokeWidth="1.3" />
-            <path d="M9.5 9.5L13 13" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
-          </svg>
-          <input
-            className="conn-search-input"
-            type="text"
-            placeholder="Search tables..."
-            value={searchText}
-            onChange={(e) => setSearchText(e.target.value)}
-          />
+      <div className="conn-google-search-box">
+        <div className="conn-toolbar">
+          <div className="conn-search-wrapper">
+            <svg className="conn-search-icon" width="14" height="14" viewBox="0 0 14 14" fill="none">
+              <circle cx="6" cy="6" r="4.5" stroke="currentColor" strokeWidth="1.3" />
+              <path d="M9.5 9.5L13 13" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
+            </svg>
+            <input
+              className="conn-search-input"
+              type="text"
+              placeholder="Search tables..."
+              value={searchText}
+              onChange={(e) => setSearchText(e.target.value)}
+            />
+          </div>
         </div>
-      </div>
-      <div className="conn-icon-bar">
+        <div className="conn-icon-bar">
         <div className="conn-icon-btn-wrapper" ref={selectRef} data-tooltip="Select">
           <button
             className="conn-icon-btn"
@@ -432,6 +433,7 @@ export default function ConnectionsPanel({
               </div>
             </div>
           )}
+        </div>
         </div>
       </div>
       {connections.length === 0 ? (

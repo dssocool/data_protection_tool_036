@@ -130,6 +130,12 @@
   background: rgba(0, 120, 212, 0.15);
 }
 
+.conn-google-search-box {
+  display: flex;
+  flex-direction: column;
+  flex-shrink: 0;
+}
+
 .conn-toolbar {
   display: flex;
   align-items: center;
