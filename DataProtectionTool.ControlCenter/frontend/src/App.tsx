@@ -856,45 +856,42 @@ export default function App() {
     }
 
     let filenames: string[] = [];
+    let sampleData: PreviewData | null = null;
 
     try {
-      if (currentSamples.length === 0) {
+      if (currentSamples.length > 0) {
+        const lastSample = currentSamples[currentSamples.length - 1];
+        filenames = lastSample.blobFilenames;
+        sampleData = lastSample.data;
+      } else {
         setSamples([]);
         setDryRuns([]);
-        setActivePreviewTab("Sample 1");
         setDiffTab(null);
+
+        const previewRes = await fetch(`/api/agents/${agentPath}/sample-table`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ rowKey, schema, tableName }),
+        });
+
+        if (!previewRes.ok) {
+          setPreviewError(`Preview failed: server error ${previewRes.status}`);
+          setPreviewLoading(false);
+          return;
+        }
+
+        const previewResult = await previewRes.json();
+        if (previewResult.event) addLocalEvent(previewResult.event);
+        if (!previewResult.success) {
+          setPreviewError(previewResult.message ?? "Preview failed.");
+          setPreviewLoading(false);
+          return;
+        }
+
+        filenames = previewResult.filenames ?? (previewResult.filename ? [previewResult.filename] : []);
+        const preview = await fetchPreviewFromFilenames(filenames);
+        sampleData = preview;
       }
-
-      const previewRes = await fetch(`/api/agents/${agentPath}/sample-table`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ rowKey, schema, tableName }),
-      });
-
-      if (!previewRes.ok) {
-        setPreviewError(`Preview failed: server error ${previewRes.status}`);
-        setPreviewLoading(false);
-        return;
-      }
-
-      const previewResult = await previewRes.json();
-      if (previewResult.event) addLocalEvent(previewResult.event);
-      if (!previewResult.success) {
-        setPreviewError(previewResult.message ?? "Preview failed.");
-        setPreviewLoading(false);
-        return;
-      }
-
-      filenames = previewResult.filenames ?? (previewResult.filename ? [previewResult.filename] : []);
-      const preview = await fetchPreviewFromFilenames(filenames);
-      if (preview) {
-        const newLabel = currentSamples.length === 0 ? "Sample 1" : `Sample ${currentSamples.length + 1}`;
-        const newSample: SampleResult = { label: newLabel, data: preview, blobFilenames: filenames };
-        currentSamples = [...currentSamples, newSample];
-        setSamples(currentSamples);
-      }
-
-      const sampleData = currentSamples[currentSamples.length - 1]?.data ?? null;
 
       const currentCached = tableCacheRef.current.get(key);
       const prevDryRuns = currentCached?.dryRuns ?? dryRuns;
