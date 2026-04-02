@@ -45,6 +45,7 @@ interface FlowsPanelProps {
   onDismissNewFlowBadge?: (rowKey: string) => void;
   onSwitchPanel: (panel: "connections" | "flows") => void;
   onRunFlows?: (flows: FlowItem[]) => void;
+  mockFlows?: FlowItem[];
 }
 
 type SortField = "srcDatabase" | "srcSchema" | "srcTable" | "destDatabase" | "destSchema" | "destTable";
@@ -120,6 +121,7 @@ export default function FlowsPanel({
   onDismissNewFlowBadge,
   onSwitchPanel,
   onRunFlows,
+  mockFlows,
 }: FlowsPanelProps) {
   const [flows, setFlows] = useState<FlowItem[]>([]);
   const [loading, setLoading] = useState(true);
@@ -140,6 +142,11 @@ export default function FlowsPanel({
   const resizeStartW = useRef(0);
 
   const fetchFlows = useCallback(async () => {
+    if (mockFlows) {
+      setFlows(mockFlows);
+      setLoading(false);
+      return;
+    }
     if (!agentPath) return;
     setLoading(true);
     try {
@@ -153,7 +160,7 @@ export default function FlowsPanel({
     } finally {
       setLoading(false);
     }
-  }, [agentPath]);
+  }, [agentPath, mockFlows]);
 
   useEffect(() => {
     fetchFlows();

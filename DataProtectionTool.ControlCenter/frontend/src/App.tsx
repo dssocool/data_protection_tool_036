@@ -15,6 +15,23 @@ import FullRunModal from "./components/FullRunModal";
 import type { FlowSource, FlowDest } from "./components/FullRunModal";
 import FlowsPanel from "./components/FlowsPanel";
 import type { FlowItem } from "./components/FlowsPanel";
+import {
+  isDemoMode,
+  MOCK_CONNECTIONS,
+  MOCK_CONNECTION_TABLES,
+  MOCK_CONNECTION_QUERIES,
+  MOCK_SAMPLE_DATA,
+  MOCK_DRY_RUN_DATA,
+  MOCK_COLUMN_RULES,
+  MOCK_COLUMN_RULE_ALGORITHMS,
+  MOCK_COLUMN_RULE_DOMAINS,
+  MOCK_COLUMN_RULE_FRAMEWORKS,
+  MOCK_ALL_ALGORITHMS,
+  MOCK_ALL_DOMAINS,
+  MOCK_ALL_FRAMEWORKS,
+  MOCK_STATUS_EVENTS,
+  MOCK_FLOWS,
+} from "./mockData";
 import "./App.css";
 
 interface TablePreviewCache {
@@ -41,9 +58,13 @@ function safeJsonParse<T>(json: string): T | null {
 function getAgentPath(): string | null {
   const segments = window.location.pathname.split("/");
   const agentsIdx = segments.indexOf("agents");
-  if (agentsIdx === -1 || agentsIdx + 1 >= segments.length) return null;
+  if (agentsIdx === -1 || agentsIdx + 1 >= segments.length) {
+    return isDemoMode() ? "demo" : null;
+  }
   return segments[agentsIdx + 1];
 }
+
+const _demoMode = isDemoMode();
 
 export default function App() {
   const [showSqlModal, setShowSqlModal] = useState(false);
@@ -94,6 +115,22 @@ export default function App() {
   const selectedTableRef = useRef(selectedTable);
   selectedTableRef.current = selectedTable;
   const pendingSaveAndRunRef = useRef<{ destConnectionRowKey: string; destSchema: string; rowKey: string; schema: string; tableName: string; flowRowKey: string } | null>(null);
+
+  useEffect(() => {
+    if (!_demoMode) return;
+    setConnections(MOCK_CONNECTIONS);
+    setConnectionTables(MOCK_CONNECTION_TABLES);
+    setConnectionQueries(MOCK_CONNECTION_QUERIES);
+    setStatusEvents(MOCK_STATUS_EVENTS);
+    setAgentOid("demo-oid-00000000");
+    setAgentTid("demo-tid-00000000");
+    setAgentUserName("Demo User");
+    setUserUniqueId("demo-user-001");
+    setAllAlgorithms(MOCK_ALL_ALGORITHMS);
+    setAllDomains(MOCK_ALL_DOMAINS);
+    setAllFrameworks(MOCK_ALL_FRAMEWORKS);
+    setExpandedConnections(new Set(["conn-001"]));
+  }, []);
 
   const fetchEvents = useCallback(async () => {
     const agentPath = getAgentPath();
@@ -148,6 +185,7 @@ export default function App() {
   }, []);
 
   useEffect(() => {
+    if (_demoMode) return;
     const agentPath = getAgentPath();
     if (!agentPath) return;
     fetchEvents();
@@ -168,10 +206,12 @@ export default function App() {
   }, []);
 
   useEffect(() => {
+    if (_demoMode) return;
     fetchConnections();
   }, [fetchConnections]);
 
   useEffect(() => {
+    if (_demoMode) return;
     const agentPath = getAgentPath();
     if (!agentPath) return;
 
@@ -261,6 +301,12 @@ export default function App() {
   }
 
   async function handleExpandConnection(rowKey: string) {
+    if (_demoMode) {
+      setConnectionTables((prev) => ({ ...prev, [rowKey]: MOCK_CONNECTION_TABLES[rowKey] ?? [] }));
+      setConnectionQueries((prev) => ({ ...prev, [rowKey]: MOCK_CONNECTION_QUERIES[rowKey] ?? [] }));
+      return;
+    }
+
     const agentPath = getAgentPath();
     if (!agentPath) return;
 
@@ -579,15 +625,39 @@ export default function App() {
 
     setPreviewLoading(false);
     setPreviewError(null);
-    setSamples([]);
     setDryRuns([]);
     setActivePreviewTab("Sample 1");
     setDiffTab(null);
+    setMismatchedColumns(new Map());
+
+    if (_demoMode) {
+      const mockSamples = MOCK_SAMPLE_DATA[key] ?? [];
+      setSamples(mockSamples);
+      if (mockSamples.length > 0) {
+        setActivePreviewTab(mockSamples[0].label);
+      }
+      const tableInfo = connectionTables[rowKey]?.find(
+        (t) => t.schema === schema && t.name === tableName
+      );
+      if (tableInfo?.fileFormatId) {
+        setColumnRules(MOCK_COLUMN_RULES);
+        setColumnRuleAlgorithms(MOCK_COLUMN_RULE_ALGORITHMS);
+        setColumnRuleDomains(MOCK_COLUMN_RULE_DOMAINS);
+        setColumnRuleFrameworks(MOCK_COLUMN_RULE_FRAMEWORKS);
+      } else {
+        setColumnRules([]);
+        setColumnRuleAlgorithms([]);
+        setColumnRuleDomains([]);
+        setColumnRuleFrameworks([]);
+      }
+      return;
+    }
+
+    setSamples([]);
     setColumnRules([]);
     setColumnRuleAlgorithms([]);
     setColumnRuleDomains([]);
     setColumnRuleFrameworks([]);
-    setMismatchedColumns(new Map());
 
     const tableInfo = connectionTables[rowKey]?.find(
       (t) => t.schema === schema && t.name === tableName
@@ -797,6 +867,40 @@ export default function App() {
   async function handleDryRun(rowKey: string, schema: string, tableName: string) {
     const agentPath = getAgentPath();
     if (!agentPath) return;
+
+    if (_demoMode) {
+      const key = tableKey(rowKey, schema, tableName);
+      const mockMasked = MOCK_DRY_RUN_DATA[key];
+
+      setSelectedTable({ rowKey, schema, tableName });
+      setSelectedQuery(null);
+
+      const mockSamples = MOCK_SAMPLE_DATA[key] ?? samples;
+      if (mockSamples.length > 0 && samples.length === 0) {
+        setSamples(mockSamples);
+      }
+
+      const newLabel = `DP Preview ${dryRuns.length + 1}`;
+      if (mockMasked) {
+        setDryRuns((prev) => [...prev, { label: newLabel, data: mockMasked, inProgress: false }]);
+      } else {
+        setDryRuns((prev) => [...prev, { label: newLabel, data: mockSamples[0]?.data ?? null, inProgress: false }]);
+      }
+      setActivePreviewTab(newLabel);
+
+      addLocalEvent({
+        timestamp: new Date().toISOString(),
+        type: "dp_preview",
+        summary: `DP preview completed: ${schema}.${tableName}`,
+        detail: "",
+        steps: [
+          { timestamp: new Date().toISOString(), message: `Sampling rows from ${schema}.${tableName}...`, status: "done" },
+          { timestamp: new Date().toISOString(), message: "Applying masking rules...", status: "done" },
+          { timestamp: new Date().toISOString(), message: "DP preview complete", status: "done" },
+        ],
+      });
+      return;
+    }
 
     const key = tableKey(rowKey, schema, tableName);
     const isSameTable = selectedTable?.rowKey === rowKey
@@ -1411,6 +1515,7 @@ export default function App() {
             onDismissNewFlowBadge={handleDismissNewFlowBadge}
             onSwitchPanel={(p) => { setLeftPanel(p); if (p === "connections") setUnseenConnectionCount(0); }}
             onRunFlows={handleRunFlows}
+            mockFlows={_demoMode ? MOCK_FLOWS : undefined}
           />
         ) : (
           <>
