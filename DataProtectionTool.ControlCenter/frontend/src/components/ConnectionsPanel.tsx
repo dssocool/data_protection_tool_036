@@ -155,6 +155,7 @@ export default function ConnectionsPanel({
   const selectRef = useRef<HTMLDivElement>(null);
   const isResizing = useRef(false);
   const panelRef = useRef<HTMLDivElement>(null);
+  const preSearchExpanded = useRef<Set<string> | null>(null);
 
   const handleResizeStart = useCallback((e: React.MouseEvent) => {
     e.preventDefault();
@@ -288,22 +289,26 @@ export default function ConnectionsPanel({
   const searchLower = searchText.toLowerCase();
 
   useEffect(() => {
-    if (!searchText) return;
-    const toExpand: string[] = [];
+    if (!searchText) {
+      if (preSearchExpanded.current) {
+        onExpandedChange(preSearchExpanded.current);
+        preSearchExpanded.current = null;
+      }
+      return;
+    }
+    if (!preSearchExpanded.current) {
+      preSearchExpanded.current = new Set(expanded);
+    }
+    const next = new Set(preSearchExpanded.current);
     for (const conn of connections) {
-      if (expanded.has(conn.rowKey)) continue;
       const tables = connectionTables[conn.rowKey];
       if (!tables) continue;
-      const hasMatch = tables.some(t =>
-        `${t.schema}.${t.name}`.toLowerCase().includes(searchText.toLowerCase())
-      );
-      if (hasMatch) toExpand.push(conn.rowKey);
+      if (tables.some(t => `${t.schema}.${t.name}`.toLowerCase().includes(searchText.toLowerCase()))) {
+        next.add(conn.rowKey);
+        onExpandConnection(conn.rowKey);
+      }
     }
-    if (toExpand.length > 0) {
-      const next = new Set(expanded);
-      for (const rk of toExpand) next.add(rk);
-      onExpandedChange(next);
-    }
+    onExpandedChange(next);
   }, [searchText]);
 
   function filteredTables(rowKey: string) {
@@ -322,14 +327,30 @@ export default function ConnectionsPanel({
     const keys: string[] = [];
     for (const conn of connections) {
       if (!expanded.has(conn.rowKey)) continue;
-      const tables = connectionTables[conn.rowKey];
+      const tables = searchText ? filteredTables(conn.rowKey) : connectionTables[conn.rowKey];
       if (!tables) continue;
       for (const t of tables) {
         keys.push(`${conn.rowKey}:${t.schema}:${t.name}`);
       }
     }
     return keys;
-  }, [connections, connectionTables, expanded]);
+  }, [connections, connectionTables, expanded, searchText]);
+
+  useEffect(() => {
+    if (!checkedTables || checkedTables.size === 0) return;
+    const visibleSet = new Set(visibleTableKeys);
+    let changed = false;
+    for (const key of checkedTables) {
+      if (!visibleSet.has(key)) { changed = true; break; }
+    }
+    if (changed) {
+      const next = new Set<string>();
+      for (const key of checkedTables) {
+        if (visibleSet.has(key)) next.add(key);
+      }
+      onCheckedTablesChange?.(next);
+    }
+  }, [visibleTableKeys]);
 
   function handleSelectAll() {
     onCheckedTablesChange?.(new Set(visibleTableKeys));
@@ -790,7 +811,7 @@ export default function ConnectionsPanel({
                                                             });
                                                           }}
                                                         >
-                                                          {hasActiveAlg ? algName : "None"}
+                                                          <span className="conn-column-algo-badge-text">{hasActiveAlg ? algName : "None"}</span>
                                                           {hasActiveAlg && metaId && onDisableColumnRule && (
                                                             <span
                                                               className="conn-column-algo-badge-action"

@@ -33,6 +33,7 @@ import {
   MOCK_STATUS_EVENTS,
   MOCK_FLOWS,
   MOCK_TABLE_COLUMNS,
+  MOCK_COLUMN_RULES_BY_FORMAT,
 } from "./mockData";
 import "./App.css";
 
@@ -696,6 +697,13 @@ export default function App() {
   async function handleFetchTableColumnRules(tKey: string, fileFormatId: string) {
     const agentPath = getAgentPath();
     if (!agentPath) return;
+
+    if (_demoMode) {
+      const rules = MOCK_COLUMN_RULES_BY_FORMAT[fileFormatId] ?? [];
+      setTableColumnRules(prev => ({ ...prev, [tKey]: rules }));
+      return;
+    }
+
     try {
       const url = `/api/agents/${agentPath}/column-rules?fileFormatId=${encodeURIComponent(fileFormatId)}`;
       const res = await fetch(url);

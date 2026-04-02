@@ -678,14 +678,18 @@
   font-weight: 600;
   cursor: pointer;
   white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
   max-width: 140px;
   vertical-align: middle;
   border: 1px solid #c5d8f0;
   transition: background 0.12s, border-color 0.12s;
   flex-shrink: 0;
   margin-left: auto;
+}
+
+.conn-column-algo-badge-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
 }
 
 .conn-column-algo-badge:hover {

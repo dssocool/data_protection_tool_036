@@ -275,6 +275,21 @@ export const MOCK_COLUMN_RULES: Record<string, unknown>[] = [
   { fileFieldMetadataId: "ffm-011", fieldName: "State", algorithmName: "", domainName: "", isMasked: false, ordinalPosition: 10 },
 ];
 
+export const MOCK_EMPLOYEES_COLUMN_RULES: Record<string, unknown>[] = [
+  { fileFieldMetadataId: "ffm-e01", fieldName: "FullName", algorithmName: "PartialMask", domainName: "Name", isMasked: true, ordinalPosition: 1 },
+  { fileFieldMetadataId: "ffm-e02", fieldName: "Email", algorithmName: "EmailMask", domainName: "Email", isMasked: true, ordinalPosition: 2 },
+  { fileFieldMetadataId: "ffm-e03", fieldName: "Salary", algorithmName: "NumericRound", domainName: "Financial", isMasked: true, ordinalPosition: 3 },
+  { fileFieldMetadataId: "ffm-e04", fieldName: "HireDate", algorithmName: "DateShift", domainName: "Date", isMasked: true, ordinalPosition: 4 },
+  { fileFieldMetadataId: "ffm-e05", fieldName: "EmployeeID", algorithmName: "", domainName: "", isMasked: false, ordinalPosition: 0 },
+  { fileFieldMetadataId: "ffm-e06", fieldName: "Department", algorithmName: "", domainName: "", isMasked: false, ordinalPosition: 5 },
+  { fileFieldMetadataId: "ffm-e07", fieldName: "ManagerID", algorithmName: "", domainName: "", isMasked: false, ordinalPosition: 6 },
+];
+
+export const MOCK_COLUMN_RULES_BY_FORMAT: Record<string, Record<string, unknown>[]> = {
+  "ff-cust-001": MOCK_COLUMN_RULES,
+  "ff-emp-001": MOCK_EMPLOYEES_COLUMN_RULES,
+};
+
 export const MOCK_COLUMN_RULE_ALGORITHMS: Record<string, unknown>[] = [
   { algorithmName: "PartialMask", maskType: "STRING", description: "Partially masks string values, preserving first character" },
   { algorithmName: "EmailMask", maskType: "STRING", description: "Masks email local part while preserving domain structure" },
