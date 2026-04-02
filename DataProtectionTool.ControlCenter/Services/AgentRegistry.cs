@@ -12,6 +12,7 @@ public class AgentConnection
     public IServerStreamWriter<ServerMessage> ResponseStream { get; }
 
     private readonly ConcurrentDictionary<string, TaskCompletionSource<string>> _pending = new();
+    private readonly SemaphoreSlim _writeLock = new(1, 1);
 
     public AgentConnection(AgentInfo info, IServerStreamWriter<ServerMessage> responseStream)
     {
@@ -34,11 +35,19 @@ public class AgentConnection
 
         try
         {
-            await ResponseStream.WriteAsync(new ServerMessage
+            await _writeLock.WaitAsync();
+            try
             {
-                Type = type,
-                Payload = wrappedPayload
-            });
+                await ResponseStream.WriteAsync(new ServerMessage
+                {
+                    Type = type,
+                    Payload = wrappedPayload
+                });
+            }
+            finally
+            {
+                _writeLock.Release();
+            }
 
             using var cts = new CancellationTokenSource(timeout);
             await using var reg = cts.Token.Register(() =>

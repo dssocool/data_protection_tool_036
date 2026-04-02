@@ -686,21 +686,61 @@ public static class EngineEndpoints
                 })).ToArray();
 
                 // Await all per-table tasks (Groups 1+3) and Group 2
-                await Task.WhenAll(perTableTasks);
-                await group2Task;
+                try
+                {
+                    await Task.WhenAll(perTableTasks);
+                }
+                catch (Exception ex)
+                {
+                    Console.Error.WriteLine($"[DpPreviewMulti] Per-table tasks failed: {ex}");
+                    var failures = perTableTasks
+                        .Where(t => t.IsFaulted)
+                        .Select(t => t.Exception?.InnerExceptions.FirstOrDefault()?.Message ?? "Unknown error")
+                        .ToList();
+                    var failMsg = failures.Count > 0
+                        ? string.Join("; ", failures)
+                        : ex.Message;
+                    await SseWriter.WriteErrorAsync(response, $"Table preparation failed: {failMsg}");
+                    return;
+                }
 
-                var (g2RulesetId, g2ProfileJobId, g2MaskingJobId) = await group2Tcs.Task;
+                try
+                {
+                    await group2Task;
+                }
+                catch (Exception ex)
+                {
+                    Console.Error.WriteLine($"[DpPreviewMulti] Group 2 task failed: {ex}");
+                }
+
+                string g2RulesetId, g2ProfileJobId, g2MaskingJobId;
+                try
+                {
+                    var group2Result = await group2Tcs.Task;
+                    g2RulesetId = group2Result.fileRulesetId;
+                    g2ProfileJobId = group2Result.profileJobId;
+                    g2MaskingJobId = group2Result.maskingJobId;
+                }
+                catch (Exception ex)
+                {
+                    Console.Error.WriteLine($"[DpPreviewMulti] Group 2 TCS failed: {ex}");
+                    await SseWriter.WriteErrorAsync(response, $"Ruleset/job creation failed: {ex.Message}");
+                    return;
+                }
 
                 // ---- Group 4: run profile, fix mappings, run masking, copy results ----
+                Console.Error.WriteLine($"[DpPreviewMulti] Starting Group 4: profileJobId={g2ProfileJobId}, maskingJobId={g2MaskingJobId}, rulesetId={g2RulesetId}");
                 await WriteStatus("Running profile job...");
                 using var profileExecResp = await EngineRelayService.RelayHttpAsync(connection, engineBaseUrl, dataEngineConfig.AuthorizationToken, "POST", "executions", new
                 {
                     jobId = int.Parse(g2ProfileJobId)
                 });
+                Console.Error.WriteLine($"[DpPreviewMulti] Profile execution response received");
 
                 if (!(profileExecResp.RootElement.TryGetProperty("success", out var peSuccessEl) && peSuccessEl.GetBoolean()))
                 {
                     var msg = profileExecResp.RootElement.TryGetProperty("message", out var m) ? m.GetString() : "Profile job execution failed to start.";
+                    Console.Error.WriteLine($"[DpPreviewMulti] Profile execution failed: {msg}");
                     await SseWriter.WriteErrorAsync(response, msg ?? "Profile job execution failed to start.");
                     return;
                 }
