@@ -80,6 +80,8 @@ interface ConnectionsPanelProps {
   onSaveColumnRule?: (tKey: string, params: { fileFieldMetadataId: string; algorithmName: string; domainName: string }) => Promise<void>;
   onDisableColumnRule?: (tKey: string, fileFieldMetadataId: string) => Promise<void>;
   onRestoreColumnRule?: (tKey: string, params: { fileFieldMetadataId: string; algorithmName: string; domainName: string }) => Promise<void>;
+  profileResultActiveTable?: string | null;
+  onProfileResultClick?: (rowKey: string, schema: string, tableName: string) => void;
 }
 
 const MIN_WIDTH = 200;
@@ -128,6 +130,8 @@ export default function ConnectionsPanel({
   onSaveColumnRule,
   onDisableColumnRule,
   onRestoreColumnRule,
+  profileResultActiveTable,
+  onProfileResultClick,
 }: ConnectionsPanelProps) {
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
   const [searchText, setSearchText] = useState("");
@@ -452,7 +456,7 @@ export default function ConnectionsPanel({
             onClick={() => setSelectMenuOpen((v) => !v)}
           >
             <span className="conn-select-arrow-checkbox-space" />
-            <svg className="conn-icon-btn-caret" width="12" height="12" viewBox="0 0 12 12" fill="none">
+            <svg className="conn-icon-btn-caret" width="14" height="14" viewBox="0 0 12 12" fill="none">
               <path d="M1.5 3.5L6 8.5L10.5 3.5" fill="currentColor" />
             </svg>
           </button>
@@ -461,7 +465,7 @@ export default function ConnectionsPanel({
             aria-label={hasChecked ? "Deselect all" : "Select all visible"}
             onClick={(e) => { e.stopPropagation(); handleSelectCheckboxClick(); }}
           >
-            <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+            <svg width="20" height="20" viewBox="0 0 16 16" fill="none">
               <rect x="2" y="3" width="10" height="10" rx="1.5" stroke="currentColor" strokeWidth="1.4" fill="none" />
               {hasChecked && (
                 <line x1="4.5" y1="8" x2="9.5" y2="8" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
@@ -493,7 +497,7 @@ export default function ConnectionsPanel({
                 aria-label="Profile Data"
                 onClick={() => onProfileData?.(Array.from(checkedTables ?? []))}
               >
-                <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+                <svg width="20" height="20" viewBox="0 0 16 16" fill="none">
                   <circle cx="6.5" cy="6.5" r="4.8" stroke="currentColor" strokeWidth="1.4" />
                   <circle cx="6.5" cy="6.5" r="3.2" stroke="currentColor" strokeWidth="0.8" opacity="0.45" />
                   <path d="M10.2 10.2L14.5 14.5" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" />
@@ -506,7 +510,7 @@ export default function ConnectionsPanel({
                 aria-label="Apply Sanitization"
                 onClick={() => onApplySanitization?.(Array.from(checkedTables ?? []))}
               >
-                <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+                <svg width="20" height="20" viewBox="0 0 16 16" fill="none">
                   <path d="M8 1.5L2.5 4.5V7.5C2.5 11 5 13.5 8 14.5C11 13.5 13.5 11 13.5 7.5V4.5L8 1.5Z" stroke="currentColor" strokeWidth="1.3" strokeLinejoin="round" fill="none" />
                   <path d="M5.5 8L7.2 9.7L10.5 6.3" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" />
                 </svg>
@@ -520,7 +524,7 @@ export default function ConnectionsPanel({
               aria-label="Refresh"
               onClick={handleRefreshAll}
             >
-              <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+              <svg width="20" height="20" viewBox="0 0 16 16" fill="none">
                 <path d="M13.5 8A5.5 5.5 0 0 1 3.05 10" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
                 <path d="M2.5 8A5.5 5.5 0 0 1 12.95 6" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
                 <path d="M12.95 3V6H9.95" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
@@ -535,7 +539,7 @@ export default function ConnectionsPanel({
             aria-label="Action"
             onClick={() => setActionsOpen((v) => !v)}
           >
-            <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+            <svg width="20" height="20" viewBox="0 0 16 16" fill="none">
               <circle cx="8" cy="3.5" r="1.2" fill="currentColor" />
               <circle cx="8" cy="8" r="1.2" fill="currentColor" />
               <circle cx="8" cy="12.5" r="1.2" fill="currentColor" />
@@ -594,7 +598,12 @@ export default function ConnectionsPanel({
                         {checkedCountForConn > 0 && (
                           <span className="conn-db-checked-badge">{checkedCountForConn}</span>
                         )}
-                        <span className="conn-server">{conn.serverName}</span>
+                        <span className="conn-server">
+                          {conn.serverName}
+                          {conn.connectionType === "SqlServer" && (
+                            <span className="conn-server-type-badge">SQL Server</span>
+                          )}
+                        </span>
                         {conn.databaseName && (
                           <span className="conn-db">{conn.databaseName}</span>
                         )}
@@ -648,6 +657,7 @@ export default function ConnectionsPanel({
                                     const isProfiled = profiledTables?.has(tKey) ?? false;
                                     const isChecked = checkedTables?.has(tKey) ?? false;
                                     const isTableExpanded = expandedTables.has(tKey);
+                                    const isProfileResultActive = profileResultActiveTable === tKey;
                                     const cols = tableColumns?.[tKey];
                                     return (
                                       <li
@@ -655,7 +665,7 @@ export default function ConnectionsPanel({
                                         className={`conn-table-entry${isTableExpanded ? " conn-table-entry-expanded" : ""}${isChecked ? " conn-table-entry-checked" : ""}`}
                                       >
                                         <div
-                                          className={`conn-table-item${isSelected ? " conn-table-item-selected" : ""}`}
+                                          className={`conn-table-item${isProfileResultActive ? " conn-table-item-profile-active" : isSelected ? " conn-table-item-selected" : ""}`}
                                           onClick={() => {
                                             handleTableExpandToggle(tKey, conn.rowKey, t.schema, t.name, t.fileFormatId);
                                           }}
@@ -702,7 +712,14 @@ export default function ConnectionsPanel({
                                               className="conn-table-profile-result-badge"
                                               onClick={(e) => {
                                                 e.stopPropagation();
-                                                onTableClick?.(conn.rowKey, t.schema, t.name);
+                                                if (!isTableExpanded) {
+                                                  handleTableExpandToggle(tKey, conn.rowKey, t.schema, t.name, t.fileFormatId);
+                                                }
+                                                if (onProfileResultClick) {
+                                                  onProfileResultClick(conn.rowKey, t.schema, t.name);
+                                                } else {
+                                                  onTableClick?.(conn.rowKey, t.schema, t.name);
+                                                }
                                               }}
                                               title="View profile result"
                                             >

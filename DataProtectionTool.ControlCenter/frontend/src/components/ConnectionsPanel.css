@@ -167,7 +167,7 @@
 
 .conn-select-split {
   position: relative;
-  margin-right: 8px;
+  margin-right: 20px;
 }
 
 .conn-select-arrow-btn {
@@ -179,7 +179,7 @@
 
 .conn-select-arrow-checkbox-space {
   display: inline-block;
-  width: 16px;
+  width: 20px;
   flex-shrink: 0;
 }
 
@@ -340,10 +340,26 @@
 }
 
 .conn-server {
+  display: flex;
+  align-items: center;
+  gap: 6px;
   font-size: 14px;
   font-weight: 500;
   color: #333;
   white-space: nowrap;
+}
+
+.conn-server-type-badge {
+  display: inline-block;
+  padding: 1px 6px;
+  border-radius: 3px;
+  background: #e0f0ff;
+  color: #1a6fb5;
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 16px;
+  white-space: nowrap;
+  vertical-align: middle;
 }
 
 .conn-db {
@@ -396,6 +412,14 @@
 
 .conn-table-item-selected:hover {
   background: #c8dcf0;
+}
+
+.conn-table-item-profile-active {
+  background: #b8cfe8;
+}
+
+.conn-table-item-profile-active:hover {
+  background: #a8c3e0;
 }
 
 .conn-table-checkbox {

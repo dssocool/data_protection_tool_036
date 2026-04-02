@@ -48,31 +48,38 @@ interface FlowsPanelProps {
   mockFlows?: FlowItem[];
 }
 
-type SortField = "srcDatabase" | "srcSchema" | "srcTable" | "destDatabase" | "destSchema" | "destTable";
+type SortField = "source" | "destination";
 type SortDir = "asc" | "desc";
 
 interface ParsedFlow {
   rowKey: string;
   createdAt: string;
+  srcServer: string;
   srcDatabase: string;
   srcSchema: string;
   srcTable: string;
+  destServer: string;
   destDatabase: string;
   destSchema: string;
   destTable: string;
 }
 
-const COLUMNS: { key: SortField; label: string }[] = [
-  { key: "srcDatabase", label: "Source Database" },
-  { key: "srcSchema", label: "Source Schema" },
-  { key: "srcTable", label: "Source Table" },
-  { key: "destDatabase", label: "Dest Database" },
-  { key: "destSchema", label: "Dest Schema" },
-  { key: "destTable", label: "Dest Table" },
-];
+interface GroupedFlow {
+  groupKey: string;
+  flowRowKeys: string[];
+  srcServer: string;
+  srcDatabase: string;
+  tables: { schema: string; table: string; rowKey: string }[];
+  destServer: string;
+  destDatabase: string;
+  destSchema: string;
+  latestCreatedAt: string;
+}
 
-const DEFAULT_COL_WIDTH = 180;
-const MIN_COL_WIDTH = 80;
+const COLUMNS: { key: SortField; label: string }[] = [
+  { key: "source", label: "Source" },
+  { key: "destination", label: "Destination" },
+];
 
 function parseJson<T>(json: string): T | null {
   try {
@@ -88,13 +95,43 @@ function parseFlow(flow: FlowItem): ParsedFlow {
   return {
     rowKey: flow.rowKey,
     createdAt: flow.createdAt ?? "",
+    srcServer: src?.serverName || "—",
     srcDatabase: src?.databaseName || src?.serverName || "—",
     srcSchema: src?.schema || "—",
     srcTable: src?.tableName || "—",
+    destServer: dest?.serverName || "—",
     destDatabase: dest?.databaseName || dest?.serverName || "—",
     destSchema: dest?.schema || "—",
     destTable: dest?.tableName || "—",
   };
+}
+
+function groupFlows(parsedFlows: ParsedFlow[]): GroupedFlow[] {
+  const map = new Map<string, GroupedFlow>();
+  for (const f of parsedFlows) {
+    const gk = `${f.srcServer}|${f.srcDatabase}|${f.destServer}|${f.destDatabase}|${f.destSchema}`;
+    const existing = map.get(gk);
+    if (existing) {
+      existing.flowRowKeys.push(f.rowKey);
+      existing.tables.push({ schema: f.srcSchema, table: f.srcTable, rowKey: f.rowKey });
+      if (f.createdAt > existing.latestCreatedAt) {
+        existing.latestCreatedAt = f.createdAt;
+      }
+    } else {
+      map.set(gk, {
+        groupKey: gk,
+        flowRowKeys: [f.rowKey],
+        srcServer: f.srcServer,
+        srcDatabase: f.srcDatabase,
+        tables: [{ schema: f.srcSchema, table: f.srcTable, rowKey: f.rowKey }],
+        destServer: f.destServer,
+        destDatabase: f.destDatabase,
+        destSchema: f.destSchema,
+        latestCreatedAt: f.createdAt,
+      });
+    }
+  }
+  return Array.from(map.values());
 }
 
 function formatHistoryTime(iso: string): string {
@@ -129,17 +166,12 @@ export default function FlowsPanel({
   const [sortField, setSortField] = useState<SortField | null>(null);
   const [sortDir, setSortDir] = useState<SortDir>("asc");
   const [selected, setSelected] = useState<Set<string>>(new Set());
-  const [colWidths, setColWidths] = useState<number[]>(COLUMNS.map(() => DEFAULT_COL_WIDTH));
   const [actionOpen, setActionOpen] = useState(false);
   const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false);
   const [confirmRunOpen, setConfirmRunOpen] = useState(false);
   const [selectedFlowRowKey, setSelectedFlowRowKey] = useState<string | null>(null);
   const [expandedHistoryIdx, setExpandedHistoryIdx] = useState<number | null>(null);
   const actionRef = useRef<HTMLDivElement>(null);
-
-  const resizingCol = useRef<number | null>(null);
-  const resizeStartX = useRef(0);
-  const resizeStartW = useRef(0);
 
   const fetchFlows = useCallback(async () => {
     if (mockFlows) {
@@ -176,29 +208,6 @@ export default function FlowsPanel({
     return () => document.removeEventListener("mousedown", handleClick);
   }, []);
 
-  useEffect(() => {
-    function onMouseMove(e: MouseEvent) {
-      if (resizingCol.current === null) return;
-      const idx = resizingCol.current;
-      const delta = e.clientX - resizeStartX.current;
-      const newW = Math.max(MIN_COL_WIDTH, resizeStartW.current + delta);
-      setColWidths((prev) => {
-        const next = [...prev];
-        next[idx] = newW;
-        return next;
-      });
-    }
-    function onMouseUp() {
-      resizingCol.current = null;
-    }
-    window.addEventListener("mousemove", onMouseMove);
-    window.addEventListener("mouseup", onMouseUp);
-    return () => {
-      window.removeEventListener("mousemove", onMouseMove);
-      window.removeEventListener("mouseup", onMouseUp);
-    };
-  }, []);
-
   const selectedFlowId = useMemo(() => {
     if (!selectedFlowRowKey) return null;
     return selectedFlowRowKey.startsWith("flow_")
@@ -213,16 +222,21 @@ export default function FlowsPanel({
       .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
   }, [statusEvents, selectedFlowId]);
 
-  function handleRowClick(rowKey: string, e: React.MouseEvent) {
+  function handleRowClick(group: GroupedFlow, e: React.MouseEvent) {
     const target = e.target as HTMLElement;
     if (target.tagName === "INPUT" || target.closest(".flows-td-checkbox")) return;
-    if (newFlowRowKeys?.has(rowKey)) {
-      onDismissNewFlowBadge?.(rowKey);
+    for (const rk of group.flowRowKeys) {
+      if (newFlowRowKeys?.has(rk)) {
+        onDismissNewFlowBadge?.(rk);
+      }
     }
-    setSelectedFlowRowKey((prev) => (prev === rowKey ? null : rowKey));
+    const firstKey = group.flowRowKeys[0];
+    setSelectedFlowRowKey((prev) => (prev === firstKey ? null : firstKey));
   }
 
   const parsed = useMemo(() => flows.map(parseFlow), [flows]);
+
+  const grouped = useMemo(() => groupFlows(parsed), [parsed]);
 
   const selectedParsedFlow = useMemo(
     () => (selectedFlowRowKey ? parsed.find((f) => f.rowKey === selectedFlowRowKey) ?? null : null),
@@ -230,32 +244,35 @@ export default function FlowsPanel({
   );
 
   const filtered = useMemo(() => {
-    if (!searchText.trim()) return parsed;
+    if (!searchText.trim()) return grouped;
     const q = searchText.toLowerCase();
-    return parsed.filter((f) => {
-      const raw = flows.find((r) => r.rowKey === f.rowKey);
-      return (
-        f.srcDatabase.toLowerCase().includes(q) ||
-        f.srcSchema.toLowerCase().includes(q) ||
-        f.srcTable.toLowerCase().includes(q) ||
-        f.destDatabase.toLowerCase().includes(q) ||
-        f.destSchema.toLowerCase().includes(q) ||
-        f.destTable.toLowerCase().includes(q) ||
-        f.rowKey.toLowerCase().includes(q) ||
-        (raw?.sourceJson ?? "").toLowerCase().includes(q) ||
-        (raw?.destJson ?? "").toLowerCase().includes(q)
-      );
-    });
-  }, [parsed, flows, searchText]);
+    return grouped.filter((g) =>
+      g.srcServer.toLowerCase().includes(q) ||
+      g.srcDatabase.toLowerCase().includes(q) ||
+      g.destServer.toLowerCase().includes(q) ||
+      g.destDatabase.toLowerCase().includes(q) ||
+      g.destSchema.toLowerCase().includes(q) ||
+      g.tables.some((t) =>
+        t.schema.toLowerCase().includes(q) ||
+        t.table.toLowerCase().includes(q)
+      )
+    );
+  }, [grouped, searchText]);
 
   const sorted = useMemo(() => {
     if (!sortField) {
-      return [...filtered].sort((a, b) => (b.createdAt ?? "").localeCompare(a.createdAt ?? ""));
+      return [...filtered].sort((a, b) => (b.latestCreatedAt ?? "").localeCompare(a.latestCreatedAt ?? ""));
     }
     const dir = sortDir === "asc" ? 1 : -1;
     return [...filtered].sort((a, b) => {
-      const va = a[sortField].toLowerCase();
-      const vb = b[sortField].toLowerCase();
+      let va: string, vb: string;
+      if (sortField === "source") {
+        va = `${a.srcServer} ${a.srcDatabase}`.toLowerCase();
+        vb = `${b.srcServer} ${b.srcDatabase}`.toLowerCase();
+      } else {
+        va = `${a.destServer} ${a.destDatabase}`.toLowerCase();
+        vb = `${b.destServer} ${b.destDatabase}`.toLowerCase();
+      }
       if (va < vb) return -1 * dir;
       if (va > vb) return 1 * dir;
       return 0;
@@ -272,30 +289,34 @@ export default function FlowsPanel({
   }
 
   function handleSelectAll() {
-    const filteredKeys = new Set(sorted.map((f) => f.rowKey));
-    const allSelected = sorted.length > 0 && sorted.every((f) => selected.has(f.rowKey));
+    const allKeys = sorted.flatMap((g) => g.flowRowKeys);
+    const allSelected = allKeys.length > 0 && allKeys.every((k) => selected.has(k));
     if (allSelected) {
       setSelected((prev) => {
         const next = new Set(prev);
-        for (const k of filteredKeys) next.delete(k);
+        for (const k of allKeys) next.delete(k);
         return next;
       });
     } else {
-      setSelected((prev) => new Set([...prev, ...filteredKeys]));
+      setSelected((prev) => new Set([...prev, ...allKeys]));
     }
   }
 
-  function handleSelectRow(rowKey: string) {
+  function handleSelectGroup(group: GroupedFlow) {
+    const allGroupSelected = group.flowRowKeys.every((k) => selected.has(k));
     setSelected((prev) => {
       const next = new Set(prev);
-      if (next.has(rowKey)) next.delete(rowKey);
-      else next.add(rowKey);
+      if (allGroupSelected) {
+        for (const k of group.flowRowKeys) next.delete(k);
+      } else {
+        for (const k of group.flowRowKeys) next.add(k);
+      }
       return next;
     });
   }
 
-  const allFilteredSelected = sorted.length > 0 && sorted.every((f) => selected.has(f.rowKey));
-  const someFilteredSelected = sorted.some((f) => selected.has(f.rowKey));
+  const allFilteredSelected = sorted.length > 0 && sorted.flatMap((g) => g.flowRowKeys).every((k) => selected.has(k));
+  const someFilteredSelected = sorted.some((g) => g.flowRowKeys.some((k) => selected.has(k)));
 
   function handleDeleteSelected() {
     setActionOpen(false);
@@ -335,18 +356,10 @@ export default function FlowsPanel({
     onRunFlows?.(selectedFlows);
   }
 
-  const selectedParsedForRun = useMemo(
-    () => parsed.filter((f) => selected.has(f.rowKey)),
-    [parsed, selected],
+  const selectedGroupsForRun = useMemo(
+    () => grouped.filter((g) => g.flowRowKeys.some((k) => selected.has(k))),
+    [grouped, selected],
   );
-
-  function handleResizeStart(e: React.MouseEvent, colIdx: number) {
-    e.preventDefault();
-    e.stopPropagation();
-    resizingCol.current = colIdx;
-    resizeStartX.current = e.clientX;
-    resizeStartW.current = colWidths[colIdx];
-  }
 
   return (
     <div className="flows-panel-full">
@@ -400,7 +413,7 @@ export default function FlowsPanel({
           ) : sorted.length === 0 ? (
             <p className="flows-panel-empty">No flows match the search.</p>
           ) : (
-            <table className="flows-table">
+            <table className="flows-table flows-table-grouped">
               <thead>
                 <tr>
                   <th className="flows-th-checkbox">
@@ -413,11 +426,10 @@ export default function FlowsPanel({
                       onChange={handleSelectAll}
                     />
                   </th>
-                  {COLUMNS.map((col, i) => (
+                  {COLUMNS.map((col) => (
                     <th
                       key={col.key}
                       className="flows-th"
-                      style={{ width: colWidths[i] }}
                       onClick={() => handleSort(col.key)}
                     >
                       <span className="flows-th-label">
@@ -428,41 +440,62 @@ export default function FlowsPanel({
                           </span>
                         )}
                       </span>
-                      <div
-                        className="flows-col-resize"
-                        onMouseDown={(e) => handleResizeStart(e, i)}
-                      />
                     </th>
                   ))}
                 </tr>
               </thead>
               <tbody>
-                {sorted.map((flow) => (
-                  <tr
-                    key={flow.rowKey}
-                    className={`${selected.has(flow.rowKey) ? "flows-row-selected" : ""}${selectedFlowRowKey === flow.rowKey ? " flows-row-active" : ""}`}
-                    onClick={(e) => handleRowClick(flow.rowKey, e)}
-                  >
-                    <td className="flows-td-checkbox">
-                      <input
-                        type="checkbox"
-                        checked={selected.has(flow.rowKey)}
-                        onChange={() => handleSelectRow(flow.rowKey)}
-                      />
-                    </td>
-                    <td style={{ width: colWidths[0] }}>
-                      {flow.srcDatabase}
-                      {newFlowRowKeys?.has(flow.rowKey) && (
-                        <span className="flow-new-badge">new</span>
-                      )}
-                    </td>
-                    <td style={{ width: colWidths[1] }}>{flow.srcSchema}</td>
-                    <td style={{ width: colWidths[2] }}>{flow.srcTable}</td>
-                    <td style={{ width: colWidths[3] }}>{flow.destDatabase}</td>
-                    <td style={{ width: colWidths[4] }}>{flow.destSchema}</td>
-                    <td style={{ width: colWidths[5] }}>{flow.destTable}</td>
-                  </tr>
-                ))}
+                {sorted.map((group) => {
+                  const isGroupSelected = group.flowRowKeys.every((k) => selected.has(k));
+                  const someGroupSelected = group.flowRowKeys.some((k) => selected.has(k));
+                  const isActive = group.flowRowKeys.includes(selectedFlowRowKey ?? "");
+                  const hasNew = group.flowRowKeys.some((rk) => newFlowRowKeys?.has(rk));
+                  return (
+                    <tr
+                      key={group.groupKey}
+                      className={`${isGroupSelected ? "flows-row-selected" : ""}${isActive ? " flows-row-active" : ""}`}
+                      onClick={(e) => handleRowClick(group, e)}
+                    >
+                      <td className="flows-td-checkbox">
+                        <input
+                          type="checkbox"
+                          checked={isGroupSelected}
+                          ref={(el) => {
+                            if (el) el.indeterminate = someGroupSelected && !isGroupSelected;
+                          }}
+                          onChange={() => handleSelectGroup(group)}
+                        />
+                      </td>
+                      <td className="flows-td-source">
+                        <div className="flows-source-card">
+                          <div className="flows-source-card-title">
+                            <span className="flows-source-server">{group.srcServer}</span>
+                            <span className="flows-source-db">{group.srcDatabase}</span>
+                          </div>
+                          <div className="flows-source-tables">
+                            {group.tables.map((t) => (
+                              <span key={t.rowKey} className="flows-source-table-badge">
+                                {t.schema}.{t.table}
+                              </span>
+                            ))}
+                          </div>
+                          {hasNew && <span className="flow-new-badge">new</span>}
+                        </div>
+                      </td>
+                      <td className="flows-td-dest">
+                        <div className="flows-dest-card">
+                          <div className="flows-dest-card-title">
+                            <span className="flows-dest-server">{group.destServer}</span>
+                            <span className="flows-dest-db">{group.destDatabase}</span>
+                          </div>
+                          <div className="flows-dest-schema">
+                            Schema: {group.destSchema}
+                          </div>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           )}
@@ -597,30 +630,36 @@ export default function FlowsPanel({
             <div className="flows-confirm-dialog flows-confirm-dialog-wide" onMouseDown={(e) => e.stopPropagation()}>
               <h3 className="flows-confirm-title">Confirm Run</h3>
               <p className="flows-confirm-body">
-                Run {selectedParsedForRun.length}{" "}
-                {selectedParsedForRun.length === 1 ? "flow" : "flows"}?
+                Run {selected.size}{" "}
+                {selected.size === 1 ? "flow" : "flows"}?
               </p>
               <div className="flows-confirm-list">
                 <table className="flows-confirm-list-table">
                   <thead>
                     <tr>
-                      <th>Source Database</th>
-                      <th>Source Schema</th>
-                      <th>Source Table</th>
-                      <th>Dest Database</th>
-                      <th>Dest Schema</th>
-                      <th>Dest Table</th>
+                      <th>Source</th>
+                      <th>Destination</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {selectedParsedForRun.map((f) => (
-                      <tr key={f.rowKey}>
-                        <td>{f.srcDatabase}</td>
-                        <td>{f.srcSchema}</td>
-                        <td>{f.srcTable}</td>
-                        <td>{f.destDatabase}</td>
-                        <td>{f.destSchema}</td>
-                        <td>{f.destTable}</td>
+                    {selectedGroupsForRun.map((g) => (
+                      <tr key={g.groupKey}>
+                        <td>
+                          <span className="flows-confirm-server">{g.srcServer}</span>
+                          {" / "}
+                          <span>{g.srcDatabase}</span>
+                          <div className="flows-confirm-tables">
+                            {g.tables.map((t) => (
+                              <span key={t.rowKey} className="flows-confirm-table-badge">{t.schema}.{t.table}</span>
+                            ))}
+                          </div>
+                        </td>
+                        <td>
+                          <span className="flows-confirm-server">{g.destServer}</span>
+                          {" / "}
+                          <span>{g.destDatabase}</span>
+                          <div className="flows-confirm-schema">Schema: {g.destSchema}</div>
+                        </td>
                       </tr>
                     ))}
                   </tbody>

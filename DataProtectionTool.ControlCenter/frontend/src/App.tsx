@@ -125,6 +125,7 @@ export default function App() {
   const [newFlowRowKeys, setNewFlowRowKeys] = useState<Set<string>>(new Set());
   const [checkedTables, setCheckedTables] = useState<Set<string>>(new Set());
   const [starredTables, setStarredTables] = useState<Set<string>>(new Set());
+  const [profileResultActiveTable, setProfileResultActiveTable] = useState<string | null>(null);
   const [tableColumns, setTableColumns] = useState<Record<string, { name: string; type: string }[]>>({});
   const [tableColumnRules, setTableColumnRules] = useState<Record<string, Record<string, unknown>[]>>({});
   const pendingSqlSaveRowKeyRef = useRef<string | null>(null);
@@ -802,6 +803,7 @@ export default function App() {
     if (!agentPath) return;
 
     saveCurrentTableToCache();
+    setProfileResultActiveTable(null);
 
     const key = tableKey(rowKey, schema, tableName);
     const cached = tableCacheRef.current.get(key);
@@ -844,6 +846,56 @@ export default function App() {
       return;
     }
 
+    setSamples([]);
+    setColumnRules([]);
+    setColumnRuleAlgorithms([]);
+    setColumnRuleDomains([]);
+    setColumnRuleFrameworks([]);
+
+    const tableInfo = connectionTables[rowKey]?.find(
+      (t) => t.schema === schema && t.name === tableName
+    );
+    if (tableInfo?.fileFormatId) {
+      fetchColumnRules(agentPath, tableInfo.fileFormatId);
+    }
+  }
+
+  function handleProfileResultClick(rowKey: string, schema: string, tableName: string) {
+    const agentPath = getAgentPath();
+    if (!agentPath) return;
+
+    saveCurrentTableToCache();
+
+    const key = tableKey(rowKey, schema, tableName);
+    const cached = tableCacheRef.current.get(key);
+
+    setSelectedTable({ rowKey, schema, tableName });
+    setSelectedQuery(null);
+    setProfileResultActiveTable(key);
+
+    if (cached) {
+      restoreTableFromCache(cached);
+      const profileDryRun = [...cached.dryRuns].reverse().find((dr) => dr.label.startsWith("Profile Result"));
+      if (profileDryRun) {
+        const diffWithProfile = cached.samples[0]?.label
+          ? { name: `${cached.samples[0].label} vs ${profileDryRun.label}`, leftTab: cached.samples[0].label, rightTab: profileDryRun.label }
+          : null;
+        if (diffWithProfile) {
+          setDiffTab(diffWithProfile);
+          setActivePreviewTab(diffWithProfile.name);
+        } else {
+          setActivePreviewTab(profileDryRun.label);
+        }
+      }
+      return;
+    }
+
+    setPreviewLoading(false);
+    setPreviewError(null);
+    setDryRuns([]);
+    setActivePreviewTab("Sample 1");
+    setDiffTab(null);
+    setMismatchedColumns(new Map());
     setSamples([]);
     setColumnRules([]);
     setColumnRuleAlgorithms([]);
@@ -943,6 +995,7 @@ export default function App() {
     if (!agentPath) return;
 
     saveCurrentTableToCache();
+    setProfileResultActiveTable(null);
 
     setSelectedQuery({ connectionRowKey, queryRowKey, queryText });
     setSelectedTable(null);
@@ -1557,6 +1610,48 @@ export default function App() {
     const multiAbort = new AbortController();
     activeJobControllersRef.current.set(trackedTs, multiAbort);
 
+    await Promise.all(
+      tables.map(async (t) => {
+        const key = t.key;
+        const cached = tableCacheRef.current.get(key);
+        if (cached && cached.samples.length > 0) return;
+        try {
+          const sampleRes = await fetch(`/api/agents/${agentPath}/sample-table`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ rowKey: t.rowKey, schema: t.schema, tableName: t.tableName }),
+            signal: multiAbort.signal,
+          });
+          if (!sampleRes.ok) return;
+          const sampleResult = await sampleRes.json();
+          if (!sampleResult.success) return;
+          if (sampleResult.event) addLocalEvent(sampleResult.event);
+          const filenames: string[] = sampleResult.filenames ?? (sampleResult.filename ? [sampleResult.filename] : []);
+          if (filenames.length === 0) return;
+          const mergeRes = await fetch("/api/blob/preview-merge", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ filenames }),
+          });
+          if (!mergeRes.ok) return;
+          const preview = (await mergeRes.json()) as PreviewData;
+          const newSample: SampleResult = { label: "Sample 1", data: preview, blobFilenames: filenames };
+          const existing = tableCacheRef.current.get(key);
+          tableCacheRef.current.set(key, {
+            ...(existing ?? {
+              samples: [], dryRuns: [], activePreviewTab: "Sample 1",
+              diffTab: null, previewError: null, dryRunInProgress: false,
+              columnRules: [], columnRuleAlgorithms: [], columnRuleDomains: [], columnRuleFrameworks: [],
+            }),
+            samples: [newSample],
+          } as TablePreviewCache);
+          if (isViewingTable(t.rowKey, t.schema, t.tableName)) {
+            setSamples([newSample]);
+          }
+        } catch { /* sampling failed for this table, profile will show without diff */ }
+      }),
+    );
+
     try {
       const res = await fetch(`/api/agents/${agentPath}/dp-preview-multi`, {
         method: "POST",
@@ -1632,7 +1727,7 @@ export default function App() {
 
                         const cachedEntry = tableCacheRef.current.get(key);
                         const prevDryRuns = cachedEntry?.dryRuns ?? [];
-                        const newLabel = `Profile Data ${formatProfileTimestamp(trackedTs)}`;
+                        const newLabel = `Profile Result ${formatProfileTimestamp(trackedTs)}`;
                         const newDryRun: DryRunResult = { label: newLabel, data: maskedPreview, inProgress: false };
 
                         const cachedSamples = cachedEntry?.samples ?? [];
@@ -2046,6 +2141,8 @@ export default function App() {
                 onSaveColumnRule={handleSaveColumnRuleFromPanel}
                 onDisableColumnRule={handleDisableColumnRuleFromPanel}
                 onRestoreColumnRule={handleRestoreColumnRuleFromPanel}
+                profileResultActiveTable={profileResultActiveTable}
+                onProfileResultClick={handleProfileResultClick}
               />
             )}
             {(selectedTable || selectedQuery) && (

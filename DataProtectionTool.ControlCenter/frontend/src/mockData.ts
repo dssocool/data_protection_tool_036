@@ -374,6 +374,42 @@ export const MOCK_FLOWS: FlowItem[] = [
     createdAt: hoursAgo(3),
   },
   {
+    rowKey: "flow-003",
+    sourceJson: JSON.stringify({
+      connectionRowKey: "conn-001",
+      serverName: "prod-sql-east.database.windows.net",
+      databaseName: "CustomerDB",
+      schema: "dbo",
+      tableName: "Orders",
+    }),
+    destJson: JSON.stringify({
+      connectionRowKey: "conn-003",
+      serverName: "dev-sql.corp.local",
+      databaseName: "Analytics",
+      schema: "dbo",
+      tableName: "Orders",
+    }),
+    createdAt: hoursAgo(2),
+  },
+  {
+    rowKey: "flow-004",
+    sourceJson: JSON.stringify({
+      connectionRowKey: "conn-001",
+      serverName: "prod-sql-east.database.windows.net",
+      databaseName: "CustomerDB",
+      schema: "dbo",
+      tableName: "Payments",
+    }),
+    destJson: JSON.stringify({
+      connectionRowKey: "conn-003",
+      serverName: "dev-sql.corp.local",
+      databaseName: "Analytics",
+      schema: "dbo",
+      tableName: "Payments",
+    }),
+    createdAt: hoursAgo(2),
+  },
+  {
     rowKey: "flow-002",
     sourceJson: JSON.stringify({
       connectionRowKey: "conn-002",

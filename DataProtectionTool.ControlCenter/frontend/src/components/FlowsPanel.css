@@ -203,8 +203,11 @@
 .flows-table {
   width: 100%;
   border-collapse: collapse;
-  table-layout: fixed;
   font-size: 13px;
+}
+
+.flows-table-grouped {
+  table-layout: fixed;
 }
 
 .flows-table thead {
@@ -220,16 +223,18 @@
   max-width: 40px;
   text-align: center;
   padding: 0;
+  vertical-align: top;
 }
 
 .flows-th-checkbox {
   background: #f5f6f8;
   border-bottom: 2px solid #ddd;
   padding: 8px 0;
+  vertical-align: middle;
 }
 
 .flows-td-checkbox {
-  padding: 6px 0;
+  padding: 14px 0 6px;
 }
 
 .flows-th {
@@ -262,20 +267,6 @@
   color: #0078d4;
 }
 
-.flows-col-resize {
-  position: absolute;
-  top: 0;
-  right: 0;
-  width: 5px;
-  height: 100%;
-  cursor: col-resize;
-  z-index: 10;
-}
-
-.flows-col-resize:hover {
-  background: rgba(0, 120, 212, 0.2);
-}
-
 /* ── Table body ────────────────────────────────────────── */
 
 .flows-table tbody tr {
@@ -304,16 +295,108 @@
 }
 
 .flows-table tbody td {
-  padding: 7px 12px;
+  padding: 10px 12px;
   color: #333;
-  white-space: nowrap;
+  border-bottom: 1px solid #eaeaea;
+  vertical-align: top;
+}
+
+/* ── Source card ───────────────────────────────────────── */
+
+.flows-td-source {
+  width: 50%;
+}
+
+.flows-source-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.flows-source-card-title {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.flows-source-server {
+  font-size: 12px;
+  color: #888;
+  line-height: 1.3;
   overflow: hidden;
   text-overflow: ellipsis;
-  border-bottom: 1px solid #f0f0f0;
+  white-space: nowrap;
+}
+
+.flows-source-db {
+  font-size: 13px;
+  font-weight: 600;
+  color: #333;
+  line-height: 1.3;
+}
+
+.flows-source-tables {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+.flows-source-table-badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 4px;
+  background: #e8eef6;
+  color: #3a6ea5;
+  font-size: 11.5px;
+  font-weight: 500;
+  white-space: nowrap;
+  line-height: 18px;
+}
+
+/* ── Destination card ─────────────────────────────────── */
+
+.flows-td-dest {
+  width: 50%;
+}
+
+.flows-dest-card {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.flows-dest-card-title {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.flows-dest-server {
+  font-size: 12px;
+  color: #888;
+  line-height: 1.3;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.flows-dest-db {
+  font-size: 13px;
+  font-weight: 600;
+  color: #333;
+  line-height: 1.3;
+}
+
+.flows-dest-schema {
+  font-size: 12px;
+  color: #666;
 }
 
 .flow-new-badge {
-  margin-left: 6px;
+  position: absolute;
+  top: 0;
+  right: 0;
   padding: 1px 8px;
   border-radius: 8px;
   background: #0078d4;
@@ -322,7 +405,36 @@
   font-weight: 700;
   white-space: nowrap;
   line-height: 16px;
-  vertical-align: middle;
+}
+
+/* ── Confirm dialog: tables/schema badges ─────────────── */
+
+.flows-confirm-server {
+  font-weight: 600;
+}
+
+.flows-confirm-tables {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 4px;
+}
+
+.flows-confirm-table-badge {
+  display: inline-block;
+  padding: 1px 7px;
+  border-radius: 4px;
+  background: #e8eef6;
+  color: #3a6ea5;
+  font-size: 11px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.flows-confirm-schema {
+  font-size: 12px;
+  color: #666;
+  margin-top: 4px;
 }
 
 /* ── Checkbox styling ──────────────────────────────────── */
@@ -466,13 +578,10 @@
 }
 
 .flows-confirm-list-table tbody td {
-  padding: 5px 10px;
+  padding: 8px 10px;
   color: #333;
   border-bottom: 1px solid #f0f0f0;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  max-width: 140px;
+  vertical-align: top;
 }
 
 .flows-confirm-list-table tbody tr:nth-child(even) {
