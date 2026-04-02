@@ -366,11 +366,11 @@ export default function FlowsPanel({
             </button>
             <button
               className="panel-switch-btn panel-switch-btn-active"
-              aria-label="Flows"
+              aria-label="End-to-End Flows"
               data-flows-btn
               onClick={() => onSwitchPanel("flows")}
             >
-              Flows
+              End-to-End Flows
               {!!flowsBadgeCount && flowsBadgeCount > 0 && (
                 <span className="flows-badge">{flowsBadgeCount}</span>
               )}
