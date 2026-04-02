@@ -781,7 +781,8 @@ export default function ConnectionsPanel({
                                                   const rule = rulesByField.get(col.name);
                                                   const algName = rule && rule.isMasked !== false && typeof rule.algorithmName === "string"
                                                     ? rule.algorithmName : "";
-                                                  const metaId = rule && typeof rule.fileFieldMetadataId === "string" ? rule.fileFieldMetadataId : "";
+                                                  const metaId = rule && (typeof rule.fileFieldMetadataId === "string" || typeof rule.fileFieldMetadataId === "number")
+                                                    ? String(rule.fileFieldMetadataId) : "";
                                                   const noRule = !rule || (rule as Record<string, unknown>)._noRule === true;
                                                   const isDisabledByEngine = !!rule && rule.isMasked === false;
                                                   const savedPrev = metaId ? disabledRules.get(metaId) : undefined;

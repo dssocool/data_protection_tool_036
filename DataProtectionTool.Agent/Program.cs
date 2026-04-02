@@ -844,7 +844,6 @@ class ConnectionDetails
 class SqlConnectionManager : IDisposable
 {
     private readonly ConcurrentDictionary<string, ConnectionDetails> _details = new();
-    private readonly ConcurrentDictionary<string, SqlConnection> _connections = new();
     private readonly CorrelationManager<ConnectionDetails> _detailCorrelation = new();
 
     public void LoadConnectionDetails(string connectionsListJson)
@@ -896,26 +895,13 @@ class SqlConnectionManager : IDisposable
         }
     }
 
-    public async Task<SqlConnection> GetOrCreateConnectionAsync(string rowKey)
+    private async Task<SqlConnection> CreateConnectionAsync(string rowKey)
     {
-        if (_connections.TryGetValue(rowKey, out var existing) &&
-            existing.State == System.Data.ConnectionState.Open)
-        {
-            return existing;
-        }
-
         if (!_details.TryGetValue(rowKey, out var details))
             throw new InvalidOperationException($"No connection details found for {rowKey}");
 
         var conn = BuildSqlConnection(details);
         await conn.OpenAsync();
-
-        if (_connections.TryRemove(rowKey, out var old))
-        {
-            try { await old.DisposeAsync(); } catch { }
-        }
-
-        _connections[rowKey] = conn;
         Console.WriteLine($"[ConnMgr] Opened SQL connection for {rowKey} ({details.ServerName})");
         return conn;
     }
@@ -926,14 +912,12 @@ class SqlConnectionManager : IDisposable
     {
         try
         {
-            var conn = await GetOrCreateConnectionAsync(rowKey);
+            await using var conn = await CreateConnectionAsync(rowKey);
             return await operation(conn);
         }
         catch (Exception ex) when (ex is SqlException || ex is InvalidOperationException)
         {
             Console.WriteLine($"[ConnMgr] Error for {rowKey}, attempting reconnect: {ex.Message}");
-
-            EvictConnection(rowKey);
 
             try
             {
@@ -948,16 +932,8 @@ class SqlConnectionManager : IDisposable
                 Console.Error.WriteLine($"[ConnMgr] Failed to re-fetch details for {rowKey}: {refetchEx.Message}");
             }
 
-            var conn = await GetOrCreateConnectionAsync(rowKey);
+            await using var conn = await CreateConnectionAsync(rowKey);
             return await operation(conn);
-        }
-    }
-
-    private void EvictConnection(string rowKey)
-    {
-        if (_connections.TryRemove(rowKey, out var old))
-        {
-            try { old.Dispose(); } catch { }
         }
     }
 
@@ -990,11 +966,6 @@ class SqlConnectionManager : IDisposable
 
     public void Dispose()
     {
-        foreach (var kvp in _connections)
-        {
-            try { kvp.Value.Dispose(); } catch { }
-        }
-        _connections.Clear();
     }
 }
 
