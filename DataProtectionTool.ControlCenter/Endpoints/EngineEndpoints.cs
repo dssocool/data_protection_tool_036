@@ -365,6 +365,28 @@ public static class EngineEndpoints
                     maskedFilenames.Add(maskedName);
                 }
 
+                // Refetch column rules via agent relay
+                object? columnRulesPayload = null;
+                try
+                {
+                    await WriteStatus("Fetching column rules...");
+                    await metadataService.EnsureLoadedAsync();
+                    var columnRules = await EngineRelayService.RelayFetchColumnRulesAsync(
+                        connection, engineBaseUrl, dataEngineConfig.AuthorizationToken, fileFormatId);
+                    var enriched = engineApi.EnrichColumnRules(columnRules, metadataService.Algorithms, metadataService.Domains, metadataService.Frameworks);
+                    columnRulesPayload = new
+                    {
+                        rules = enriched.Rules.Select(e => JsonSerializer.Deserialize<object>(e.GetRawText())).ToArray(),
+                        algorithms = enriched.Algorithms.Select(e => JsonSerializer.Deserialize<object>(e.GetRawText())).ToArray(),
+                        domains = enriched.Domains.Select(e => JsonSerializer.Deserialize<object>(e.GetRawText())).ToArray(),
+                        frameworks = enriched.Frameworks.Select(e => JsonSerializer.Deserialize<object>(e.GetRawText())).ToArray(),
+                    };
+                }
+                catch (Exception ex)
+                {
+                    Console.Error.WriteLine($"[DpPreview] Warning: Could not refetch column rules: {ex.Message}");
+                }
+
                 var dryRunEvtSummary = $"DP preview completed: fileFormatId={fileFormatId}, fileRulesetId={fileRulesetId}, " +
                     $"profileJobId={profileJobId} ({profileStatus}), maskingJobId={maskingJobId} ({maskingStatus})";
                 var stepsDetail = JsonSerializer.Serialize(statusSteps);
@@ -382,7 +404,8 @@ public static class EngineEndpoints
                     maskingJobId,
                     maskingStatus,
                     maskedFilenames,
-                    sqlColumnTypes
+                    sqlColumnTypes,
+                    columnRules = columnRulesPayload
                 });
                 await SseWriter.WriteEventAsync(response, "complete", completeJson);
             }
@@ -883,7 +906,7 @@ public static class EngineEndpoints
                     return;
                 }
 
-                // Copy masked files back per table
+                // Copy masked files back per table and refetch column rules via agent
                 await WriteStatus("Copying masked results...");
                 var perTableComplete = new List<object>();
                 foreach (var tr in tableResults)
@@ -901,6 +924,27 @@ public static class EngineEndpoints
                         maskedFilenames.Add(maskedName);
                     }
 
+                    object? columnRulesPayload = null;
+                    try
+                    {
+                        var tableLabel = $"{tr.Schema}.{tr.TableName}";
+                        await WriteStatus($"[{tableLabel}] Fetching column rules...");
+                        var columnRules = await EngineRelayService.RelayFetchColumnRulesAsync(
+                            connection, engineBaseUrl, dataEngineConfig.AuthorizationToken, tr.FileFormatId);
+                        var enriched = engineApi.EnrichColumnRules(columnRules, metadataService.Algorithms, metadataService.Domains, metadataService.Frameworks);
+                        columnRulesPayload = new
+                        {
+                            rules = enriched.Rules.Select(e => JsonSerializer.Deserialize<object>(e.GetRawText())).ToArray(),
+                            algorithms = enriched.Algorithms.Select(e => JsonSerializer.Deserialize<object>(e.GetRawText())).ToArray(),
+                            domains = enriched.Domains.Select(e => JsonSerializer.Deserialize<object>(e.GetRawText())).ToArray(),
+                            frameworks = enriched.Frameworks.Select(e => JsonSerializer.Deserialize<object>(e.GetRawText())).ToArray(),
+                        };
+                    }
+                    catch (Exception ex)
+                    {
+                        Console.Error.WriteLine($"[DpPreviewMulti] Warning: Could not refetch column rules for {tr.Schema}.{tr.TableName}: {ex.Message}");
+                    }
+
                     perTableComplete.Add(new
                     {
                         rowKey = tr.RowKey,
@@ -909,6 +953,7 @@ public static class EngineEndpoints
                         fileFormatId = tr.FileFormatId,
                         maskedFilenames,
                         sqlColumnTypes = tr.SqlColumnTypes,
+                        columnRules = columnRulesPayload,
                     });
                 }
 

@@ -61,6 +61,53 @@ public static class EngineRelayService
         return status;
     }
 
+    public static async Task<List<JsonElement>> RelayFetchColumnRulesAsync(
+        AgentConnection connection, string engineBaseUrl, string authorizationToken,
+        string fileFormatId)
+    {
+        var allItems = new List<JsonElement>();
+        int pageNumber = 1;
+        const int maxPages = 100;
+        var baseRelativeUrl = $"file-field-metadata?file_format_id={Uri.EscapeDataString(fileFormatId)}";
+
+        while (pageNumber <= maxPages)
+        {
+            var relativeUrl = $"{baseRelativeUrl}&page_number={pageNumber}";
+            using var resp = await RelayHttpAsync(connection, engineBaseUrl, authorizationToken, "GET", relativeUrl);
+
+            if (!(resp.RootElement.TryGetProperty("success", out var successEl) && successEl.GetBoolean()))
+                break;
+
+            if (!resp.RootElement.TryGetProperty("body", out var bodyEl))
+                break;
+
+            using var bodyDoc = JsonDocument.Parse(bodyEl.GetString() ?? "{}");
+
+            if (!bodyDoc.RootElement.TryGetProperty("responseList", out var listEl) || listEl.ValueKind != JsonValueKind.Array)
+                break;
+
+            var pageItems = listEl.EnumerateArray().Select(e => e.Clone()).ToList();
+            if (pageItems.Count == 0)
+                break;
+
+            allItems.AddRange(pageItems);
+
+            if (!bodyDoc.RootElement.TryGetProperty("_pageInfo", out var pageInfoEl) || pageInfoEl.ValueKind != JsonValueKind.String)
+                break;
+
+            using var pageInfoDoc = JsonDocument.Parse(pageInfoEl.GetString()!);
+            var pi = pageInfoDoc.RootElement;
+            int numberOnPage = pi.TryGetProperty("numberOnPage", out var nop) ? nop.GetInt32() : 0;
+            int total = pi.TryGetProperty("total", out var tot) ? tot.GetInt32() : 0;
+            if (numberOnPage >= total)
+                break;
+
+            pageNumber++;
+        }
+
+        return allItems;
+    }
+
     public static async Task<bool> ValidateEngineConfigAsync(
         DataEngineConfig config, HttpResponse response, bool requireProfileSetId = false)
     {

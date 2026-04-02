@@ -1418,6 +1418,8 @@ export default function App() {
               let maskedFilenames = filenames;
               let completedFileFormatId = "";
               let completeSqlColumnTypes: string[] | undefined;
+              // eslint-disable-next-line @typescript-eslint/no-explicit-any
+              let crPayload: any = null;
               try {
                 const completeData = JSON.parse(eventData);
                 if (Array.isArray(completeData.maskedFilenames) && completeData.maskedFilenames.length > 0) {
@@ -1429,7 +1431,23 @@ export default function App() {
                 if (Array.isArray(completeData.sqlColumnTypes) && completeData.sqlColumnTypes.length > 0) {
                   completeSqlColumnTypes = completeData.sqlColumnTypes;
                 }
+                if (completeData.columnRules) {
+                  crPayload = completeData.columnRules;
+                }
               } catch { /* use original filenames as fallback */ }
+              const parseArray = (arr: unknown): Record<string, unknown>[] => {
+                if (!Array.isArray(arr)) return [];
+                return arr.map((item: unknown) => {
+                  if (typeof item === "string") {
+                    try { return JSON.parse(item); } catch { return { raw: item }; }
+                  }
+                  return item as Record<string, unknown>;
+                });
+              };
+              const parsedRules = crPayload ? parseArray(crPayload.rules) : null;
+              const parsedAlgorithms = crPayload ? parseArray(crPayload.algorithms) : null;
+              const parsedDomains = crPayload ? parseArray(crPayload.domains) : null;
+              const parsedFrameworks = crPayload ? parseArray(crPayload.frameworks) : null;
               const mergeRes = await fetch("/api/blob/preview-merge", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
@@ -1456,6 +1474,12 @@ export default function App() {
                     dryRuns: finishDryRun(latestCached.dryRuns),
                     activePreviewTab: newLabel,
                     dryRunInProgress: false,
+                    ...(parsedRules ? {
+                      columnRules: parsedRules,
+                      columnRuleAlgorithms: parsedAlgorithms ?? [],
+                      columnRuleDomains: parsedDomains ?? [],
+                      columnRuleFrameworks: parsedFrameworks ?? [],
+                    } : {}),
                   });
                 }
                 setDryRunningTables((prev) => { const next = new Set(prev); next.delete(key); return next; });
@@ -1463,15 +1487,15 @@ export default function App() {
                 if (isViewingTable(rowKey, schema, tableName)) {
                   setDryRuns(finishDryRun);
                   setActivePreviewTab(newLabel);
+                  if (parsedRules) {
+                    setColumnRules(parsedRules);
+                    setColumnRuleAlgorithms(parsedAlgorithms ?? []);
+                    setColumnRuleDomains(parsedDomains ?? []);
+                    setColumnRuleFrameworks(parsedFrameworks ?? []);
+                  }
                 }
 
                 if (completedFileFormatId) {
-                  const cachedPreview = tableCacheRef.current.get(key);
-                  const origPreview = cachedPreview?.samples[0]?.data ?? null;
-                  fetchColumnRules(
-                    agentPath, completedFileFormatId,
-                    origPreview?.headers, origPreview?.columnTypes,
-                  );
                   setConnectionTables((prev) => {
                     const tables = prev[rowKey];
                     if (!tables) return prev;
@@ -1805,8 +1829,22 @@ export default function App() {
               const completeData = JSON.parse(eventData);
               if (Array.isArray(completeData.tables)) {
                 for (const tResult of completeData.tables) {
-                  const { rowKey, schema, tableName: tName, fileFormatId, maskedFilenames, sqlColumnTypes: completeSqlColumnTypes } = tResult;
+                  const { rowKey, schema, tableName: tName, fileFormatId, maskedFilenames, sqlColumnTypes: completeSqlColumnTypes, columnRules: crPayload } = tResult;
                   const key = tableKey(rowKey, schema, tName);
+
+                  const parseArray = (arr: unknown): Record<string, unknown>[] => {
+                    if (!Array.isArray(arr)) return [];
+                    return arr.map((item: unknown) => {
+                      if (typeof item === "string") {
+                        try { return JSON.parse(item); } catch { return { raw: item }; }
+                      }
+                      return item as Record<string, unknown>;
+                    });
+                  };
+                  const parsedRules = crPayload ? parseArray(crPayload.rules) : null;
+                  const parsedAlgorithms = crPayload ? parseArray(crPayload.algorithms) : null;
+                  const parsedDomains = crPayload ? parseArray(crPayload.domains) : null;
+                  const parsedFrameworks = crPayload ? parseArray(crPayload.frameworks) : null;
 
                   if (Array.isArray(maskedFilenames) && maskedFilenames.length > 0) {
                     try {
@@ -1842,6 +1880,12 @@ export default function App() {
                           diffTab: autoDiff,
                           activePreviewTab: autoDiff?.name ?? newLabel,
                           dryRunInProgress: false,
+                          ...(parsedRules ? {
+                            columnRules: parsedRules,
+                            columnRuleAlgorithms: parsedAlgorithms ?? [],
+                            columnRuleDomains: parsedDomains ?? [],
+                            columnRuleFrameworks: parsedFrameworks ?? [],
+                          } : {}),
                         });
 
                         if (isViewingTable(rowKey, schema, tName)) {
@@ -1851,6 +1895,12 @@ export default function App() {
                             setActivePreviewTab(autoDiff.name);
                           } else {
                             setActivePreviewTab(newLabel);
+                          }
+                          if (parsedRules) {
+                            setColumnRules(parsedRules);
+                            setColumnRuleAlgorithms(parsedAlgorithms ?? []);
+                            setColumnRuleDomains(parsedDomains ?? []);
+                            setColumnRuleFrameworks(parsedFrameworks ?? []);
                           }
                         }
                       }
@@ -1870,6 +1920,25 @@ export default function App() {
                         ),
                       };
                     });
+                  }
+
+                  if (parsedRules && !Array.isArray(maskedFilenames)) {
+                    const cachedEntry = tableCacheRef.current.get(key);
+                    if (cachedEntry) {
+                      tableCacheRef.current.set(key, {
+                        ...cachedEntry,
+                        columnRules: parsedRules,
+                        columnRuleAlgorithms: parsedAlgorithms ?? [],
+                        columnRuleDomains: parsedDomains ?? [],
+                        columnRuleFrameworks: parsedFrameworks ?? [],
+                      });
+                    }
+                    if (isViewingTable(rowKey, schema, tName)) {
+                      setColumnRules(parsedRules);
+                      setColumnRuleAlgorithms(parsedAlgorithms ?? []);
+                      setColumnRuleDomains(parsedDomains ?? []);
+                      setColumnRuleFrameworks(parsedFrameworks ?? []);
+                    }
                   }
 
                   setDryRunningTables((prev) => { const next = new Set(prev); next.delete(key); return next; });
