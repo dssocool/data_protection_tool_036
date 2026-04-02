@@ -384,7 +384,13 @@ export default function DataPreviewPanel({
   }, [samples, dryRuns]);
 
   const tabs = useMemo(() => {
-    if (isProfileResultMode && diffTab) return [diffTab.name];
+    if (isProfileResultMode) {
+      const resultTabs: string[] = [];
+      for (const dr of dryRuns) {
+        if (dr.label.startsWith("Result")) resultTabs.push(dr.label);
+      }
+      return resultTabs;
+    }
     const list: string[] = samples.map((s) => s.label);
     for (const dr of dryRuns) list.push(dr.label);
     if (diffTab) list.push(diffTab.name);

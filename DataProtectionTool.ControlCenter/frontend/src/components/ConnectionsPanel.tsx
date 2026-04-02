@@ -65,7 +65,7 @@ interface ConnectionsPanelProps {
   checkedTables?: Set<string>;
   onCheckedTablesChange?: (next: Set<string>) => void;
   onProfileData?: (tableKeys: string[]) => void;
-  profiledTables?: Set<string>;
+  profiledTables?: Map<string, number>;
   profileFailedTables?: Set<string>;
   onApplySanitization?: (tableKeys: string[]) => void;
   starredTables?: Set<string>;
@@ -687,7 +687,8 @@ export default function ConnectionsPanel({
                                       && selectedTable?.schema === t.schema
                                       && selectedTable?.tableName === t.name;
                                     const isDryRunning = dryRunningTables.has(tKey);
-                                    const isProfiled = profiledTables?.has(tKey) ?? false;
+                                    const profileCount = profiledTables?.get(tKey) ?? 0;
+                                    const isProfiled = profileCount > 0;
                                     const isChecked = checkedTables?.has(tKey) ?? false;
                                     const isTableExpanded = expandedTables.has(tKey);
                                     const isProfileResultActive = profileResultActiveTable === tKey;
@@ -740,7 +741,7 @@ export default function ConnectionsPanel({
                                             </svg>
                                           </span>
                                           <span className="conn-table-name">{t.schema}.{t.name}</span>
-                                          {isProfiled && !isDryRunning && (
+                                          {isProfiled && (
                                             <span
                                               className="conn-table-profile-result-badge"
                                               onClick={(e) => {
@@ -754,13 +755,13 @@ export default function ConnectionsPanel({
                                                   onTableClick?.(conn.rowKey, t.schema, t.name);
                                                 }
                                               }}
-                                              title="View profile result"
+                                              title={`View ${profileCount} ${profileCount === 1 ? "profile" : "profiles"}`}
                                             >
                                               <svg width="10" height="10" viewBox="0 0 16 16" fill="none">
                                                 <circle cx="6.5" cy="6.5" r="4.8" stroke="currentColor" strokeWidth="1.6" />
                                                 <path d="M10.2 10.2L14.5 14.5" stroke="currentColor" strokeWidth="2.8" strokeLinecap="round" />
                                               </svg>
-                                              profile result
+                                              {profileCount} {profileCount === 1 ? "profile" : "profiles"}
                                             </span>
                                           )}
                                         </div>

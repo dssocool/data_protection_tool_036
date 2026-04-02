@@ -117,7 +117,7 @@ export default function App() {
   const [allAlgorithms, setAllAlgorithms] = useState<Record<string, unknown>[]>([]);
   const [allFrameworks, setAllFrameworks] = useState<Record<string, unknown>[]>([]);
   const [dryRunningTables, setDryRunningTables] = useState<Set<string>>(new Set());
-  const [profiledTables, setProfiledTables] = useState<Set<string>>(new Set());
+  const [profiledTables, setProfiledTables] = useState<Map<string, number>>(new Map());
   const [profileFailedTables, setProfileFailedTables] = useState<Set<string>>(new Set());
   const [mismatchedColumns, setMismatchedColumns] = useState<Map<string, { maskType: string; sqlType: string }>>(new Map());
   const [sqlModalMinimizing, setSqlModalMinimizing] = useState(false);
@@ -218,7 +218,7 @@ export default function App() {
       demoEntry.timers.forEach(clearTimeout);
       for (const key of demoEntry.tableKeys) {
         setDryRunningTables(prev => { const next = new Set(prev); next.delete(key); return next; });
-        setProfiledTables(prev => { const next = new Set(prev); next.delete(key); return next; });
+        setProfiledTables(prev => { const next = new Map(prev); next.delete(key); return next; });
       }
       demoTimersRef.current.delete(eventTimestamp);
     }
@@ -885,16 +885,17 @@ export default function App() {
 
     if (cached) {
       restoreTableFromCache(cached);
-      const profileDryRun = [...cached.dryRuns].reverse().find((dr) => dr.label.startsWith("Result"));
-      if (profileDryRun) {
-        const diffWithProfile = cached.samples[0]?.label
-          ? { name: profileDryRun.label, leftTab: cached.samples[0].label, rightTab: profileDryRun.label }
+      const latestProfileDryRun = [...cached.dryRuns].reverse().find((dr) => dr.label.startsWith("Result"));
+      if (latestProfileDryRun) {
+        const sampleLabel = cached.samples[0]?.label;
+        const diffWithProfile = sampleLabel
+          ? { name: latestProfileDryRun.label, leftTab: sampleLabel, rightTab: latestProfileDryRun.label }
           : null;
         if (diffWithProfile) {
           setDiffTab(diffWithProfile);
           setActivePreviewTab(diffWithProfile.name);
         } else {
-          setActivePreviewTab(profileDryRun.label);
+          setActivePreviewTab(latestProfileDryRun.label);
         }
       }
       return;
@@ -1541,7 +1542,7 @@ export default function App() {
           if (i === 0) {
             setProfileFailedTables((prev) => new Set(prev).add(t.key));
           } else {
-            setProfiledTables((prev) => new Set(prev).add(t.key));
+            setProfiledTables((prev) => new Map(prev).set(t.key, (prev.get(t.key) ?? 0) + 1));
 
             const maskedPreview = MOCK_DRY_RUN_DATA[t.key];
             if (maskedPreview) {
@@ -1829,7 +1830,7 @@ export default function App() {
                   }
 
                   setDryRunningTables((prev) => { const next = new Set(prev); next.delete(key); return next; });
-                  setProfiledTables((prev) => new Set(prev).add(key));
+                  setProfiledTables((prev) => new Map(prev).set(key, (prev.get(key) ?? 0) + 1));
                 }
               }
             } catch { /* parse error */ }
@@ -1843,7 +1844,6 @@ export default function App() {
             for (const t of tables) {
               setDryRunningTables((prev) => { const next = new Set(prev); next.delete(t.key); return next; });
               setProfileFailedTables((prev) => new Set(prev).add(t.key));
-              setProfiledTables((prev) => { const next = new Set(prev); next.delete(t.key); return next; });
             }
           }
         }
@@ -1854,7 +1854,6 @@ export default function App() {
         for (const t of tables) {
           setDryRunningTables((prev) => { const next = new Set(prev); next.delete(t.key); return next; });
           setProfileFailedTables((prev) => new Set(prev).add(t.key));
-          setProfiledTables((prev) => { const next = new Set(prev); next.delete(t.key); return next; });
         }
       }
     } catch (e) {
@@ -1866,7 +1865,6 @@ export default function App() {
       for (const t of tables) {
         setDryRunningTables((prev) => { const next = new Set(prev); next.delete(t.key); return next; });
         setProfileFailedTables((prev) => new Set(prev).add(t.key));
-        setProfiledTables((prev) => { const next = new Set(prev); next.delete(t.key); return next; });
       }
     } finally {
       activeJobControllersRef.current.delete(trackedTs);
@@ -2217,7 +2215,15 @@ export default function App() {
                 allDomains={allDomains}
                 allAlgorithms={allAlgorithms}
                 allFrameworks={allFrameworks}
-                onTabChange={setActivePreviewTab}
+                onTabChange={(tab) => {
+                  setActivePreviewTab(tab);
+                  if (profileResultActiveTable && tab.startsWith("Result")) {
+                    const sampleLabel = samples[0]?.label;
+                    if (sampleLabel) {
+                      setDiffTab({ name: tab, leftTab: sampleLabel, rightTab: tab });
+                    }
+                  }
+                }}
                 onTabClose={(tab) => {
                   const isSampleTab = samples.some((s) => s.label === tab);
                   const isDryRunTab = dryRuns.some((dr) => dr.label === tab);
