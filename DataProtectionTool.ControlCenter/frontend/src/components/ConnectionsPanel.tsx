@@ -82,6 +82,10 @@ interface ConnectionsPanelProps {
   onRestoreColumnRule?: (tKey: string, params: { fileFieldMetadataId: string; algorithmName: string; domainName: string }) => Promise<void>;
   profileResultActiveTable?: string | null;
   onProfileResultClick?: (rowKey: string, schema: string, tableName: string) => void;
+  hoveredColumn?: string | null;
+  clickedColumn?: string | null;
+  onHoveredColumnChange?: (col: string | null) => void;
+  onClickedColumnChange?: (col: string | null) => void;
 }
 
 const MIN_WIDTH = 200;
@@ -132,6 +136,10 @@ export default function ConnectionsPanel({
   onRestoreColumnRule,
   profileResultActiveTable,
   onProfileResultClick,
+  hoveredColumn,
+  clickedColumn,
+  onHoveredColumnChange,
+  onClickedColumnChange,
 }: ConnectionsPanelProps) {
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
   const [searchText, setSearchText] = useState("");
@@ -238,6 +246,16 @@ export default function ConnectionsPanel({
     const next = new Set(expanded);
     if (next.has(rowKey)) {
       next.delete(rowKey);
+      const tables = connectionTables[rowKey];
+      if (tables && checkedTables && checkedTables.size > 0) {
+        const nextChecked = new Set(checkedTables);
+        for (const t of tables) {
+          nextChecked.delete(`${rowKey}:${t.schema}:${t.name}`);
+        }
+        if (nextChecked.size !== checkedTables.size) {
+          onCheckedTablesChange?.(nextChecked);
+        }
+      }
     } else {
       next.add(rowKey);
       onExpandConnection(rowKey);
@@ -266,18 +284,6 @@ export default function ConnectionsPanel({
     document.addEventListener("mousedown", dismiss);
     return () => document.removeEventListener("mousedown", dismiss);
   }, [selectMenuOpen]);
-
-  const allTableKeys = useMemo(() => {
-    const keys: string[] = [];
-    for (const conn of connections) {
-      const tables = connectionTables[conn.rowKey];
-      if (!tables) continue;
-      for (const t of tables) {
-        keys.push(`${conn.rowKey}:${t.schema}:${t.name}`);
-      }
-    }
-    return keys;
-  }, [connections, connectionTables]);
 
   const searchLower = searchText.toLowerCase();
 
@@ -315,19 +321,18 @@ export default function ConnectionsPanel({
   const visibleTableKeys = useMemo(() => {
     const keys: string[] = [];
     for (const conn of connections) {
+      if (!expanded.has(conn.rowKey)) continue;
       const tables = connectionTables[conn.rowKey];
       if (!tables) continue;
-      const filtered = filteredTables(conn.rowKey);
-      if (!filtered) continue;
-      for (const t of filtered) {
+      for (const t of tables) {
         keys.push(`${conn.rowKey}:${t.schema}:${t.name}`);
       }
     }
     return keys;
-  }, [connections, connectionTables, searchText]);
+  }, [connections, connectionTables, expanded]);
 
   function handleSelectAll() {
-    onCheckedTablesChange?.(new Set(allTableKeys));
+    onCheckedTablesChange?.(new Set(visibleTableKeys));
     setSelectMenuOpen(false);
   }
 
@@ -361,7 +366,7 @@ export default function ConnectionsPanel({
 
   function handleSelectStarred() {
     const next = new Set<string>();
-    for (const key of allTableKeys) {
+    for (const key of visibleTableKeys) {
       if (starredTables?.has(key)) next.add(key);
     }
     onCheckedTablesChange?.(next);
@@ -370,7 +375,7 @@ export default function ConnectionsPanel({
 
   function handleSelectUnstarred() {
     const next = new Set<string>();
-    for (const key of allTableKeys) {
+    for (const key of visibleTableKeys) {
       if (!starredTables?.has(key)) next.add(key);
     }
     onCheckedTablesChange?.(next);
@@ -477,9 +482,6 @@ export default function ConnectionsPanel({
               No items available
             </span>
           )}
-          {(checkedTables?.size ?? 0) > 0 && (
-            <span className="conn-select-badge">{checkedTables!.size}</span>
-          )}
           {selectMenuOpen && (
             <div className="conn-icon-dropdown">
               <div className="conn-icon-dropdown-item" onClick={handleSelectAll}>All</div>
@@ -551,8 +553,22 @@ export default function ConnectionsPanel({
                 className="conn-icon-dropdown-item"
                 onClick={() => {
                   setActionsOpen(false);
+                  const allKeys = new Set(connections.map(c => c.rowKey));
+                  for (const rk of allKeys) onExpandConnection(rk);
+                  onExpandedChange(allKeys);
+                }}
+              >
+                Expand All
+              </div>
+              <div
+                className="conn-icon-dropdown-item"
+                onClick={() => {
+                  setActionsOpen(false);
                   onExpandedChange(new Set());
                   setExpandedTables(new Set());
+                  if (checkedTables && checkedTables.size > 0) {
+                    onCheckedTablesChange?.(new Set());
+                  }
                 }}
               >
                 Collapse All
@@ -560,6 +576,9 @@ export default function ConnectionsPanel({
             </div>
           )}
         </div>
+        {(checkedTables?.size ?? 0) > 0 && (
+          <span className="conn-icon-bar-selected-text">{checkedTables!.size} selected</span>
+        )}
         </div>
       </div>
       {connections.length === 0 ? (
@@ -575,10 +594,6 @@ export default function ConnectionsPanel({
                 {visibleConns.map((conn) => {
                   const fTables = filteredTables(conn.rowKey);
                   const fQueries = filteredQueries(conn.rowKey);
-                  const tablesForConn = connectionTables[conn.rowKey];
-                  const checkedCountForConn = tablesForConn
-                    ? tablesForConn.filter(t => checkedTables?.has(`${conn.rowKey}:${t.schema}:${t.name}`)).length
-                    : 0;
                   return (
                   <li key={conn.rowKey} className="connections-list-entry">
                     <div
@@ -595,9 +610,6 @@ export default function ConnectionsPanel({
                         </svg>
                       </button>
                       <div className="conn-details">
-                        {checkedCountForConn > 0 && (
-                          <span className="conn-db-checked-badge">{checkedCountForConn}</span>
-                        )}
                         <span className="conn-server">
                           {conn.serverName}
                           {conn.connectionType === "SqlServer" && (
@@ -754,8 +766,16 @@ export default function ConnectionsPanel({
                                                   const savedPrev = metaId ? disabledRules.get(metaId) : undefined;
                                                   const isDisabled = isDisabledByEngine || !!savedPrev;
                                                   const hasActiveAlg = !!algName && !isDisabled;
+                                                  const isColClicked = isProfileResultActive && clickedColumn === col.name;
+                                                  const isColHovered = isProfileResultActive && !isColClicked && hoveredColumn === col.name;
                                                   return (
-                                                    <li key={col.name} className="conn-table-column-row">
+                                                    <li
+                                                      key={col.name}
+                                                      className={`conn-table-column-row${isColClicked ? " column-highlight-click" : isColHovered ? " column-highlight-hover" : ""}`}
+                                                      onMouseEnter={isProfileResultActive ? () => onHoveredColumnChange?.(col.name) : undefined}
+                                                      onMouseLeave={isProfileResultActive ? () => onHoveredColumnChange?.(null) : undefined}
+                                                      onClick={isProfileResultActive ? (e) => { e.stopPropagation(); onClickedColumnChange?.(clickedColumn === col.name ? null : col.name); } : undefined}
+                                                    >
                                                       <span className="conn-table-column-name">{col.name}</span>
                                                       <span className="conn-table-column-type">{col.type}</span>
                                                       {hasFormat && (

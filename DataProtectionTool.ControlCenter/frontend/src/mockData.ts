@@ -231,6 +231,18 @@ const EMPLOYEES_PREVIEW: PreviewData = {
   ],
 };
 
+const EMPLOYEES_MASKED_PREVIEW: PreviewData = {
+  headers: EMPLOYEES_PREVIEW.headers,
+  columnTypes: EMPLOYEES_PREVIEW.columnTypes,
+  rows: [
+    ["201", "S**** T*******", "s.t*******@****.local", "Engineering", "125000.00", "2018-01-01", "200"],
+    ["202", "J**** L**", "j.l**@****.local", "Engineering", "118000.00", "2019-01-01", "201"],
+    ["203", "M**** G*****", "m.g*****@****.local", "Marketing", "95000.00", "2020-01-01", "210"],
+    ["204", "R***** W*****", "r.w*****@****.local", "Finance", "105000.00", "2017-01-01", "220"],
+    ["205", "L*** A*******", "l.a*******@****.local", "Engineering", "132000.00", "2016-01-01", "201"],
+  ],
+};
+
 export const MOCK_SAMPLE_DATA: Record<string, SampleResult[]> = {
   "conn-001:dbo:Customers": [
     { label: "Sample 1", data: CUSTOMERS_PREVIEW, blobFilenames: ["mock-cust-sample.parquet"] },
@@ -242,6 +254,7 @@ export const MOCK_SAMPLE_DATA: Record<string, SampleResult[]> = {
 
 export const MOCK_DRY_RUN_DATA: Record<string, PreviewData> = {
   "conn-001:dbo:Customers": CUSTOMERS_MASKED_PREVIEW,
+  "conn-002:hr:Employees": EMPLOYEES_MASKED_PREVIEW,
 };
 
 // ---------------------------------------------------------------------------

@@ -128,6 +128,8 @@ export default function App() {
   const [profileResultActiveTable, setProfileResultActiveTable] = useState<string | null>(null);
   const [tableColumns, setTableColumns] = useState<Record<string, { name: string; type: string }[]>>({});
   const [tableColumnRules, setTableColumnRules] = useState<Record<string, Record<string, unknown>[]>>({});
+  const [hoveredColumn, setHoveredColumn] = useState<string | null>(null);
+  const [clickedColumn, setClickedColumn] = useState<string | null>(null);
   const pendingSqlSaveRowKeyRef = useRef<string | null>(null);
   const pendingFlowRowKeyRef = useRef<string | null>(null);
   const previewCacheRef = useRef<Map<string, string[]>>(new Map());
@@ -1532,6 +1534,44 @@ export default function App() {
             setProfileFailedTables((prev) => new Set(prev).add(t.key));
           } else {
             setProfiledTables((prev) => new Set(prev).add(t.key));
+
+            const maskedPreview = MOCK_DRY_RUN_DATA[t.key];
+            if (maskedPreview) {
+              const newLabel = `Profile Result ${formatProfileTimestamp(demoTs)}`;
+              const newDryRun: DryRunResult = { label: newLabel, data: maskedPreview, inProgress: false };
+              const cachedEntry = tableCacheRef.current.get(t.key);
+              const mockSamples = MOCK_SAMPLE_DATA[t.key] ?? [];
+              const prevSamples = cachedEntry?.samples ?? mockSamples;
+              const prevDryRuns = cachedEntry?.dryRuns ?? [];
+              const sampleLabel = prevSamples[0]?.label;
+              const autoDiff = sampleLabel
+                ? { name: `${sampleLabel} vs ${newLabel}`, leftTab: sampleLabel, rightTab: newLabel }
+                : null;
+
+              tableCacheRef.current.set(t.key, {
+                ...(cachedEntry ?? {
+                  samples: prevSamples, dryRuns: [], activePreviewTab: "Sample 1",
+                  diffTab: null, previewError: null, dryRunInProgress: false,
+                  columnRules: [], columnRuleAlgorithms: [], columnRuleDomains: [], columnRuleFrameworks: [],
+                }),
+                samples: prevSamples,
+                dryRuns: [...prevDryRuns, newDryRun],
+                diffTab: autoDiff,
+                activePreviewTab: autoDiff?.name ?? newLabel,
+                dryRunInProgress: false,
+              });
+
+              if (isViewingTable(t.rowKey, t.schema, t.tableName)) {
+                setSamples(prevSamples);
+                setDryRuns((prev) => [...prev, newDryRun]);
+                if (autoDiff) {
+                  setDiffTab(autoDiff);
+                  setActivePreviewTab(autoDiff.name);
+                } else {
+                  setActivePreviewTab(newLabel);
+                }
+              }
+            }
           }
           if (i === tables.length - 1) {
             demoTimersRef.current.delete(demoTs);
@@ -2143,6 +2183,10 @@ export default function App() {
                 onRestoreColumnRule={handleRestoreColumnRuleFromPanel}
                 profileResultActiveTable={profileResultActiveTable}
                 onProfileResultClick={handleProfileResultClick}
+                hoveredColumn={hoveredColumn}
+                clickedColumn={clickedColumn}
+                onHoveredColumnChange={setHoveredColumn}
+                onClickedColumnChange={setClickedColumn}
               />
             )}
             {(selectedTable || selectedQuery) && (
@@ -2240,6 +2284,11 @@ export default function App() {
                 mismatchedColumns={mismatchedColumns}
                 onMismatchedColumnsChange={setMismatchedColumns}
                 panelLeft={leftPanel ? connectionsPanelWidth + 16 : 0}
+                isProfileResultMode={profileResultActiveTable != null}
+                hoveredColumn={hoveredColumn}
+                clickedColumn={clickedColumn}
+                onHoveredColumnChange={setHoveredColumn}
+                onClickedColumnChange={setClickedColumn}
               />
             )}
           </>

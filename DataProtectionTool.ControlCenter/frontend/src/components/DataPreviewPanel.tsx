@@ -53,6 +53,11 @@ interface DataPreviewPanelProps {
   mismatchedColumns: Map<string, { maskType: string; sqlType: string }>;
   onMismatchedColumnsChange: (updater: (prev: Map<string, { maskType: string; sqlType: string }>) => Map<string, { maskType: string; sqlType: string }>) => void;
   panelLeft: number;
+  isProfileResultMode?: boolean;
+  hoveredColumn?: string | null;
+  clickedColumn?: string | null;
+  onHoveredColumnChange?: (col: string | null) => void;
+  onClickedColumnChange?: (col: string | null) => void;
 }
 
 function resolveTabData(
@@ -74,10 +79,14 @@ interface SortableTableProps {
   onHeaderClick: (columnIndex: number) => void;
   columnWidths: number[];
   onColumnResize: (columnIndex: number, width: number) => void;
+  hoveredColumn?: string | null;
+  clickedColumn?: string | null;
+  onHoveredColumnChange?: (col: string | null) => void;
+  onClickedColumnChange?: (col: string | null) => void;
 }
 
 const DataTable = forwardRef<HTMLTableElement, SortableTableProps>(
-  function DataTable({ data, sortColumnIndex, sortDirection, onHeaderClick, columnWidths, onColumnResize }, ref) {
+  function DataTable({ data, sortColumnIndex, sortDirection, onHeaderClick, columnWidths, onColumnResize, hoveredColumn, clickedColumn, onHoveredColumnChange, onClickedColumnChange }, ref) {
     const resizing = useRef<{ colIndex: number; startX: number; startWidth: number } | null>(null);
     const innerRef = useRef<HTMLTableElement | null>(null);
     const setRefs = useCallback((el: HTMLTableElement | null) => {
@@ -133,33 +142,59 @@ const DataTable = forwardRef<HTMLTableElement, SortableTableProps>(
         )}
         <thead>
           <tr>
-            {data.headers.map((h, i) => (
-              <th key={i} onClick={() => onHeaderClick(i)}>
-                <span className="column-header-content">
-                  {h}
-                  {sortColumnIndex === i && sortDirection && (
-                    <span className="column-sort-indicator">
-                      {sortDirection === "asc" ? "\u25B2" : "\u25BC"}
-                    </span>
+            {data.headers.map((h, i) => {
+              const isClicked = clickedColumn === h;
+              const isHovered = !isClicked && hoveredColumn === h;
+              return (
+                <th
+                  key={i}
+                  className={isClicked ? "column-highlight-click" : isHovered ? "column-highlight-hover" : ""}
+                  onClick={() => {
+                    onClickedColumnChange?.(clickedColumn === h ? null : h);
+                    onHeaderClick(i);
+                  }}
+                  onMouseEnter={() => onHoveredColumnChange?.(h)}
+                  onMouseLeave={() => onHoveredColumnChange?.(null)}
+                >
+                  <span className="column-header-content">
+                    {h}
+                    {sortColumnIndex === i && sortDirection && (
+                      <span className="column-sort-indicator">
+                        {sortDirection === "asc" ? "\u25B2" : "\u25BC"}
+                      </span>
+                    )}
+                  </span>
+                  {data.columnTypes?.[i] && (
+                    <span className="column-type-label">{data.columnTypes[i]}</span>
                   )}
-                </span>
-                {data.columnTypes?.[i] && (
-                  <span className="column-type-label">{data.columnTypes[i]}</span>
-                )}
-                <div
-                  className="column-resize-handle"
-                  onMouseDown={(e) => onResizeMouseDown(e, i)}
-                />
-              </th>
-            ))}
+                  <div
+                    className="column-resize-handle"
+                    onMouseDown={(e) => onResizeMouseDown(e, i)}
+                  />
+                </th>
+              );
+            })}
           </tr>
         </thead>
         <tbody>
           {data.rows.map((row, ri) => (
             <tr key={ri}>
-              {row.map((cell, ci) => (
-                <td key={ci}>{cell}</td>
-              ))}
+              {row.map((cell, ci) => {
+                const colName = data.headers[ci];
+                const isClicked = clickedColumn === colName;
+                const isHovered = !isClicked && hoveredColumn === colName;
+                return (
+                  <td
+                    key={ci}
+                    className={isClicked ? "column-highlight-click" : isHovered ? "column-highlight-hover" : ""}
+                    onMouseEnter={() => onHoveredColumnChange?.(colName)}
+                    onMouseLeave={() => onHoveredColumnChange?.(null)}
+                    onClick={() => onClickedColumnChange?.(clickedColumn === colName ? null : colName)}
+                  >
+                    {cell}
+                  </td>
+                );
+              })}
             </tr>
           ))}
         </tbody>
@@ -176,10 +211,14 @@ interface DiffViewProps {
   onHeaderClick: (columnIndex: number) => void;
   columnWidths: number[];
   onColumnResize: (columnIndex: number, width: number) => void;
+  hoveredColumn?: string | null;
+  clickedColumn?: string | null;
+  onHoveredColumnChange?: (col: string | null) => void;
+  onClickedColumnChange?: (col: string | null) => void;
 }
 
 const DiffView = forwardRef<HTMLTableElement, DiffViewProps>(
-  function DiffView({ left, right, sortColumnIndex, sortDirection, onHeaderClick, columnWidths, onColumnResize }, ref) {
+  function DiffView({ left, right, sortColumnIndex, sortDirection, onHeaderClick, columnWidths, onColumnResize, hoveredColumn, clickedColumn, onHoveredColumnChange, onClickedColumnChange }, ref) {
     const headers = left.headers;
     const maxRows = Math.max(left.rows.length, right.rows.length);
 
@@ -238,25 +277,38 @@ const DiffView = forwardRef<HTMLTableElement, DiffViewProps>(
         )}
         <thead>
           <tr>
-            {headers.map((h, i) => (
-              <th key={i} onClick={() => onHeaderClick(i)}>
-                <span className="column-header-content">
-                  {h}
-                  {sortColumnIndex === i && sortDirection && (
-                    <span className="column-sort-indicator">
-                      {sortDirection === "asc" ? "\u25B2" : "\u25BC"}
-                    </span>
+            {headers.map((h, i) => {
+              const isClicked = clickedColumn === h;
+              const isHovered = !isClicked && hoveredColumn === h;
+              return (
+                <th
+                  key={i}
+                  className={isClicked ? "column-highlight-click" : isHovered ? "column-highlight-hover" : ""}
+                  onClick={() => {
+                    onClickedColumnChange?.(clickedColumn === h ? null : h);
+                    onHeaderClick(i);
+                  }}
+                  onMouseEnter={() => onHoveredColumnChange?.(h)}
+                  onMouseLeave={() => onHoveredColumnChange?.(null)}
+                >
+                  <span className="column-header-content">
+                    {h}
+                    {sortColumnIndex === i && sortDirection && (
+                      <span className="column-sort-indicator">
+                        {sortDirection === "asc" ? "\u25B2" : "\u25BC"}
+                      </span>
+                    )}
+                  </span>
+                  {left.columnTypes?.[i] && (
+                    <span className="column-type-label">{left.columnTypes[i]}</span>
                   )}
-                </span>
-                {left.columnTypes?.[i] && (
-                  <span className="column-type-label">{left.columnTypes[i]}</span>
-                )}
-                <div
-                  className="column-resize-handle"
-                  onMouseDown={(e) => onResizeMouseDown(e, i)}
-                />
-              </th>
-            ))}
+                  <div
+                    className="column-resize-handle"
+                    onMouseDown={(e) => onResizeMouseDown(e, i)}
+                  />
+                </th>
+              );
+            })}
           </tr>
         </thead>
         <tbody>
@@ -265,15 +317,23 @@ const DiffView = forwardRef<HTMLTableElement, DiffViewProps>(
             const rightRow = right.rows[ri];
             return (
               <tr key={ri}>
-                {headers.map((_, ci) => {
+                {headers.map((h, ci) => {
                   const lv = leftRow?.[ci] ?? "";
                   const rv = rightRow?.[ci] ?? "";
                   const changed = lv !== rv;
+                  const isClicked = clickedColumn === h;
+                  const isHovered = !isClicked && hoveredColumn === h;
+                  const hlClass = isClicked ? " column-highlight-click" : isHovered ? " column-highlight-hover" : "";
+                  const cellHandlers = {
+                    onMouseEnter: () => onHoveredColumnChange?.(h),
+                    onMouseLeave: () => onHoveredColumnChange?.(null),
+                    onClick: () => onClickedColumnChange?.(clickedColumn === h ? null : h),
+                  };
                   if (!changed) {
-                    return <td key={ci}>{lv}</td>;
+                    return <td key={ci} className={hlClass.trim() || undefined} {...cellHandlers}>{lv}</td>;
                   }
                   return (
-                    <td key={ci} className="data-preview-diff-cell-changed">
+                    <td key={ci} className={`data-preview-diff-cell-changed${hlClass}`} {...cellHandlers}>
                       <span className="data-preview-diff-old">{lv}</span>
                       <span className="data-preview-diff-arrow">{"\u2192"}</span>
                       <span className="data-preview-diff-new">{rv}</span>
@@ -311,6 +371,11 @@ export default function DataPreviewPanel({
   mismatchedColumns,
   onMismatchedColumnsChange,
   panelLeft,
+  isProfileResultMode,
+  hoveredColumn,
+  clickedColumn,
+  onHoveredColumnChange,
+  onClickedColumnChange,
 }: DataPreviewPanelProps) {
   const dataTabs = useMemo(() => {
     const list: string[] = samples.map((s) => s.label);
@@ -319,11 +384,12 @@ export default function DataPreviewPanel({
   }, [samples, dryRuns]);
 
   const tabs = useMemo(() => {
+    if (isProfileResultMode && diffTab) return [diffTab.name];
     const list: string[] = samples.map((s) => s.label);
     for (const dr of dryRuns) list.push(dr.label);
     if (diffTab) list.push(diffTab.name);
     return list;
-  }, [samples, dryRuns, diffTab]);
+  }, [samples, dryRuns, diffTab, isProfileResultMode]);
 
   const [leftDiffTab, setLeftDiffTab] = useState("");
   const [rightDiffTab, setRightDiffTab] = useState("");
@@ -531,7 +597,7 @@ export default function DataPreviewPanel({
             </button>
           ))}
         </div>
-        {dataTabs.length > 1 && (
+        {!isProfileResultMode && dataTabs.length > 1 && (
           <div className="data-preview-diff-controls">
             <select
               className="data-preview-diff-select"
@@ -567,7 +633,7 @@ export default function DataPreviewPanel({
           </div>
         )}
       </div>
-      <div className="data-preview-body" ref={dataBodyRef} onScroll={handleDataScroll}>
+      <div className={`data-preview-body${isProfileResultMode ? " data-preview-body-no-hscroll" : ""}`} ref={dataBodyRef} onScroll={isProfileResultMode ? undefined : handleDataScroll}>
         {(() => {
           const activeDryRun = dryRuns.find((dr) => dr.label === activeTab);
           if (activeDryRun?.inProgress && !activeData) {
@@ -594,6 +660,10 @@ export default function DataPreviewPanel({
                 onHeaderClick={handleHeaderClick}
                 columnWidths={userColumnWidths}
                 onColumnResize={handleColumnResize}
+                hoveredColumn={hoveredColumn}
+                clickedColumn={clickedColumn}
+                onHoveredColumnChange={onHoveredColumnChange}
+                onClickedColumnChange={onClickedColumnChange}
                 ref={tableRef}
               />
             );
@@ -607,6 +677,10 @@ export default function DataPreviewPanel({
                 onHeaderClick={handleHeaderClick}
                 columnWidths={userColumnWidths}
                 onColumnResize={handleColumnResize}
+                hoveredColumn={hoveredColumn}
+                clickedColumn={clickedColumn}
+                onHoveredColumnChange={onHoveredColumnChange}
+                onClickedColumnChange={onClickedColumnChange}
                 ref={tableRef}
               />
             );
@@ -614,7 +688,7 @@ export default function DataPreviewPanel({
           return null;
         })()}
       </div>
-      {currentHeaders.length > 0 && (
+      {currentHeaders.length > 0 && !isProfileResultMode && (
         <div className="data-preview-column-rules">
           <div className="data-preview-column-rules-header">
             <span className="data-preview-column-rules-tab">Column Rules</span>

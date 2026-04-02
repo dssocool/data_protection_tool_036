@@ -120,6 +120,15 @@
   flex-shrink: 0;
 }
 
+.conn-icon-bar-selected-text {
+  margin-left: auto;
+  font-size: 11px;
+  font-weight: 600;
+  color: #0078d4;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
 .conn-icon-btn-wrapper {
   position: relative;
 }
@@ -198,23 +207,6 @@
   background: #e4e4e4;
 }
 
-.conn-select-badge {
-  position: absolute;
-  top: -5px;
-  right: -14px;
-  min-width: 16px;
-  height: 16px;
-  padding: 0 4px;
-  border-radius: 8px;
-  background: #0078d4;
-  color: #fff;
-  font-size: 10px;
-  font-weight: 600;
-  line-height: 16px;
-  text-align: center;
-  pointer-events: none;
-  z-index: 2;
-}
 
 .conn-icon-btn-caret {
   color: #888;
@@ -648,6 +640,14 @@
   background: #f0f4f8;
 }
 
+.conn-table-column-row.column-highlight-hover {
+  background: #fff9c4 !important;
+}
+
+.conn-table-column-row.column-highlight-click {
+  background: #ffe082 !important;
+}
+
 .conn-table-column-name {
   color: #444;
   font-weight: 500;
@@ -772,21 +772,4 @@
   100% { transform: translateX(0); }
 }
 
-.conn-db-checked-badge {
-  position: absolute;
-  top: -9px;
-  left: -16px;
-  min-width: 16px;
-  height: 16px;
-  padding: 0 4px;
-  border-radius: 8px;
-  background: #0078d4;
-  color: #fff;
-  font-size: 10px;
-  font-weight: 600;
-  line-height: 16px;
-  text-align: center;
-  pointer-events: none;
-  z-index: 1;
-}
 
