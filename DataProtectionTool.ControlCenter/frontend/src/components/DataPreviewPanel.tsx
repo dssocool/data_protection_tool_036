@@ -224,11 +224,33 @@ const DiffView = forwardRef<HTMLTableElement, DiffViewProps>(
 
     const resizing = useRef<{ colIndex: number; startX: number; startWidth: number } | null>(null);
     const innerRef = useRef<HTMLTableElement | null>(null);
+    const autoMeasured = useRef(false);
     const setRefs = useCallback((el: HTMLTableElement | null) => {
       innerRef.current = el;
       if (typeof ref === "function") ref(el);
       else if (ref) (ref as React.MutableRefObject<HTMLTableElement | null>).current = el;
     }, [ref]);
+
+    useEffect(() => {
+      autoMeasured.current = false;
+    }, [left, right]);
+
+    useEffect(() => {
+      if (columnWidths.length > 0 || autoMeasured.current) return;
+      const table = innerRef.current;
+      if (!table) return;
+      autoMeasured.current = true;
+      const colCount = headers.length;
+      const widths = new Array<number>(colCount).fill(0);
+      const allCells = table.querySelectorAll("thead th, tbody td");
+      allCells.forEach((cell) => {
+        const ci = Array.from(cell.parentElement!.children).indexOf(cell);
+        if (ci >= 0 && ci < colCount) {
+          widths[ci] = Math.max(widths[ci], (cell as HTMLElement).scrollWidth + 20);
+        }
+      });
+      widths.forEach((w, i) => onColumnResize(i, w));
+    });
 
     const onResizeMouseDown = useCallback((e: React.MouseEvent, colIndex: number) => {
       e.stopPropagation();
@@ -236,17 +258,7 @@ const DiffView = forwardRef<HTMLTableElement, DiffViewProps>(
 
       if (columnWidths.length === 0 && innerRef.current) {
         const ths = innerRef.current.querySelectorAll("thead th");
-        const headerWidths = Array.from(ths).map((th) => th.getBoundingClientRect().width);
-        const rows = innerRef.current.querySelectorAll("tbody tr");
-        const measured = [...headerWidths];
-        rows.forEach((row) => {
-          const tds = row.querySelectorAll("td");
-          tds.forEach((td, i) => {
-            if (i < measured.length) {
-              measured[i] = Math.max(measured[i], td.getBoundingClientRect().width);
-            }
-          });
-        });
+        const measured = Array.from(ths).map((th) => th.getBoundingClientRect().width);
         measured.forEach((w, i) => onColumnResize(i, w));
       }
 

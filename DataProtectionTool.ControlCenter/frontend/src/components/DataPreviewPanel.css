@@ -365,6 +365,15 @@
   min-width: 100%;
 }
 
+.data-preview-diff-table.data-preview-table-fixed {
+  width: auto;
+}
+
+.data-preview-diff-table.data-preview-table-fixed td {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .data-preview-diff-table th {
   white-space: nowrap;
   overflow: visible;
