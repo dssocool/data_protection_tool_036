@@ -404,7 +404,7 @@ export default function ConnectionsPanel({
           </div>
         </div>
         <div className="conn-icon-bar">
-        <div className="conn-icon-btn-wrapper conn-select-split" ref={selectRef} data-tooltip="Select">
+        <div className="conn-icon-btn-wrapper conn-select-split" ref={selectRef} data-tooltip={selectMenuOpen ? undefined : "Select"}>
           <button
             className="conn-icon-btn conn-select-arrow-btn"
             aria-label="Select options"
@@ -480,7 +480,7 @@ export default function ConnectionsPanel({
             </button>
           </div>
         )}
-        <div className="conn-icon-btn-wrapper" ref={actionsRef} data-tooltip="Action">
+        <div className="conn-icon-btn-wrapper" ref={actionsRef} data-tooltip={actionsOpen ? undefined : "Action"}>
           <button
             className="conn-icon-btn"
             aria-label="Action"
@@ -498,19 +498,11 @@ export default function ConnectionsPanel({
                 className="conn-icon-dropdown-item"
                 onClick={() => {
                   setActionsOpen(false);
-                  onProfileData?.(Array.from(checkedTables ?? []));
+                  onExpandedChange(new Set());
+                  setExpandedTables(new Set());
                 }}
               >
-                Data Sanitize - Profile Data
-              </div>
-              <div
-                className="conn-icon-dropdown-item"
-                onClick={() => {
-                  setActionsOpen(false);
-                  onApplySanitization?.(Array.from(checkedTables ?? []));
-                }}
-              >
-                Data Sanitize - Apply Sanitization
+                Collapse All
               </div>
             </div>
           )}
