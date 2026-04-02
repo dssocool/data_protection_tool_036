@@ -28,7 +28,6 @@ export default function ColumnRuleModal({
   allFrameworks,
   onSave,
   onClose,
-  mismatchedColumns,
   onMismatchedColumnsChange,
   selectedColumnSqlType = "",
 }: ColumnRuleModalProps) {
