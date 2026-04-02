@@ -442,14 +442,17 @@ public static class EngineEndpoints
                     return;
                 }
 
-                var tables = new List<(string rowKey, string schema, string tableName)>();
+                var tables = new List<(string rowKey, string schema, string tableName, List<string> previewFilenames)>();
                 foreach (var tEl in tablesEl.EnumerateArray())
                 {
                     var rk = tEl.TryGetProperty("rowKey", out var rkEl) ? rkEl.GetString() ?? "" : "";
                     var sc = tEl.TryGetProperty("schema", out var scEl) ? scEl.GetString() ?? "" : "";
                     var tn = tEl.TryGetProperty("tableName", out var tnEl) ? tnEl.GetString() ?? "" : "";
+                    var pf = new List<string>();
+                    if (tEl.TryGetProperty("previewFilenames", out var pfEl) && pfEl.ValueKind == JsonValueKind.Array)
+                        pf = pfEl.EnumerateArray().Select(e => e.GetString() ?? "").Where(f => f != "").ToList();
                     if (!string.IsNullOrEmpty(rk) && !string.IsNullOrEmpty(sc) && !string.IsNullOrEmpty(tn))
-                        tables.Add((rk, sc, tn));
+                        tables.Add((rk, sc, tn, pf));
                 }
 
                 if (tables.Count == 0)
@@ -541,38 +544,58 @@ public static class EngineEndpoints
                 // ---- Group 1 + Group 3 pipeline per table (parallel across tables) ----
                 var perTableTasks = tables.Select((table, idx) => Task.Run(async () =>
                 {
-                    var (rowKey, schema, tableName) = table;
+                    var (rowKey, schema, tableName, previewFilenames) = table;
                     var tableLabel = $"{schema}.{tableName}";
 
                     // -- Group 1: sample, copy blobs, fetch SQL types, create file format --
-                    await WriteStatus($"[{tableLabel}] Sampling table...");
-                    var uniqueId = await clientTableService.GetUserIdAsync(partitionKey);
-                    var samplePayload = JsonSerializer.Serialize(new
-                    {
-                        rowKey, schema, tableName, uniqueId,
-                        sqlStatement = $"SELECT * FROM [{schema}].[{tableName}] TABLESAMPLE (200 ROWS)"
-                    });
-                    var sampleResult = await connection.SendCommandAsync("sample_table", samplePayload, TimeSpan.FromSeconds(120));
-                    using var sampleDoc = JsonDocument.Parse(sampleResult);
-                    var sampleRoot = sampleDoc.RootElement;
-
-                    if (!(sampleRoot.TryGetProperty("success", out var ssEl) && ssEl.GetBoolean()))
-                    {
-                        var msg = sampleRoot.TryGetProperty("message", out var mEl) ? mEl.GetString() : "Sample failed.";
-                        throw new InvalidOperationException($"[{tableLabel}] Sample failed: {msg}");
-                    }
-
                     var filenames = new List<string>();
-                    if (sampleRoot.TryGetProperty("filenames", out var fnEl) && fnEl.ValueKind == JsonValueKind.Array)
-                        filenames = fnEl.EnumerateArray().Select(e => e.GetString() ?? "").Where(f => f != "").ToList();
-                    else if (sampleRoot.TryGetProperty("filename", out var fEl))
+
+                    if (previewFilenames.Count > 0)
                     {
-                        var fn = fEl.GetString() ?? "";
-                        if (!string.IsNullOrEmpty(fn)) filenames.Add(fn);
+                        await WriteStatus($"[{tableLabel}] Verifying cached sample...");
+                        var allExist = true;
+                        foreach (var fn in previewFilenames)
+                        {
+                            if (!await previewContainerClient.GetBlobClient(fn).ExistsAsync())
+                            {
+                                allExist = false;
+                                break;
+                            }
+                        }
+                        if (allExist)
+                            filenames = previewFilenames;
                     }
 
                     if (filenames.Count == 0)
-                        throw new InvalidOperationException($"[{tableLabel}] Sample produced no files.");
+                    {
+                        await WriteStatus($"[{tableLabel}] Sampling table...");
+                        var uniqueId = await clientTableService.GetUserIdAsync(partitionKey);
+                        var samplePayload = JsonSerializer.Serialize(new
+                        {
+                            rowKey, schema, tableName, uniqueId,
+                            sqlStatement = $"SELECT * FROM [{schema}].[{tableName}] TABLESAMPLE (200 ROWS)"
+                        });
+                        var sampleResult = await connection.SendCommandAsync("sample_table", samplePayload, TimeSpan.FromSeconds(120));
+                        using var sampleDoc = JsonDocument.Parse(sampleResult);
+                        var sampleRoot = sampleDoc.RootElement;
+
+                        if (!(sampleRoot.TryGetProperty("success", out var ssEl) && ssEl.GetBoolean()))
+                        {
+                            var msg = sampleRoot.TryGetProperty("message", out var mEl) ? mEl.GetString() : "Sample failed.";
+                            throw new InvalidOperationException($"[{tableLabel}] Sample failed: {msg}");
+                        }
+
+                        if (sampleRoot.TryGetProperty("filenames", out var fnEl) && fnEl.ValueKind == JsonValueKind.Array)
+                            filenames = fnEl.EnumerateArray().Select(e => e.GetString() ?? "").Where(f => f != "").ToList();
+                        else if (sampleRoot.TryGetProperty("filename", out var fEl))
+                        {
+                            var fn = fEl.GetString() ?? "";
+                            if (!string.IsNullOrEmpty(fn)) filenames.Add(fn);
+                        }
+
+                        if (filenames.Count == 0)
+                            throw new InvalidOperationException($"[{tableLabel}] Sample produced no files.");
+                    }
 
                     // Copy preview blobs to engine container
                     await WriteStatus($"[{tableLabel}] Copying preview files...");

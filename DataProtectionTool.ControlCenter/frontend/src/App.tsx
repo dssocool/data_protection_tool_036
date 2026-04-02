@@ -1705,7 +1705,11 @@ export default function App() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          tables: tables.map((t) => ({ rowKey: t.rowKey, schema: t.schema, tableName: t.tableName })),
+          tables: tables.map((t) => {
+            const cached = tableCacheRef.current.get(t.key);
+            const previewFilenames = cached?.samples?.[0]?.blobFilenames ?? [];
+            return { rowKey: t.rowKey, schema: t.schema, tableName: t.tableName, previewFilenames };
+          }),
         }),
         signal: multiAbort.signal,
       });
