@@ -885,10 +885,10 @@ export default function App() {
 
     if (cached) {
       restoreTableFromCache(cached);
-      const profileDryRun = [...cached.dryRuns].reverse().find((dr) => dr.label.startsWith("Profile Result"));
+      const profileDryRun = [...cached.dryRuns].reverse().find((dr) => dr.label.startsWith("Result"));
       if (profileDryRun) {
         const diffWithProfile = cached.samples[0]?.label
-          ? { name: `${cached.samples[0].label} vs ${profileDryRun.label}`, leftTab: cached.samples[0].label, rightTab: profileDryRun.label }
+          ? { name: profileDryRun.label, leftTab: cached.samples[0].label, rightTab: profileDryRun.label }
           : null;
         if (diffWithProfile) {
           setDiffTab(diffWithProfile);
@@ -1545,7 +1545,7 @@ export default function App() {
 
             const maskedPreview = MOCK_DRY_RUN_DATA[t.key];
             if (maskedPreview) {
-              const newLabel = `Profile Result ${formatProfileTimestamp(demoTs)}`;
+              const newLabel = `Result ${formatProfileTimestamp(demoTs)}`;
               const newDryRun: DryRunResult = { label: newLabel, data: maskedPreview, inProgress: false };
               const cachedEntry = tableCacheRef.current.get(t.key);
               const mockSamples = MOCK_SAMPLE_DATA[t.key] ?? [];
@@ -1553,7 +1553,7 @@ export default function App() {
               const prevDryRuns = cachedEntry?.dryRuns ?? [];
               const sampleLabel = prevSamples[0]?.label;
               const autoDiff = sampleLabel
-                ? { name: `${sampleLabel} vs ${newLabel}`, leftTab: sampleLabel, rightTab: newLabel }
+                ? { name: newLabel, leftTab: sampleLabel, rightTab: newLabel }
                 : null;
 
               tableCacheRef.current.set(t.key, {
@@ -1779,13 +1779,13 @@ export default function App() {
 
                         const cachedEntry = tableCacheRef.current.get(key);
                         const prevDryRuns = cachedEntry?.dryRuns ?? [];
-                        const newLabel = `Profile Result ${formatProfileTimestamp(trackedTs)}`;
+                        const newLabel = `Result ${formatProfileTimestamp(trackedTs)}`;
                         const newDryRun: DryRunResult = { label: newLabel, data: maskedPreview, inProgress: false };
 
                         const cachedSamples = cachedEntry?.samples ?? [];
                         const sampleLabel = cachedSamples[0]?.label;
                         const autoDiff = sampleLabel
-                          ? { name: `${sampleLabel} vs ${newLabel}`, leftTab: sampleLabel, rightTab: newLabel }
+                          ? { name: newLabel, leftTab: sampleLabel, rightTab: newLabel }
                           : null;
 
                         tableCacheRef.current.set(key, {

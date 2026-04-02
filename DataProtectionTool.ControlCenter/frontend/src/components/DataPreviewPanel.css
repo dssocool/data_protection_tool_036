@@ -336,6 +336,19 @@
   cursor: default;
 }
 
+.data-preview-diff-table td {
+  white-space: nowrap;
+  max-width: none;
+  overflow: visible;
+  text-overflow: unset;
+}
+
+.data-preview-diff-table th {
+  white-space: nowrap;
+  overflow: visible;
+  text-overflow: unset;
+}
+
 .data-preview-diff-cell-changed {
   background: #fffbe6;
 }
