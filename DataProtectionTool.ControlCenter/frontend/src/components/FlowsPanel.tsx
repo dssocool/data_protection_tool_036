@@ -348,32 +348,22 @@ export default function FlowsPanel({
           <div className="panel-switch-icons">
             <button
               className="panel-switch-btn"
-              title="Connections"
               aria-label="Connections"
               data-connections-btn
               onClick={() => onSwitchPanel("connections")}
             >
-              <svg width="24" height="24" viewBox="0 0 16 16" fill="none">
-                <circle cx="4" cy="4" r="2" stroke="currentColor" strokeWidth="1.3" />
-                <circle cx="12" cy="4" r="2" stroke="currentColor" strokeWidth="1.3" />
-                <circle cx="8" cy="12" r="2" stroke="currentColor" strokeWidth="1.3" />
-                <path d="M4 6V9L8 10M12 6V9L8 10" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round" />
-              </svg>
+              Connections
               {!!connectionsBadgeCount && connectionsBadgeCount > 0 && (
                 <span className="connections-badge">{connectionsBadgeCount}</span>
               )}
             </button>
             <button
               className="panel-switch-btn panel-switch-btn-active"
-              title="Flows"
               aria-label="Flows"
               data-flows-btn
               onClick={() => onSwitchPanel("flows")}
             >
-              <svg width="24" height="24" viewBox="0 0 16 16" fill="none">
-                <path d="M3 4H7M3 8H10M3 12H13" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
-                <path d="M12 3L14 4L12 5" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round" />
-              </svg>
+              Flows
               {!!flowsBadgeCount && flowsBadgeCount > 0 && (
                 <span className="flows-badge">{flowsBadgeCount}</span>
               )}

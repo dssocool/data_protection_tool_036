@@ -38,33 +38,34 @@
 
 .panel-switch-btn {
   position: relative;
-  width: 36px;
-  height: 36px;
   display: flex;
   align-items: center;
   justify-content: center;
-  background: none;
+  background: #fdf6e3;
   border: none;
   border-radius: 6px;
   cursor: pointer;
-  color: #999;
-  padding: 0;
+  color: #7a6e2a;
+  padding: 6px 14px;
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
   transition: color 0.15s, background 0.15s;
 }
 
 .panel-switch-btn:hover {
-  color: #555;
-  background: #f0f0f0;
+  color: #5a4e1a;
+  background: #f5e6a3;
 }
 
 .panel-switch-btn-active {
-  color: #333;
-  background: #e8e8e8;
+  color: #4a3e0a;
+  background: #f5e6a3;
 }
 
 .panel-switch-btn-active:hover {
-  color: #222;
-  background: #ddd;
+  color: #3a2e00;
+  background: #eddc8c;
 }
 
 .flows-badge {

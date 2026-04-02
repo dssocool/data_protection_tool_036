@@ -86,6 +86,7 @@ export default function App() {
   const [unseenConnectionCount, setUnseenConnectionCount] = useState(0);
   const [newConnectionRowKeys, setNewConnectionRowKeys] = useState<Set<string>>(new Set());
   const [newFlowRowKeys, setNewFlowRowKeys] = useState<Set<string>>(new Set());
+  const [checkedTables, setCheckedTables] = useState<Set<string>>(new Set());
   const pendingSqlSaveRowKeyRef = useRef<string | null>(null);
   const pendingFlowRowKeyRef = useRef<string | null>(null);
   const previewCacheRef = useRef<Map<string, string[]>>(new Map());
@@ -559,7 +560,7 @@ export default function App() {
     }
   }
 
-  async function handleTableClick(rowKey: string, schema: string, tableName: string) {
+  function handleTableClick(rowKey: string, schema: string, tableName: string) {
     const agentPath = getAgentPath();
     if (!agentPath) return;
 
@@ -576,7 +577,7 @@ export default function App() {
       return;
     }
 
-    setPreviewLoading(true);
+    setPreviewLoading(false);
     setPreviewError(null);
     setSamples([]);
     setDryRuns([]);
@@ -593,42 +594,6 @@ export default function App() {
     );
     if (tableInfo?.fileFormatId) {
       fetchColumnRules(agentPath, tableInfo.fileFormatId);
-    }
-
-    try {
-      const res = await fetch(`/api/agents/${agentPath}/sample-table`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ rowKey, schema, tableName }),
-      });
-
-      if (!res.ok) {
-        setPreviewError(`Server error: ${res.status}`);
-        return;
-      }
-
-      const result = await res.json();
-      if (result.event) addLocalEvent(result.event);
-      if (!result.success) {
-        setPreviewError(result.message ?? "Preview failed.");
-        return;
-      }
-
-      const filenames: string[] = result.filenames ?? (result.filename ? [result.filename] : []);
-      const preview = await fetchPreviewFromFilenames(filenames);
-
-      if (preview) {
-        const newSample: SampleResult = { label: "Sample 1", data: preview, blobFilenames: filenames };
-        setSamples([newSample]);
-      }
-
-      if (tableInfo?.fileFormatId && preview?.headers?.length && preview?.columnTypes?.length) {
-        fetchColumnRules(agentPath, tableInfo.fileFormatId, preview.headers, preview.columnTypes);
-      }
-    } catch (e) {
-      setPreviewError(`Preview failed: ${e instanceof Error ? e.message : String(e)}`);
-    } finally {
-      setPreviewLoading(false);
     }
   }
 
@@ -1475,6 +1440,10 @@ export default function App() {
                 onFullRun={handleFullRunOpen}
                 onSwitchPanel={(p) => { setLeftPanel(p); if (p === "connections") setUnseenConnectionCount(0); }}
                 onWidthChange={setConnectionsPanelWidth}
+                checkedTables={checkedTables}
+                onCheckedTablesChange={setCheckedTables}
+                onProfileData={() => {}}
+                onApplySanitization={() => {}}
               />
             )}
             {(selectedTable || selectedQuery) && (

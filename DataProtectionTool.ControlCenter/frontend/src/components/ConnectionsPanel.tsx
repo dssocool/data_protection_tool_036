@@ -61,6 +61,10 @@ interface ConnectionsPanelProps {
   connectionsBadgeCount?: number;
   newConnectionRowKeys?: Set<string>;
   onDismissNewBadge?: (rowKey: string) => void;
+  checkedTables?: Set<string>;
+  onCheckedTablesChange?: (next: Set<string>) => void;
+  onProfileData?: (tableKeys: string[]) => void;
+  onApplySanitization?: (tableKeys: string[]) => void;
 }
 
 const MIN_WIDTH = 200;
@@ -91,8 +95,15 @@ export default function ConnectionsPanel({
   connectionsBadgeCount,
   newConnectionRowKeys,
   onDismissNewBadge,
+  checkedTables,
+  onCheckedTablesChange,
+  onProfileData,
+  onApplySanitization,
 }: ConnectionsPanelProps) {
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
+  const [searchText, setSearchText] = useState("");
+  const [actionsOpen, setActionsOpen] = useState(false);
+  const actionsRef = useRef<HTMLDivElement>(null);
   const isResizing = useRef(false);
   const panelRef = useRef<HTMLDivElement>(null);
 
@@ -193,10 +204,44 @@ export default function ConnectionsPanel({
     onExpandedChange(next);
   }
 
+  useEffect(() => {
+    if (!actionsOpen) return;
+    function dismiss(e: MouseEvent) {
+      if (actionsRef.current && !actionsRef.current.contains(e.target as Node)) {
+        setActionsOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", dismiss);
+    return () => document.removeEventListener("mousedown", dismiss);
+  }, [actionsOpen]);
+
+  function handleCheckboxToggle(e: React.MouseEvent, key: string) {
+    e.stopPropagation();
+    const next = new Set(checkedTables);
+    if (next.has(key)) {
+      next.delete(key);
+    } else {
+      next.add(key);
+    }
+    onCheckedTablesChange?.(next);
+  }
+
   const isExpanded = (rowKey: string) => expanded.has(rowKey);
   const isLoading = (rowKey: string) => loadingTables.has(rowKey);
-  const tables = (rowKey: string) => connectionTables[rowKey];
-  const queries = (rowKey: string) => connectionQueries[rowKey];
+
+  const searchLower = searchText.toLowerCase();
+
+  function filteredTables(rowKey: string) {
+    const t = connectionTables[rowKey];
+    if (!t || !searchText) return t;
+    return t.filter((item) => `${item.schema}.${item.name}`.toLowerCase().includes(searchLower));
+  }
+
+  function filteredQueries(rowKey: string) {
+    const q = connectionQueries[rowKey];
+    if (!q || !searchText) return q;
+    return q.filter((item) => item.queryText.toLowerCase().includes(searchLower));
+  }
 
   return (
     <>
@@ -205,46 +250,96 @@ export default function ConnectionsPanel({
         <div className="panel-switch-icons">
           <button
             className="panel-switch-btn panel-switch-btn-active"
-            title="Connections"
             aria-label="Connections"
             data-connections-btn
             onClick={() => onSwitchPanel("connections")}
           >
-            <svg width="24" height="24" viewBox="0 0 16 16" fill="none">
-              <circle cx="4" cy="4" r="2" stroke="currentColor" strokeWidth="1.3" />
-              <circle cx="12" cy="4" r="2" stroke="currentColor" strokeWidth="1.3" />
-              <circle cx="8" cy="12" r="2" stroke="currentColor" strokeWidth="1.3" />
-              <path d="M4 6V9L8 10M12 6V9L8 10" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round" />
-            </svg>
+            Connections
             {!!connectionsBadgeCount && connectionsBadgeCount > 0 && (
               <span className="connections-badge">{connectionsBadgeCount}</span>
             )}
           </button>
           <button
             className="panel-switch-btn"
-            title="Flows"
             aria-label="Flows"
             data-flows-btn
             onClick={() => onSwitchPanel("flows")}
           >
-            <svg width="24" height="24" viewBox="0 0 16 16" fill="none">
-              <path d="M3 4H7M3 8H10M3 12H13" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
-              <path d="M12 3L14 4L12 5" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round" />
-            </svg>
+            Flows
             {!!flowsBadgeCount && flowsBadgeCount > 0 && (
               <span className="flows-badge">{flowsBadgeCount}</span>
             )}
           </button>
         </div>
       </div>
+      <div className="conn-toolbar">
+        <div className="conn-search-wrapper">
+          <svg className="conn-search-icon" width="14" height="14" viewBox="0 0 14 14" fill="none">
+            <circle cx="6" cy="6" r="4.5" stroke="currentColor" strokeWidth="1.3" />
+            <path d="M9.5 9.5L13 13" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
+          </svg>
+          <input
+            className="conn-search-input"
+            type="text"
+            placeholder="Search tables..."
+            value={searchText}
+            onChange={(e) => setSearchText(e.target.value)}
+          />
+        </div>
+        <div className="conn-actions-wrapper" ref={actionsRef}>
+          <button
+            className="conn-actions-btn"
+            onClick={() => setActionsOpen((v) => !v)}
+          >
+            Actions
+            <svg width="10" height="10" viewBox="0 0 10 10" fill="none">
+              <path d="M2 4L5 7L8 4" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+          </button>
+          {actionsOpen && (
+            <div className="conn-actions-dropdown">
+              <div
+                className="conn-actions-dropdown-item"
+                onClick={() => {
+                  setActionsOpen(false);
+                  onProfileData?.(Array.from(checkedTables ?? []));
+                }}
+              >
+                Data Sanitize - Profile Data
+              </div>
+              <div
+                className="conn-actions-dropdown-item"
+                onClick={() => {
+                  setActionsOpen(false);
+                  onApplySanitization?.(Array.from(checkedTables ?? []));
+                }}
+              >
+                Data Sanitize - Apply Sanitization
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
       {connections.length === 0 ? (
         <p className="connections-panel-empty">No saved connections.</p>
       ) : (
         <div className="connections-list">
-          {Object.entries(grouped).map(([type, conns]) => (
+          {Object.entries(grouped).map(([type, conns]) => {
+            const visibleConns = searchText
+              ? conns.filter((conn) => {
+                  const ft = filteredTables(conn.rowKey);
+                  const fq = filteredQueries(conn.rowKey);
+                  return (ft && ft.length > 0) || (fq && fq.length > 0) || !isExpanded(conn.rowKey);
+                })
+              : conns;
+            if (visibleConns.length === 0) return null;
+            return (
             <div key={type} className="conn-group">
               <ul className="conn-group-list">
-                {conns.map((conn) => (
+                {visibleConns.map((conn) => {
+                  const fTables = filteredTables(conn.rowKey);
+                  const fQueries = filteredQueries(conn.rowKey);
+                  return (
                   <li key={conn.rowKey} className="connections-list-entry">
                     <div
                       className="connections-list-item"
@@ -275,9 +370,9 @@ export default function ConnectionsPanel({
                           <div className="conn-tables-loading">Loading...</div>
                         ) : (
                           <>
-                            {queries(conn.rowKey) && queries(conn.rowKey)!.length > 0 && (
+                            {fQueries && fQueries.length > 0 && (
                               <ul className="conn-tables-list">
-                                {queries(conn.rowKey)!.map((q) => {
+                                {fQueries.map((q) => {
                                   const isSelected = selectedQuery?.connectionRowKey === conn.rowKey
                                     && selectedQuery?.queryRowKey === q.rowKey;
                                   const label = q.queryText.length > 40
@@ -300,16 +395,18 @@ export default function ConnectionsPanel({
                                 })}
                               </ul>
                             )}
-                            {tables(conn.rowKey) ? (
-                              tables(conn.rowKey)!.length === 0 && (!queries(conn.rowKey) || queries(conn.rowKey)!.length === 0) ? (
+                            {fTables ? (
+                              fTables.length === 0 && (!fQueries || fQueries.length === 0) ? (
                                 <div className="conn-tables-empty">No tables found.</div>
                               ) : (
                                 <ul className="conn-tables-list">
-                                  {tables(conn.rowKey)!.map((t) => {
+                                  {fTables.map((t) => {
+                                    const tKey = `${conn.rowKey}:${t.schema}:${t.name}`;
                                     const isSelected = selectedTable?.rowKey === conn.rowKey
                                       && selectedTable?.schema === t.schema
                                       && selectedTable?.tableName === t.name;
-                                    const isDryRunning = dryRunningTables.has(`${conn.rowKey}:${t.schema}:${t.name}`);
+                                    const isDryRunning = dryRunningTables.has(tKey);
+                                    const isChecked = checkedTables?.has(tKey) ?? false;
                                     return (
                                       <li
                                         key={`${t.schema}.${t.name}`}
@@ -317,6 +414,13 @@ export default function ConnectionsPanel({
                                         onClick={() => onTableClick(conn.rowKey, t.schema, t.name)}
                                         onContextMenu={(e) => handleTableContextMenu(e, conn.rowKey, t.schema, t.name)}
                                       >
+                                        <input
+                                          type="checkbox"
+                                          className="conn-table-checkbox"
+                                          checked={isChecked}
+                                          onClick={(e) => handleCheckboxToggle(e as unknown as React.MouseEvent, tKey)}
+                                          onChange={() => {}}
+                                        />
                                         <span className="conn-table-icon-wrapper">
                                           {isDryRunning && (
                                             <svg className="conn-table-running-icon" width="14" height="14" viewBox="0 0 14 14">
@@ -331,9 +435,9 @@ export default function ConnectionsPanel({
                                           </svg>
                                         </span>
                                         <span className="conn-table-name">{t.schema}.{t.name}</span>
-                                        {tableTabCounts[`${conn.rowKey}:${t.schema}:${t.name}`] && (
+                                        {tableTabCounts[tKey] && (
                                           <span className="conn-table-tab-badge">
-                                            {tableTabCounts[`${conn.rowKey}:${t.schema}:${t.name}`] === 1 ? "1 tab" : `${tableTabCounts[`${conn.rowKey}:${t.schema}:${t.name}`]} tabs`}
+                                            {tableTabCounts[tKey] === 1 ? "1 tab" : `${tableTabCounts[tKey]} tabs`}
                                           </span>
                                         )}
                                       </li>
@@ -347,10 +451,12 @@ export default function ConnectionsPanel({
                       </div>
                     )}
                   </li>
-                ))}
+                  );
+                })}
               </ul>
             </div>
-          ))}
+            );
+          })}
         </div>
       )}
       <div

@@ -29,17 +29,18 @@
 
 .panel-switch-btn {
   position: relative;
-  width: 36px;
-  height: 36px;
   display: flex;
   align-items: center;
   justify-content: center;
-  background: none;
+  background: #fdf6e3;
   border: none;
   border-radius: 6px;
   cursor: pointer;
-  color: #999;
-  padding: 0;
+  color: #7a6e2a;
+  padding: 6px 14px;
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
   transition: color 0.15s, background 0.15s;
 }
 
@@ -80,18 +81,18 @@
 }
 
 .panel-switch-btn:hover {
-  color: #555;
-  background: #f0f0f0;
+  color: #5a4e1a;
+  background: #f5e6a3;
 }
 
 .panel-switch-btn-active {
-  color: #333;
-  background: #e8e8e8;
+  color: #4a3e0a;
+  background: #f5e6a3;
 }
 
 .panel-switch-btn-active:hover {
-  color: #222;
-  background: #ddd;
+  color: #3a2e00;
+  background: #eddc8c;
 }
 
 .connections-panel-close {
@@ -127,6 +128,98 @@
 
 .connections-panel-resize:hover {
   background: rgba(0, 120, 212, 0.15);
+}
+
+.conn-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 10px;
+  border-bottom: 1px solid #e8e8e8;
+  flex-shrink: 0;
+}
+
+.conn-search-wrapper {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+}
+
+.conn-search-icon {
+  position: absolute;
+  left: 8px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: #999;
+  pointer-events: none;
+}
+
+.conn-search-input {
+  width: 100%;
+  padding: 5px 8px 5px 28px;
+  border: 1px solid #ddd;
+  border-radius: 5px;
+  font-size: 12px;
+  outline: none;
+  background: #fafafa;
+  box-sizing: border-box;
+  transition: border-color 0.15s;
+}
+
+.conn-search-input:focus {
+  border-color: #0078d4;
+  background: #fff;
+}
+
+.conn-actions-wrapper {
+  position: relative;
+  flex-shrink: 0;
+}
+
+.conn-actions-btn {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 5px 10px;
+  border: 1px solid #ddd;
+  border-radius: 5px;
+  background: #fff;
+  font-size: 12px;
+  font-weight: 500;
+  color: #333;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.12s, border-color 0.12s;
+}
+
+.conn-actions-btn:hover {
+  background: #f5f5f5;
+  border-color: #bbb;
+}
+
+.conn-actions-dropdown {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  min-width: 240px;
+  background: #fff;
+  border-radius: 6px;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.15), 0 1px 4px rgba(0, 0, 0, 0.1);
+  padding: 4px 0;
+  z-index: 100;
+}
+
+.conn-actions-dropdown-item {
+  padding: 8px 16px;
+  font-size: 13px;
+  color: #333;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.1s;
+}
+
+.conn-actions-dropdown-item:hover {
+  background: #f0f4f8;
 }
 
 .connections-panel-empty {
@@ -179,6 +272,10 @@
   padding: 10px 18px 10px 18px;
   cursor: pointer;
   transition: background 0.12s;
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  background: #fff;
 }
 
 .connections-list-item:hover {
@@ -274,6 +371,15 @@
 
 .conn-table-item-selected:hover {
   background: #d4e4f4;
+}
+
+.conn-table-checkbox {
+  flex-shrink: 0;
+  width: 14px;
+  height: 14px;
+  margin: 0;
+  cursor: pointer;
+  accent-color: #0078d4;
 }
 
 .conn-table-icon-wrapper {
