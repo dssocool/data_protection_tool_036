@@ -673,6 +673,46 @@
   font-size: 12px;
 }
 
+.conn-column-algo-badge {
+  display: inline-block;
+  font-size: 10px;
+  line-height: 16px;
+  padding: 0 6px;
+  border-radius: 8px;
+  background: #e8f0fe;
+  color: #1a73e8;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 120px;
+  vertical-align: middle;
+  border: 1px solid #c5d8f0;
+  transition: background 0.12s, border-color 0.12s;
+  flex-shrink: 0;
+  margin-left: auto;
+}
+
+.conn-column-algo-badge:hover {
+  background: #d2e3fc;
+  border-color: #a8c7f0;
+}
+
+.conn-column-algo-badge-empty {
+  background: transparent;
+  color: #bbb;
+  border: 1px dashed #ccc;
+  min-width: 18px;
+  text-align: center;
+}
+
+.conn-column-algo-badge-empty:hover {
+  background: #f5f5f5;
+  border-color: #aaa;
+  color: #888;
+}
+
 .conn-selected-count {
   margin-left: auto;
   font-size: 12px;

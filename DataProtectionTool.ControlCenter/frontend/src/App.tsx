@@ -111,6 +111,7 @@ export default function App() {
   const [checkedTables, setCheckedTables] = useState<Set<string>>(new Set());
   const [starredTables, setStarredTables] = useState<Set<string>>(new Set());
   const [tableColumns, setTableColumns] = useState<Record<string, { name: string; type: string }[]>>({});
+  const [tableColumnRules, setTableColumnRules] = useState<Record<string, Record<string, unknown>[]>>({});
   const pendingSqlSaveRowKeyRef = useRef<string | null>(null);
   const pendingFlowRowKeyRef = useRef<string | null>(null);
   const previewCacheRef = useRef<Map<string, string[]>>(new Map());
@@ -641,6 +642,53 @@ export default function App() {
           agentPath, tableInfo.fileFormatId,
           origPreview?.headers, origPreview?.columnTypes,
         );
+      }
+    }
+  }
+
+  async function handleFetchTableColumnRules(tKey: string, fileFormatId: string) {
+    const agentPath = getAgentPath();
+    if (!agentPath) return;
+    try {
+      const url = `/api/agents/${agentPath}/column-rules?fileFormatId=${encodeURIComponent(fileFormatId)}`;
+      const res = await fetch(url);
+      if (res.ok) {
+        const result = await res.json();
+        if (result.success && Array.isArray(result.responseList)) {
+          const parseArray = (arr: unknown): Record<string, unknown>[] => {
+            if (!Array.isArray(arr)) return [];
+            return arr.map((item: unknown) => {
+              if (typeof item === "string") {
+                try { return JSON.parse(item); } catch { return { raw: item }; }
+              }
+              return item as Record<string, unknown>;
+            });
+          };
+          const rules = parseArray(result.responseList);
+          setTableColumnRules(prev => ({ ...prev, [tKey]: rules }));
+        }
+      }
+    } catch {
+      // best-effort
+    }
+  }
+
+  async function handleSaveColumnRuleFromPanel(
+    tKey: string,
+    params: { fileFieldMetadataId: string; algorithmName: string; domainName: string },
+  ) {
+    await handleSaveColumnRule(params);
+    const parts = tKey.split(":");
+    if (parts.length >= 3) {
+      const rowKey = parts[0];
+      const tables = connectionTables[rowKey];
+      if (tables) {
+        const tableName = parts.slice(2).join(":");
+        const schema = parts[1];
+        const tableInfo = tables.find(t => t.schema === schema && t.name === tableName);
+        if (tableInfo?.fileFormatId) {
+          await handleFetchTableColumnRules(tKey, tableInfo.fileFormatId);
+        }
       }
     }
   }
@@ -1792,6 +1840,12 @@ export default function App() {
                 onStarredTablesChange={setStarredTables}
                 tableColumns={tableColumns}
                 onFetchTableColumns={handleFetchTableColumns}
+                tableColumnRules={tableColumnRules}
+                allAlgorithms={allAlgorithms}
+                allDomains={allDomains}
+                allFrameworks={allFrameworks}
+                onFetchTableColumnRules={handleFetchTableColumnRules}
+                onSaveColumnRule={handleSaveColumnRuleFromPanel}
               />
             )}
             {(selectedTable || selectedQuery) && (

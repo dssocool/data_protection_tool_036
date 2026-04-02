@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import "./ConnectionsPanel.css";
+import ColumnRuleModal from "./ColumnRuleModal";
 
 export interface SavedConnection {
   rowKey: string;
@@ -69,6 +70,12 @@ interface ConnectionsPanelProps {
   onStarredTablesChange?: (next: Set<string>) => void;
   tableColumns?: Record<string, { name: string; type: string }[]>;
   onFetchTableColumns?: (rowKey: string, schema: string, tableName: string) => void;
+  tableColumnRules?: Record<string, Record<string, unknown>[]>;
+  allAlgorithms?: Record<string, unknown>[];
+  allDomains?: Record<string, unknown>[];
+  allFrameworks?: Record<string, unknown>[];
+  onFetchTableColumnRules?: (tKey: string, fileFormatId: string) => void;
+  onSaveColumnRule?: (tKey: string, params: { fileFieldMetadataId: string; algorithmName: string; domainName: string }) => Promise<void>;
 }
 
 const MIN_WIDTH = 200;
@@ -107,12 +114,19 @@ export default function ConnectionsPanel({
   onStarredTablesChange,
   tableColumns,
   onFetchTableColumns,
+  tableColumnRules,
+  allAlgorithms,
+  allDomains,
+  allFrameworks,
+  onFetchTableColumnRules,
+  onSaveColumnRule,
 }: ConnectionsPanelProps) {
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
   const [searchText, setSearchText] = useState("");
   const [expandedTables, setExpandedTables] = useState<Set<string>>(new Set());
   const [actionsOpen, setActionsOpen] = useState(false);
   const [selectMenuOpen, setSelectMenuOpen] = useState(false);
+  const [columnRuleModal, setColumnRuleModal] = useState<{ rule: Record<string, unknown>; tKey: string } | null>(null);
   const actionsRef = useRef<HTMLDivElement>(null);
   const selectRef = useRef<HTMLDivElement>(null);
   const isResizing = useRef(false);
@@ -342,7 +356,7 @@ export default function ConnectionsPanel({
 
   const hasChecked = (checkedTables?.size ?? 0) > 0;
 
-  function handleTableExpandToggle(tKey: string, rowKey: string, schema: string, tableName: string) {
+  function handleTableExpandToggle(tKey: string, rowKey: string, schema: string, tableName: string, fileFormatId?: string) {
     const next = new Set(expandedTables);
     if (next.has(tKey)) {
       next.delete(tKey);
@@ -350,6 +364,9 @@ export default function ConnectionsPanel({
       next.add(tKey);
       if (!tableColumns?.[tKey]) {
         onFetchTableColumns?.(rowKey, schema, tableName);
+      }
+      if (fileFormatId && !tableColumnRules?.[tKey]) {
+        onFetchTableColumnRules?.(tKey, fileFormatId);
       }
     }
     setExpandedTables(next);
@@ -602,7 +619,7 @@ export default function ConnectionsPanel({
                                       >
                                         <div
                                           className={`conn-table-item${isSelected ? " conn-table-item-selected" : ""}`}
-                                          onClick={() => handleTableExpandToggle(tKey, conn.rowKey, t.schema, t.name)}
+                                          onClick={() => handleTableExpandToggle(tKey, conn.rowKey, t.schema, t.name, t.fileFormatId)}
                                         >
                                           <input
                                             type="checkbox"
@@ -646,20 +663,51 @@ export default function ConnectionsPanel({
                                             </span>
                                           )}
                                         </div>
-                                        {isTableExpanded && (
-                                          <ul className="conn-table-columns">
-                                            {cols ? (
-                                              cols.map((col) => (
-                                                <li key={col.name} className="conn-table-column-row">
-                                                  <span className="conn-table-column-name">{col.name}</span>
-                                                  <span className="conn-table-column-type">{col.type}</span>
-                                                </li>
-                                              ))
-                                            ) : (
-                                              <li className="conn-table-column-row conn-table-columns-loading">Loading columns...</li>
-                                            )}
-                                          </ul>
-                                        )}
+                                        {isTableExpanded && (() => {
+                                          const hasFormat = !!t.fileFormatId;
+                                          const rules = hasFormat ? tableColumnRules?.[tKey] : undefined;
+                                          const rulesByField = new Map<string, Record<string, unknown>>();
+                                          if (rules) {
+                                            for (const r of rules) {
+                                              const fn = r.fieldName;
+                                              if (typeof fn === "string") rulesByField.set(fn, r);
+                                            }
+                                          }
+                                          return (
+                                            <ul className="conn-table-columns">
+                                              {cols ? (
+                                                cols.map((col) => {
+                                                  const rule = rulesByField.get(col.name);
+                                                  const algName = rule && rule.isMasked !== false && typeof rule.algorithmName === "string"
+                                                    ? rule.algorithmName : "";
+                                                  return (
+                                                    <li key={col.name} className="conn-table-column-row">
+                                                      <span className="conn-table-column-name">{col.name}</span>
+                                                      <span className="conn-table-column-type">{col.type}</span>
+                                                      {hasFormat && (
+                                                        <span
+                                                          className={`conn-column-algo-badge${algName ? "" : " conn-column-algo-badge-empty"}`}
+                                                          title={algName || "No algorithm assigned"}
+                                                          onClick={(e) => {
+                                                            e.stopPropagation();
+                                                            setColumnRuleModal({
+                                                              rule: rule ?? { fieldName: col.name, _noRule: true },
+                                                              tKey,
+                                                            });
+                                                          }}
+                                                        >
+                                                          {algName || "\u00A0"}
+                                                        </span>
+                                                      )}
+                                                    </li>
+                                                  );
+                                                })
+                                              ) : (
+                                                <li className="conn-table-column-row conn-table-columns-loading">Loading columns...</li>
+                                              )}
+                                            </ul>
+                                          );
+                                        })()}
                                       </li>
                                     );
                                   })}
@@ -778,6 +826,19 @@ export default function ConnectionsPanel({
         )}
       </div>,
       document.body,
+    )}
+    {columnRuleModal && allAlgorithms && allDomains && allFrameworks && (
+      <ColumnRuleModal
+        selectedRule={columnRuleModal.rule}
+        allAlgorithms={allAlgorithms}
+        allDomains={allDomains}
+        allFrameworks={allFrameworks}
+        onSave={(params) => {
+          if (!onSaveColumnRule) return Promise.resolve();
+          return onSaveColumnRule(columnRuleModal.tKey, params);
+        }}
+        onClose={() => setColumnRuleModal(null)}
+      />
     )}
     </>
   );
