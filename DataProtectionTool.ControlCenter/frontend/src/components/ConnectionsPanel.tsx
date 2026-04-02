@@ -249,6 +249,20 @@ export default function ConnectionsPanel({
     return keys;
   }, [connections, connectionTables]);
 
+  const searchLower = searchText.toLowerCase();
+
+  function filteredTables(rowKey: string) {
+    const t = connectionTables[rowKey];
+    if (!t || !searchText) return t;
+    return t.filter((item) => `${item.schema}.${item.name}`.toLowerCase().includes(searchLower));
+  }
+
+  function filteredQueries(rowKey: string) {
+    const q = connectionQueries[rowKey];
+    if (!q || !searchText) return q;
+    return q.filter((item) => item.queryText.toLowerCase().includes(searchLower));
+  }
+
   const visibleTableKeys = useMemo(() => {
     const keys: string[] = [];
     for (const conn of connections) {
@@ -343,20 +357,6 @@ export default function ConnectionsPanel({
 
   const isExpanded = (rowKey: string) => expanded.has(rowKey);
   const isLoading = (rowKey: string) => loadingTables.has(rowKey);
-
-  const searchLower = searchText.toLowerCase();
-
-  function filteredTables(rowKey: string) {
-    const t = connectionTables[rowKey];
-    if (!t || !searchText) return t;
-    return t.filter((item) => `${item.schema}.${item.name}`.toLowerCase().includes(searchLower));
-  }
-
-  function filteredQueries(rowKey: string) {
-    const q = connectionQueries[rowKey];
-    if (!q || !searchText) return q;
-    return q.filter((item) => item.queryText.toLowerCase().includes(searchLower));
-  }
 
   return (
     <>
@@ -522,13 +522,7 @@ export default function ConnectionsPanel({
       ) : (
         <div className="connections-list">
           {Object.entries(grouped).map(([type, conns]) => {
-            const visibleConns = searchText
-              ? conns.filter((conn) => {
-                  const ft = filteredTables(conn.rowKey);
-                  const fq = filteredQueries(conn.rowKey);
-                  return (ft && ft.length > 0) || (fq && fq.length > 0) || !isExpanded(conn.rowKey);
-                })
-              : conns;
+            const visibleConns = conns;
             if (visibleConns.length === 0) return null;
             return (
             <div key={type} className="conn-group">
@@ -594,7 +588,7 @@ export default function ConnectionsPanel({
                             )}
                             {fTables ? (
                               fTables.length === 0 && (!fQueries || fQueries.length === 0) ? (
-                                <div className="conn-tables-empty">No tables found.</div>
+                                <div className="conn-tables-empty">{searchText ? "No matches" : "Empty"}</div>
                               ) : (
                                 <ul className="conn-tables-list">
                                   {fTables.map((t) => {

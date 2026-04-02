@@ -449,8 +449,10 @@
   width: 14px;
   height: 14px;
   margin: 0;
+  padding: 0;
   cursor: pointer;
   accent-color: #0078d4;
+  vertical-align: middle;
 }
 
 .conn-table-icon-wrapper {
@@ -458,10 +460,14 @@
   flex-shrink: 0;
   width: 14px;
   height: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .conn-table-icon {
   flex-shrink: 0;
+  display: block;
   color: #999;
 }
 
@@ -469,6 +475,7 @@
   font-size: 13px;
   color: #555;
   white-space: nowrap;
+  line-height: 14px;
 }
 
 .conn-context-menu {
@@ -601,6 +608,7 @@
 
 .conn-table-star {
   flex-shrink: 0;
+  display: block;
   cursor: pointer;
   transition: transform 0.15s ease;
 }
