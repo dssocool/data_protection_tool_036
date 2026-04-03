@@ -1517,6 +1517,7 @@ export default function App() {
                 setDryRunningTables((prev) => { const next = new Set(prev); next.delete(key); return next; });
               }
             } else if (eventType === "error") {
+              completed = true;
               let errMsg = "DP preview failed.";
               try {
                 const parsed = JSON.parse(eventData);
@@ -1947,6 +1948,7 @@ export default function App() {
               }
             } catch { /* parse error */ }
           } else if (eventType === "error") {
+            completed = true;
             let errMsg = "DP preview (multi) failed.";
             try {
               const parsed = JSON.parse(eventData);
@@ -2095,6 +2097,7 @@ export default function App() {
           } else if (eventType === "complete") {
             completed = true;
           } else if (eventType === "error") {
+            completed = true;
             let errMsg = "DP run failed.";
             try {
               const parsed = JSON.parse(eventData);
